@@ -4,6 +4,8 @@ Public GitHub home for **Project COMMAND**.
 
 Human status and operating notes: [docs/status.html](docs/status.html).
 
+Owner-aligned product and engineering requirements: [Complete COMMAND build specification](docs/PRODUCT-SPEC.html).
+
 This repository is public by owner direction. Do not commit secrets, credentials, private messages, or restricted data.
 
 ## License
