@@ -162,4 +162,22 @@ class HistoryViewModelTest {
         assertEquals(listOf(LocalDate.of(2026, 11, 3)), ready()!!.days.filter { d -> d.entries.any { it.occurrenceId == ahead } }.map { it.date })
         assertEquals(2, ready()!!.month.eligibleDays)
     }
+
+    @Test
+    fun `a mission pinned to a zone far ahead of the phone is listed on its own day even when its instant is before the phone's first midnight`() {
+        // The phone is in Los Angeles at 04:00 on 2 November, so the thirty days begin on 4 October (midnight there is 07:00Z). A mission
+        // pinned to Kiritimati (UTC+14) rang at 00:30 on 4 October there, which is 10:30Z on the 3rd: before the phone's midnight, inside the window.
+        collector.cancel()
+        clock.zone = ZoneId.of("America/Los_Angeles")
+        clock.nowMs = FakeAlarmModule.T0 + 3 * hour
+        vm = HistoryViewModel(missions, clock)
+        collector = CoroutineScope(Dispatchers.Main.immediate).launch { vm.state.collect { } }
+
+        val pinned = occurrence("Pinned far ahead", 30 * 24 * hour - 3 * hour / 2, started, zone = "Pacific/Kiritimati")
+
+        awaitUntil(message = "the pinned one") { ready()?.days?.flatMap { it.entries }?.any { it.occurrenceId == pinned } == true }
+        assertEquals(listOf(LocalDate.of(2026, 10, 4)), ready()!!.days.map { it.date })
+        assertEquals(1, ready()!!.month.eligibleDays)
+        assertEquals(1, ready()!!.month.daysWithStart)
+    }
 }

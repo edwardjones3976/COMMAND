@@ -105,14 +105,17 @@ class MissionRepository @Inject constructor(
     ) { upcoming, recent -> ScheduleSnapshot(upcoming, recent) }
 
     /**
-     * What came due in the last [days] local days, today included, newest first, of missions that still exist: what History is made of.
-     * The days are the person's own, in the clock's zone, and what is still to come later today is left out until it is due.
+     * What may have come due in the last [days] local days, today included, newest first, of missions that still exist: what History is made
+     * of. What is still to come is left out until it is due. The query is bounded by instants and generous at the start: two zones are at
+     * most 26 hours apart, so an occurrence of a mission pinned to a zone ahead of the phone's can be on a day inside the window while its
+     * instant is that much before the phone's midnight. Which of these rows belong to which days is decided afterwards, by
+     * `HistoryCalculator.isWithin`, for the list and the counts alike.
      */
     fun observeHistory(days: Int): Flow<List<ScheduleRow>> {
         require(days >= 1)
         val zone = clock.zone()
         val today = java.time.Instant.ofEpochMilli(clock.nowMs()).atZone(zone).toLocalDate()
-        val from = today.minusDays((days - 1).toLong()).atStartOfDay(zone).toInstant().toEpochMilli()
+        val from = today.minusDays((days - 1).toLong()).atStartOfDay(zone).toInstant().toEpochMilli() - ZONE_SLACK_MS
         return db.occurrences().observeBetween(from, clock.nowMs() + 1, HISTORY_LIMIT)
     }
 
@@ -395,6 +398,9 @@ class MissionRepository @Inject constructor(
         private const val TEST_DELAY_MS = 5_000L
         private const val UPCOMING_LIMIT = 200
         private const val HISTORY_LIMIT = 500
+
+        /** The most two zones can differ (UTC-12 and UTC+14). */
+        private const val ZONE_SLACK_MS = 26 * 60 * 60 * 1000L
         private const val RECENT_LIMIT = 50
         private const val DEFAULT_TEST_TITLE = "Test alarm"
         private const val DEFAULT_TEST_ACTION = "This is a test. Say you are starting."

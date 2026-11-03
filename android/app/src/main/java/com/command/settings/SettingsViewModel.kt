@@ -43,6 +43,16 @@ class SettingsViewModel @Inject constructor(
     fun chooseRoutePolicy(policy: RoutePolicy) {
         if ((chosen ?: (state.value as? SettingsUiState.Ready)?.routePolicy) == policy) return
         chosen = policy
-        viewModelScope.launch { writes.withLock { settings.setRoutePolicy(policy) } }
+        viewModelScope.launch {
+            writes.withLock {
+                try {
+                    settings.setRoutePolicy(policy)
+                } catch (e: Throwable) {
+                    // It did not get written, so it is not what is stored, and the same choice must be possible again.
+                    if (chosen == policy) chosen = null
+                    throw e
+                }
+            }
+        }
     }
 }

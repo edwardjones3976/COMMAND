@@ -110,6 +110,7 @@ class HistoryCalculator(private val clock: Clock) {
         }
     }
 
+    /** The summary of the last [days] local days ending [today]. A screen that makes several windows reads [currentDay] once and gives it to each. */
     fun summary(occurrences: List<HistoryOccurrence>, days: Int, today: LocalDate = currentDay()): WindowSummary {
         val perDay = dayCounts(occurrences, days, today)
         return WindowSummary(

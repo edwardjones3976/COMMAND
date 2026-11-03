@@ -607,13 +607,15 @@ class MissionRepositoryTest {
     }
 
     @Test
-    fun `a day starts at the person's midnight, not at UTC midnight`() = run {
+    fun `the fetch starts at the person's midnight less the most two zones can differ, so that a mission pinned to a zone ahead is not cut off`() = run {
         f.clock.zone = java.time.ZoneId.of("Pacific/Auckland") // UTC+13 on that date: it is already 22:00 on Monday there
-        val sinceMidnightThere = due("Tuesday there, early", 0 - 5 * hour, OccurrenceState.MISSED) // 04:00 UTC = 17:00 Monday in Auckland
-        val before = due("Sunday there", -23 * hour, OccurrenceState.MISSED) // 10:00 UTC Sunday = 23:00 Sunday in Auckland
+        val sinceMidnightThere = due("Monday there, early", 0 - 5 * hour, OccurrenceState.MISSED) // 04:00 UTC = 17:00 Monday in Auckland
+        val sundayThere = due("Sunday there", -23 * hour, OccurrenceState.MISSED) // 10:00 UTC Sunday = 23:00 Sunday in Auckland
+        val longBefore = due("Three days before", -72 * hour, OccurrenceState.MISSED)
         val one = missions.observeHistory(1).first().map { it.occurrenceId }
-        assertEquals("one day is the local Monday", listOf(sinceMidnightThere), one)
-        assertTrue(before !in one)
+        // Midnight on Monday in Auckland is 11:00 UTC on Sunday. The fetch reaches 26 hours further back, and the rule decides the rest.
+        assertEquals(listOf(sinceMidnightThere, sundayThere), one)
+        assertTrue(longBefore !in one)
     }
 
     @Test
