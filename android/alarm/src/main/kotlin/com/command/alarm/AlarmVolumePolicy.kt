@@ -82,9 +82,13 @@ class AlarmVolumePolicy @Inject constructor(
         launchSafely { restoreFor(occurrenceId) }
     }
 
-    /** Puts back whatever a ring that is over left raised, whichever ring it was. */
+    /**
+     * Puts back whatever a ring that is over left raised, whichever ring it was. A ring's end queues it, so by the time it runs another ring
+     * may be sounding, and what that one raised is its own to put back: like [restoreStale] it looks at the live service under the lock and
+     * leaves the record alone while anything is ringing.
+     */
     fun restoreAnySoon() {
-        launchSafely { lock.withLock { undo(only = null) } }
+        launchSafely { restoreStale() }
     }
 
     /**
