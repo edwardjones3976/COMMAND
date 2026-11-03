@@ -53,6 +53,20 @@ class PublicationSafetyTest {
     }
 
     @Test
+    fun `no personal e-mail addresses or non-empty debug tokens are tracked`() {
+        scan("personal e-mail address", Regex("""[A-Za-z0-9._%+-]+@(yahoo|gmail|hotmail|outlook|icloud|live|proton)\.[a-z]{2,}""", RegexOption.IGNORE_CASE))
+        scan("App Check debug token value", Regex("""(?m)^\s*FIREBASE_APPCHECK_DEBUG_TOKEN\s*[=:]\s*\S+"""))
+        scan("debug token UUID", Regex("""(?i)debug[_ -]?token["']?\s*[:=]\s*["']?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"""))
+    }
+
+    @Test
+    fun `tracked images are launcher icons or on the provenance allowlist`() {
+        val raster = Regex("""(?i)\.(png|jpe?g|gif|webp)$""")
+        val hits = tracked.filter { raster.containsMatchIn(it) && "/res/mipmap-" !in it && it !in IMAGE_ALLOWLIST }
+        assertTrue("images without provenance: $hits (add to IMAGE_ALLOWLIST with a note, or remove)", hits.isEmpty())
+    }
+
+    @Test
     fun `no AI Studio working files, screenshots, databases or calendars are tracked`() {
         val bad = Regex("""(^|/)(\.aistudio/|\.tempmediaStorage|Screenshot_\d{8}_)|\.(ics|db|db-wal|db-shm)$""")
         val hits = tracked.filter { bad.containsMatchIn(it) }
@@ -125,6 +139,14 @@ class PublicationSafetyTest {
             "android/app/src/main/java/com/example/data/CommandModels.kt",
             "android/app/src/main/java/com/example/ui/screens/VoiceStudioScreen.kt",
             "android/app/src/test/java/com/example/ExampleRobolectricTest.kt",
+        )
+        // Provenance: AI Studio-generated placeholder art from the original import. All five go with the legacy UI in M4b.
+        val IMAGE_ALLOWLIST = setOf(
+            "android/app/src/main/res/drawable/drill_sergeant_avatar.jpg",
+            "android/app/src/main/res/drawable/img_life_coach_avatar.png",
+            "android/app/src/main/res/drawable/img_life_coach_frame1.png",
+            "android/app/src/main/res/drawable/img_life_coach_frame2.png",
+            "android/app/src/main/res/drawable/img_life_coach_frame3.png",
         )
         val LEGACY_MAIN_FILES_WITH_SIMULATE_BUTTON = setOf("android/app/src/main/java/com/example/ui/screens/StreakVaultScreen.kt")
         val LEGACY_DESTRUCTIVE = setOf("android/app/src/main/java/com/example/data/CommandDatabase.kt")

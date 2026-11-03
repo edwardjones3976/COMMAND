@@ -39,7 +39,7 @@ jobs:
 
   publication-safety:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,6 +47,14 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Publication-safety scanner (git-tracked files)
+        working-directory: android
+        run: ./gradlew --no-daemon :app:testDebugUnitTest --tests com.example.PublicationSafetyTest
 
   assemble:
     runs-on: ubuntu-latest
