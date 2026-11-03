@@ -133,4 +133,9 @@ class NotificationIdsTest {
         // occurrence id), which keeps them in a separate namespace from untagged ring notifications.
         assertTrue(AlarmContract.ID_CHECK_IN != AlarmContract.ID_MISSED)
     }
+
+    @Test
+    fun `the notification of the reconcile worker can never replace a ring, whose id is its occurrence's request code`() {
+        assertTrue("request codes count up from 1", AlarmContract.ID_RECONCILE < 0)
+    }
 }

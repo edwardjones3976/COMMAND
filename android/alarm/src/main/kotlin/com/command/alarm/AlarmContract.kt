@@ -37,6 +37,12 @@ object AlarmContract {
     const val ID_MISSED = 3
     const val ID_FALLBACK = 4
 
+    /**
+     * The "checking your alarms" foreground notification of the reconcile worker before Android 12. Negative, because a ring
+     * uses its occurrence's request code as its notification id and those count up from 1: this can never replace a ring.
+     */
+    const val ID_RECONCILE = -1
+
     fun occurrenceId(intent: Intent?): String? =
         intent?.getStringExtra(EXTRA_OCCURRENCE_ID) ?: intent?.data?.takeIf { it.scheme == "command" }?.lastPathSegment
 

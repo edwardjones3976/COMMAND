@@ -4,7 +4,9 @@ import android.content.Context
 import android.media.AudioManager
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.ListenableWorker
+import androidx.work.WorkManager
 import androidx.work.testing.TestListenableWorkerBuilder
+import androidx.work.testing.WorkManagerTestInitHelper
 import androidx.work.workDataOf
 import com.command.data.MissionDraft
 import com.command.data.MissionRepository
@@ -54,6 +56,7 @@ class ReconcileWorkerTest {
     fun setUp() {
         hilt.inject()
         context = ApplicationProvider.getApplicationContext()
+        WorkManagerTestInitHelper.initializeTestWorkManager(context)
     }
 
     private fun worker(trigger: String? = null, attempt: Int = 0) =
@@ -127,5 +130,18 @@ class ReconcileWorkerTest {
         val result = runBlocking { worker("SOMETHING_FROM_A_NEWER_VERSION").doWork() }
         assertEquals(ListenableWorker.Result.success(), result)
         assertNull("not a boot", events(EventType.BOOT_RECONCILE).firstOrNull())
+    }
+
+    @Test
+    fun `every run makes sure the six-hourly backstop exists, even one that then gives up`() {
+        fun backstops() = WorkManager.getInstance(context).getWorkInfosForUniqueWork(ReconcileAlarmsWorker.NAME_PERIODIC).get()
+        assertTrue("an update from a version that never installed it, before the app is opened", backstops().isEmpty())
+
+        runBlocking { worker("PACKAGE_REPLACED").doWork() }
+        assertEquals(1, backstops().size)
+
+        db.openHelper.writableDatabase.execSQL("DROP TABLE missions")
+        assertEquals(ListenableWorker.Result.retry(), runBlocking { worker("BOOT", attempt = 0).doWork() })
+        assertEquals("asking again leaves the one that is there", 1, backstops().size)
     }
 }

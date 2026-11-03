@@ -392,10 +392,29 @@ class MissionRepositoryTest {
         val occurrence = f.repo.createOccurrence(mission.id, f.t0 + 2 * hour, "UTC").occurrence // the app stopped before arming it
         f.clock.advance(2 * hour + 5 * 60_000)
 
-        missions.reconcile(ReconcileTrigger.OPEN)
+        val report = missions.reconcile(ReconcileTrigger.OPEN)
 
         assertEquals(OccurrenceState.ARMED, f.db.occurrences().get(occurrence.id)!!.state)
         assertNotNull("so it rings now instead of never", f.scheduler.armed[fireIdentity(occurrence.id)])
+        assertEquals("a repair is a change, so even an open says so", 1, report.repaired)
+        val summary = f.db.events().ofType(EventType.BOOT_RECONCILE).single()
+        assertTrue(summary.payloadJson.contains("\"repaired\":\"1\""))
+    }
+
+    @Test
+    fun `an occurrence stored but never armed, not yet due, is armed and counted as a repair too`() = run {
+        val mission = Fixture.missionRow(startAt = f.t0 + 2 * hour)
+        f.db.missions().insert(mission)
+        val occurrence = f.repo.createOccurrence(mission.id, f.t0 + 2 * hour, "UTC").occurrence // the app stopped before arming it
+        assertEquals(OccurrenceState.SCHEDULED, occurrence.state)
+
+        val report = missions.reconcile(ReconcileTrigger.OPEN)
+
+        assertEquals(OccurrenceState.ARMED, f.db.occurrences().get(occurrence.id)!!.state)
+        assertEquals(1, report.repaired)
+        assertEquals("it already existed, so it was not created", 0, report.created)
+        assertEquals(1, f.db.events().ofType(EventType.BOOT_RECONCILE).size)
+        assertFalse("and the next open has nothing left to say", missions.reconcile(ReconcileTrigger.OPEN).changedAnything)
     }
 
     @Test

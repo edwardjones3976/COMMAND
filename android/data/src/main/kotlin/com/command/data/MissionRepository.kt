@@ -208,11 +208,14 @@ class MissionRepository @Inject constructor(
         val zone = clock.zone()
         var created = 0
         var discarded = 0
+        var repaired = 0
         for (mission in db.missions().enabled().filter { it.source == MissionSource.MANUAL }) {
             val z = zoneOf(mission, zone)
             val wanted = instantsOf(mission, z, now)
             discarded += discardFuture(mission.id, keep = wanted.toSet(), now, EventSource.SYSTEM)
-            created += createAndArm(mission, z, wanted, EventSource.SYSTEM)
+            val counts = createAndArm(mission, z, wanted, EventSource.SYSTEM)
+            created += counts.created
+            repaired += counts.repaired
         }
         var rearmed = 0
         var lost = 0
@@ -235,16 +238,16 @@ class MissionRepository @Inject constructor(
                 }
             } else {
                 // Created but never armed (the app stopped in between) and only just due: arm it now, so it rings at once.
-                occurrences.apply(occ.id, OccurrenceCommand.Arm(armModeNow()), EventSource.SYSTEM)
+                if (occurrences.apply(occ.id, OccurrenceCommand.Arm(armModeNow()), EventSource.SYSTEM) is ApplyResult.Applied) repaired++
             }
         }
-        val report = ReconcileReport(created, discarded, rearmed, lost, missed, precisionChanged)
+        val report = ReconcileReport(created, discarded, rearmed, lost, missed, precisionChanged, repaired)
         if (trigger.alwaysLogged || report.changedAnything) {
             occurrences.logEvent(
                 EventType.BOOT_RECONCILE, null, EventSource.SYSTEM,
                 EventPayload.of(
                     "trigger" to trigger, "created" to created, "discarded" to discarded,
-                    "rearmed" to rearmed, "lost" to lost, "missed" to missed, "precision_changed" to precisionChanged,
+                    "rearmed" to rearmed, "lost" to lost, "missed" to missed, "precision_changed" to precisionChanged, "repaired" to repaired,
                 ),
             )
         }
@@ -325,16 +328,21 @@ class MissionRepository @Inject constructor(
     }
 
     /** Creates the occurrences that do not exist yet and arms every one that is still waiting to be armed. */
-    private suspend fun createAndArm(m: MissionRow, zone: ZoneId, instants: List<Long>, source: EventSource): Int {
+    /** What [createAndArm] did: occurrences created, and ones that already existed but had never been armed and now are. */
+    private class ArmCounts(val created: Int, val repaired: Int)
+
+    private suspend fun createAndArm(m: MissionRow, zone: ZoneId, instants: List<Long>, source: EventSource): ArmCounts {
         var created = 0
+        var repaired = 0
         for (at in instants) {
             val result = occurrences.createOccurrence(m.id, at, zone.id)
             if (result.isNew) created++
             if (result.occurrence.state == OccurrenceState.SCHEDULED) {
-                occurrences.apply(result.occurrence.id, OccurrenceCommand.Arm(armModeNow()), source)
+                val applied = occurrences.apply(result.occurrence.id, OccurrenceCommand.Arm(armModeNow()), source)
+                if (!result.isNew && applied is ApplyResult.Applied) repaired++
             }
         }
-        return created
+        return ArmCounts(created, repaired)
     }
 
     /**

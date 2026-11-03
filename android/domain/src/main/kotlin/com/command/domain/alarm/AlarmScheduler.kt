@@ -35,8 +35,10 @@ interface AlarmScheduler {
     fun cancel(request: AlarmRequest)
 
     /**
-     * Whether the platform still holds this alarm. A reboot, a force-stop and some vendors' battery managers drop alarms
-     * without telling anyone, so the app asks instead of assuming.
+     * Whether the platform still holds this alarm's PendingIntent. A reboot and a force-stop cancel it, and some vendors' battery
+     * managers drop alarms too, so false is proof that the alarm is gone. True is not proof that it is there: Android 12 removes
+     * a revoked app's exact alarms without cancelling their PendingIntents, and the platform offers no way to ask about the alarm
+     * itself. Callers log the answer and never treat it as a reason not to arm.
      */
     fun isArmed(request: AlarmRequest): Boolean
 }

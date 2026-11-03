@@ -3,6 +3,8 @@ package com.command.alarm
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import androidx.core.net.toUri
 import androidx.test.core.app.ApplicationProvider
 import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
@@ -177,5 +179,20 @@ class AlarmSchedulerTest {
         scheduler.arm(request())
         assertEquals(1, scheduled().size)
         assertTrue(scheduler.isArmed(request()))
+    }
+
+    @Test
+    fun `the probe sees the PendingIntent and not the registration, which is why reconcile arms either way`() {
+        scheduler.arm(request())
+        val token = PendingIntent.getBroadcast(
+            context, 7,
+            Intent(context, ReveilleAlarmReceiver::class.java).setAction(AlarmContract.ACTION_FIRE).setData(request().identity.toUri()),
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+        )
+        assertNotNull(token)
+
+        alarms.cancel(token!!) // removes the registration and leaves the token, as a revocation does on Android 12
+        assertTrue(scheduled().isEmpty())
+        assertTrue("a known limit of the platform: true is not proof, false is", scheduler.isArmed(request()))
     }
 }

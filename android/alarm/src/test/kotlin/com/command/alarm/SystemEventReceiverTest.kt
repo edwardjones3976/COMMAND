@@ -69,4 +69,11 @@ class SystemEventReceiverTest {
         val infos = WorkManager.getInstance(context).getWorkInfosForUniqueWork(ReconcileAlarmsWorker.NAME_PERIODIC).get()
         assertEquals(1, infos.size)
     }
+
+    @Test
+    fun `by the time the enqueue has finished the request is stored, which is what the receiver waits for`() {
+        val operation = ReconcileScheduler.enqueueNow(context, ReconcileTrigger.BOOT)
+        operation.result.get()
+        assertEquals(1, queued().size)
+    }
 }

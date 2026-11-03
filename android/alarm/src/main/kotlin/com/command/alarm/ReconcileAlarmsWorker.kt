@@ -18,6 +18,9 @@ class ReconcileAlarmsWorker(context: Context, params: WorkerParameters) : Corout
         val trigger = inputData.getString(KEY_TRIGGER)
             ?.let { name -> ReconcileTrigger.values().firstOrNull { it.name == name } }
             ?: ReconcileTrigger.PERIODIC
+        // First, before anything that can fail: the backstop must exist even if this run gives up, and after an update from a version
+        // that never installed it, before the app has been opened.
+        ReconcileScheduler.ensurePeriodic(applicationContext)
         return try {
             AlarmEntryPoint.from(applicationContext).arming().run(trigger)
             Result.success()
@@ -32,13 +35,12 @@ class ReconcileAlarmsWorker(context: Context, params: WorkerParameters) : Corout
      * Only used before Android 12, where expedited work runs as a foreground service. It names no service type on purpose: a
      * type would need a permission and a Play declaration for a service that never starts on the versions that require them.
      */
-    override suspend fun getForegroundInfo(): ForegroundInfo = ForegroundInfo(NOTIFICATION_ID, RingNotifications.checking(applicationContext))
+    override suspend fun getForegroundInfo(): ForegroundInfo = ForegroundInfo(AlarmContract.ID_RECONCILE, RingNotifications.checking(applicationContext))
 
     companion object {
         const val KEY_TRIGGER = "trigger"
         const val NAME_NOW = "reconcile-now"
         const val NAME_PERIODIC = "reconcile-periodic"
         private const val MAX_ATTEMPTS = 3
-        private const val NOTIFICATION_ID = 5
     }
 }
