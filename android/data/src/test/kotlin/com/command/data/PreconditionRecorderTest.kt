@@ -7,6 +7,10 @@ import com.command.domain.model.SettingKeys
 import com.command.domain.occurrence.EventType
 import com.command.domain.reliability.Precondition
 import com.command.domain.reliability.PreconditionSnapshot
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -129,5 +133,19 @@ class PreconditionRecorderTest {
         f.db.settings().put(com.command.data.db.SettingRow(SettingKeys.PERMISSION_SNAPSHOT, "not json at all"))
         assertNull(recorder.last())
         assertEquals(8, recorder.record(healthy()).size)
+    }
+
+    @Test
+    fun `two readings that arrive together write each change once`() = run {
+        recorder.record(healthy())
+        val flips = 25
+        for (i in 1..flips) {
+            val reading = healthyWith(Precondition.NOTIFICATIONS to if (i % 2 == 1) "denied" else "granted")
+            coroutineScope {
+                listOf(async(Dispatchers.Default) { recorder.record(reading) }, async(Dispatchers.Default) { recorder.record(reading) }).awaitAll()
+            }
+        }
+        assertEquals("every flip is one change, however many readings saw it", flips, types(EventType.PERMISSION_CHANGED).size)
+        assertEquals("and one consent row", flips + 1, f.db.consents().history(ConsentKey.NOTIFICATIONS).size)
     }
 }

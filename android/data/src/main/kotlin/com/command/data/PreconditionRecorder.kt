@@ -36,12 +36,17 @@ class PreconditionRecorder @Inject constructor(
             ?.takeIf { it.isNotEmpty() }
             ?.let { PreconditionSnapshot.fromTokens(it) }
 
-    /** Returns the changes since the last snapshot (all of them the first time, none when nothing changed). */
+    /**
+     * Returns the changes since the last snapshot (all of them the first time, none when nothing changed). Two readings can arrive
+     * together (after a force-stop the platform delivers a boot broadcast just as the app opens), so the comparison is made again
+     * inside the transaction that writes: whichever comes second sees the first one's result and writes nothing twice.
+     */
     suspend fun record(snapshot: PreconditionSnapshot): List<PreconditionChange> {
-        val changes = snapshot.changesFrom(last())
-        if (changes.isEmpty()) return emptyList()
+        // Most readings change nothing, so look first without taking the database's writer.
+        if (snapshot.changesFrom(last()).isEmpty()) return emptyList()
         val now = clock.nowMs()
-        db.withTransaction {
+        return db.withTransaction {
+            val changes = snapshot.changesFrom(last())
             for (change in changes) {
                 event(EventType.PRECONDITION, change, now)
                 // The first reading is a baseline, not a change.
@@ -58,9 +63,9 @@ class PreconditionRecorder @Inject constructor(
                     event(EventType.DND_MAY_SUPPRESS, change, now)
                 }
             }
-            db.settings().put(SettingRow(SettingKeys.PERMISSION_SNAPSHOT, Codec.encodePayload(snapshot.toTokens())))
+            if (changes.isNotEmpty()) db.settings().put(SettingRow(SettingKeys.PERMISSION_SNAPSHOT, Codec.encodePayload(snapshot.toTokens())))
+            changes
         }
-        return changes
     }
 
     private suspend fun event(type: EventType, change: PreconditionChange, now: Long) {

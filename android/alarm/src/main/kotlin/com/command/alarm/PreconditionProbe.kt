@@ -19,8 +19,10 @@ import javax.inject.Singleton
 
 /**
  * Asks the platform, right now, about everything an alarm depends on. It only reads: it never asks for a permission, never
- * changes a setting and never touches the volume. What it finds is recorded by [com.command.data.PreconditionRecorder] and
- * shown on the reliability screen, so the app tells the truth about whether the next alarm will ring the way it promises.
+ * changes a setting and never touches the volume. (The one thing it may do is create the app's notification channels if they are
+ * missing, which the app does at every start anyway, so that the ring channel's importance can be read instead of reported as
+ * missing.) What it finds is recorded by [com.command.data.PreconditionRecorder] and shown on the reliability screen, so the app
+ * tells the truth about whether the next alarm will ring the way it promises.
  */
 @Singleton
 class PreconditionProbe @Inject constructor(

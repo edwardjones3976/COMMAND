@@ -143,4 +143,39 @@ class AlarmSchedulerTest {
         assertEquals(ReveilleAlarmReceiver::class.java.name, saved.component!!.className)
         assertEquals("command://occurrence/occ-1", saved.dataString)
     }
+
+    @Test
+    fun `an armed alarm is found by the probe, a cancelled one is not, and asking never arms one`() {
+        assertFalse("nothing is armed yet", scheduler.isArmed(request()))
+        assertFalse("and asking did not arm it", scheduler.isArmed(request()))
+        assertTrue(scheduled().isEmpty())
+
+        scheduler.arm(request())
+        assertTrue(scheduler.isArmed(request()))
+        assertEquals(1, scheduled().size)
+
+        scheduler.cancel(request())
+        assertFalse(scheduler.isArmed(request()))
+    }
+
+    @Test
+    fun `the probe tells the three kinds of alarm apart, and one occurrence from another`() {
+        scheduler.arm(request(AlarmKind.CHECK_IN, index = 1))
+        assertFalse("a check-in is not the ring", scheduler.isArmed(request(AlarmKind.FIRE)))
+        assertFalse(scheduler.isArmed(request(AlarmKind.CYCLE_END)))
+        assertTrue(scheduler.isArmed(request(AlarmKind.CHECK_IN, index = 1)))
+        assertFalse("the second check-in is not the first", scheduler.isArmed(request(AlarmKind.CHECK_IN, index = 2)))
+
+        scheduler.arm(request(AlarmKind.FIRE, occurrence = "occ-1", code = 7))
+        assertTrue(scheduler.isArmed(request(AlarmKind.FIRE, occurrence = "occ-1", code = 7)))
+        assertFalse("another occurrence", scheduler.isArmed(request(AlarmKind.FIRE, occurrence = "occ-2", code = 8)))
+    }
+
+    @Test
+    fun `arming the same alarm again replaces it instead of adding a second`() {
+        scheduler.arm(request())
+        scheduler.arm(request())
+        assertEquals(1, scheduled().size)
+        assertTrue(scheduler.isArmed(request()))
+    }
 }
