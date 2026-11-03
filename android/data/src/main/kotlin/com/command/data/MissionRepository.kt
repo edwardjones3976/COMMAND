@@ -4,6 +4,8 @@ import androidx.room.withTransaction
 import com.command.data.db.CommandDb
 import com.command.data.db.MissionRow
 import com.command.data.db.ScheduleRow
+import com.command.domain.alarm.AlarmKind
+import com.command.domain.alarm.AlarmRequest
 import com.command.domain.alarm.AlarmScheduler
 import com.command.domain.dials.Flexibility
 import com.command.domain.model.EventSource
@@ -81,7 +83,8 @@ sealed interface SaveResult {
  * Occurrences that have not fired are a plan derived from the mission: an edit keeps the ones whose time did not change,
  * discards the rest and creates what is missing, so changing a title never disturbs an alarm that is already armed.
  * Everything that has rung stays as history. Every state change still goes through [OccurrenceRepository]. A background
- * reconciler that also runs after a reboot supersedes [refreshWindow] in a later milestone.
+ * [reconcile] is what makes the stored plan and the platform's alarms match the missions again after anything has
+ * disturbed them.
  */
 @Singleton
 class MissionRepository @Inject constructor(
@@ -190,29 +193,62 @@ class MissionRepository @Inject constructor(
     }
 
     /**
-     * Makes sure every enabled mission has its next week of occurrences, that every armed one has its platform alarm (a
-     * reboot or a force-stop silently drops them), and that an alarm that came due while the phone was off is recorded as
-     * missed instead of ringing hours late. Cheap and idempotent: safe whenever the app opens.
+     * Makes the stored plan and the platform's alarms match the missions again. Run when the app opens, after a reboot, an
+     * update, a clock or zone change or a change of the exact-alarm permission, and every few hours as a backstop:
+     *  - each enabled manual mission gets exactly its next week of occurrences (an occurrence at a time the rule no longer
+     *    gives, because the zone or the clock changed, is discarded; a missing one is created and armed);
+     *  - every armed occurrence is asked after, because a reboot or a force-stop silently drops platform alarms: one that
+     *    is gone is logged as lost and put back;
+     *  - an alarm that came due more than ten minutes ago while the phone was off is recorded as missed (and says so)
+     *    instead of ringing hours late; one that is only just due, armed or not, rings now.
+     * Idempotent and cheap. Runs that the person did not start leave a line in the audit log even when they found nothing.
      */
-    suspend fun refreshWindow() = writes.withLock {
+    suspend fun reconcile(trigger: ReconcileTrigger): ReconcileReport = writes.withLock {
         val now = clock.nowMs()
         val zone = clock.zone()
-        for (mission in db.missions().enabled()) {
+        var created = 0
+        var discarded = 0
+        for (mission in db.missions().enabled().filter { it.source == MissionSource.MANUAL }) {
             val z = zoneOf(mission, zone)
             val wanted = instantsOf(mission, z, now)
-            discardFuture(mission.id, keep = wanted.toSet(), now, EventSource.SYSTEM)
-            createAndArm(mission, z, wanted, EventSource.SYSTEM)
+            discarded += discardFuture(mission.id, keep = wanted.toSet(), now, EventSource.SYSTEM)
+            created += createAndArm(mission, z, wanted, EventSource.SYSTEM)
         }
+        var rearmed = 0
+        var lost = 0
+        var missed = 0
+        var precisionChanged = 0
         for (occ in db.occurrences().inStates(listOf(OccurrenceState.SCHEDULED, OccurrenceState.ARMED))) {
             if (occ.scheduledAtUtc < now - GRACE_MS) {
-                occurrences.apply(occ.id, OccurrenceCommand.Miss(MissReason.DOWNTIME), EventSource.SYSTEM)
+                val result = occurrences.apply(occ.id, OccurrenceCommand.Miss(MissReason.DOWNTIME, lateMs = now - occ.scheduledAtUtc), EventSource.SYSTEM)
+                if (result is ApplyResult.Applied) missed++
             } else if (occ.state == OccurrenceState.ARMED) {
-                occurrences.rearm(occ.id)
+                if (!scheduler.isArmed(AlarmRequest(occ.id, occ.requestCode, AlarmKind.FIRE, occ.scheduledAtUtc))) {
+                    lost++
+                    occurrences.logEvent(EventType.ALARM_LOST, occ, EventSource.SYSTEM, EventPayload.of("trigger" to trigger))
+                }
+                // Always put it back, found or not: arming the same alarm again replaces it, so this can only help.
+                val mode = occurrences.rearm(occ.id)
+                if (mode != null) {
+                    rearmed++
+                    if (mode != occ.armMode) precisionChanged++
+                }
             } else {
                 // Created but never armed (the app stopped in between) and only just due: arm it now, so it rings at once.
                 occurrences.apply(occ.id, OccurrenceCommand.Arm(armModeNow()), EventSource.SYSTEM)
             }
         }
+        val report = ReconcileReport(created, discarded, rearmed, lost, missed, precisionChanged)
+        if (trigger.alwaysLogged || report.changedAnything) {
+            occurrences.logEvent(
+                EventType.BOOT_RECONCILE, null, EventSource.SYSTEM,
+                EventPayload.of(
+                    "trigger" to trigger, "created" to created, "discarded" to discarded,
+                    "rearmed" to rearmed, "lost" to lost, "missed" to missed, "precision_changed" to precisionChanged,
+                ),
+            )
+        }
+        report
     }
 
     // --- helpers ------------------------------------------------------------------------------------------------
@@ -289,13 +325,16 @@ class MissionRepository @Inject constructor(
     }
 
     /** Creates the occurrences that do not exist yet and arms every one that is still waiting to be armed. */
-    private suspend fun createAndArm(m: MissionRow, zone: ZoneId, instants: List<Long>, source: EventSource) {
+    private suspend fun createAndArm(m: MissionRow, zone: ZoneId, instants: List<Long>, source: EventSource): Int {
+        var created = 0
         for (at in instants) {
-            val occurrence = occurrences.createOccurrence(m.id, at, zone.id).occurrence
-            if (occurrence.state == OccurrenceState.SCHEDULED) {
-                occurrences.apply(occurrence.id, OccurrenceCommand.Arm(armModeNow()), source)
+            val result = occurrences.createOccurrence(m.id, at, zone.id)
+            if (result.isNew) created++
+            if (result.occurrence.state == OccurrenceState.SCHEDULED) {
+                occurrences.apply(result.occurrence.id, OccurrenceCommand.Arm(armModeNow()), source)
             }
         }
+        return created
     }
 
     /**
@@ -312,9 +351,9 @@ class MissionRepository @Inject constructor(
         }.map { it.id }
 
     /** Discards the mission's coming unfired occurrences except those at the [keep] instants. */
-    private suspend fun discardFuture(missionId: String, keep: Set<Long>, now: Long, source: EventSource) {
+    private suspend fun discardFuture(missionId: String, keep: Set<Long>, now: Long, source: EventSource): Int {
         val doomed = unfiredIds(missionId, keep, now, futureOnly = true, includeDelayed = false)
-        if (doomed.isNotEmpty()) occurrences.discardUnfired(doomed, source)
+        return if (doomed.isNotEmpty()) occurrences.discardUnfired(doomed, source) else 0
     }
 
     private fun armModeNow(): ArmMode = if (scheduler.canScheduleExact()) ArmMode.EXACT else ArmMode.INEXACT

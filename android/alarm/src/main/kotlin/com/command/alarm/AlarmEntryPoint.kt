@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 interface AlarmEntryPoint {
     fun repository(): OccurrenceRepository
     fun resolver(): RingModeResolver
+    fun arming(): ArmingReconciler
     fun ringController(): RingController
     fun scheduler(): com.command.domain.alarm.AlarmScheduler
 

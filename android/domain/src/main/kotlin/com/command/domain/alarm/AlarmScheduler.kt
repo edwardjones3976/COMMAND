@@ -33,6 +33,12 @@ interface AlarmScheduler {
     fun arm(request: AlarmRequest): ArmMode
 
     fun cancel(request: AlarmRequest)
+
+    /**
+     * Whether the platform still holds this alarm. A reboot, a force-stop and some vendors' battery managers drop alarms
+     * without telling anyone, so the app asks instead of assuming.
+     */
+    fun isArmed(request: AlarmRequest): Boolean
 }
 
 /** Background work the state machine can ask for (pre-rendering voice lines, prefetching directives). */

@@ -37,7 +37,7 @@ class AlarmManifestTest {
     fun `no component of the alarm module can be started by another app`() {
         val exported = Regex("""android:exported="true"""")
         assertFalse(exported.containsMatchIn(manifest))
-        for (name in listOf(".ReveilleService", ".ReveilleAlarmReceiver", ".CycleEndReceiver", ".CheckInReceiver", ".SilenceReceiver")) {
+        for (name in listOf(".ReveilleService", ".ReveilleAlarmReceiver", ".CycleEndReceiver", ".CheckInReceiver", ".SilenceReceiver", ".SystemEventReceiver")) {
             assertTrue("$name must be declared", manifest.contains("""android:name="$name""""))
         }
     }
@@ -48,10 +48,24 @@ class AlarmManifestTest {
         assertEquals(
             setOf(
                 "SCHEDULE_EXACT_ALARM", "USE_EXACT_ALARM", "POST_NOTIFICATIONS", "USE_FULL_SCREEN_INTENT", "FOREGROUND_SERVICE",
-                "FOREGROUND_SERVICE_MEDIA_PLAYBACK", "FOREGROUND_SERVICE_SYSTEM_EXEMPTED", "WAKE_LOCK", "VIBRATE",
+                "FOREGROUND_SERVICE_MEDIA_PLAYBACK", "FOREGROUND_SERVICE_SYSTEM_EXEMPTED", "WAKE_LOCK", "VIBRATE", "RECEIVE_BOOT_COMPLETED",
             ),
             declared,
         )
+    }
+
+    @Test
+    fun `the system event receiver listens for exactly the events that can leave alarms wrong, and is private`() {
+        val block = manifest.substringAfter("android:name=\".SystemEventReceiver\"").substringBefore("</receiver>")
+        val actions = Regex("<action android:name=\"([^\"]+)\"").findAll(block).map { it.groupValues[1] }.toSet()
+        assertEquals(
+            setOf(
+                "android.intent.action.BOOT_COMPLETED", "android.intent.action.MY_PACKAGE_REPLACED", "android.intent.action.TIME_SET",
+                "android.intent.action.TIMEZONE_CHANGED", "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED",
+            ),
+            actions,
+        )
+        assertTrue(manifest.contains("android:name=\".SystemEventReceiver\" android:exported=\"false\""))
     }
 
     @Test

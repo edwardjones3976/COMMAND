@@ -45,6 +45,8 @@ class FakeAlarmScheduler(var exactAllowed: Boolean = true) : AlarmScheduler {
         armed.remove(request.identity)
         calls += "cancel ${request.identity}"
     }
+
+    override fun isArmed(request: AlarmRequest): Boolean = request.identity in armed
 }
 
 class FakeWorkEnqueuer : WorkEnqueuer {

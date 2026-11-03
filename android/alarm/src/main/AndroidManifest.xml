@@ -13,6 +13,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <application>
@@ -26,5 +27,20 @@
         <receiver android:name=".CycleEndReceiver" android:exported="false" />
         <receiver android:name=".CheckInReceiver" android:exported="false" />
         <receiver android:name=".SilenceReceiver" android:exported="false" />
+
+        <!--
+            The events that can leave alarms wrong: a reboot clears every one, and so can an update, the clock or the zone being
+            set, or the exact-alarm permission changing. The receiver only queues a background reconcile. Not exported: the
+            system delivers these broadcasts to it regardless, and nothing else has any business sending them.
+        -->
+        <receiver android:name=".SystemEventReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

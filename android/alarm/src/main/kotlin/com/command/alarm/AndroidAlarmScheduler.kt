@@ -53,6 +53,8 @@ class AndroidAlarmScheduler @Inject constructor(
         operation.cancel()
     }
 
+    override fun isArmed(request: AlarmRequest): Boolean = pendingIntent(request, create = false) != null
+
     private fun pendingIntent(request: AlarmRequest, create: Boolean): PendingIntent? {
         val target = when (request.kind) {
             AlarmKind.FIRE -> ReveilleAlarmReceiver::class.java

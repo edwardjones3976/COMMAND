@@ -155,6 +155,7 @@ dependencies {
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.hilt.android.testing)
+  testImplementation(libs.androidx.work.testing)
   testImplementation(project(":testing-android"))
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
