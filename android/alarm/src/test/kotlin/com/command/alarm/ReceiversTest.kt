@@ -1,6 +1,7 @@
 package com.command.alarm
 
 import android.app.NotificationManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import com.command.testing.android.FakeAlarmModule
 import com.command.testing.android.FakeRingOutput
@@ -38,6 +39,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 import org.robolectric.shadows.ShadowPowerManager
 import javax.inject.Inject
 
@@ -297,5 +299,27 @@ class ReceiversTest {
         awaitUntil(message = "done") { stateOf(o) == OccurrenceState.COMPLETED_SELF_REPORTED }
         assertEquals("only the valid answer took the question away", listOf(o.id), poster.cancelled.distinct())
         assertFalse(EventType.REJECTED_TRANSITION in eventTypes(o))
+    }
+
+    // --- a failure inside a receiver -----------------------------------------------------------------------------------------------
+
+    private class FailingReceiver : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            runAsync(context) { throw IllegalStateException("the database went away") }
+        }
+    }
+
+    @Test
+    fun `a receiver whose work throws logs it and leaves the process alone`() {
+        val uncaught = ArrayList<Throwable>()
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { _, e -> uncaught += e }
+        try {
+            FailingReceiver().onReceive(context, Intent())
+            awaitUntil(message = "the failure was logged") { ShadowLog.getLogsForTag("AlarmReceivers").isNotEmpty() }
+            assertEquals("nothing reached the thread's uncaught handler, which would have ended the process", emptyList<Throwable>(), uncaught)
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(previous)
+        }
     }
 }

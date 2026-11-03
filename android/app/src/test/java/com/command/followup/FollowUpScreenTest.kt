@@ -1,5 +1,6 @@
 package com.command.followup
 
+import androidx.compose.ui.test.StateRestorationTester
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -229,5 +230,20 @@ class FollowUpScreenTest {
         val taps = show(ask, friction = FrictionPrompt(LockPolicy.REASON) { })
         compose.onNodeWithText("Not relevant today", substring = true).performClick()
         assertTrue(taps.log.any { it.startsWith("friction ") && it.contains(FrictionEvidence.Reason(SkipReasonCode.NOT_RELEVANT_TODAY).toString()) })
+    }
+
+    @Test
+    fun `the delay dialog is still open after the activity is recreated`() {
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            CommandTheme(darkTheme = true) {
+                FollowUpScreen(state = ask, friction = null, notice = null, reasons = SkipReasonCode.values().toList(), actions = FollowUpActions(), onClose = {})
+            }
+        }
+        compose.onNodeWithTag(FollowUpTags.DELAY).performClick()
+        compose.onNodeWithText("Delay for how long?").assertIsDisplayed()
+
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithText("Delay for how long?").assertIsDisplayed()
     }
 }

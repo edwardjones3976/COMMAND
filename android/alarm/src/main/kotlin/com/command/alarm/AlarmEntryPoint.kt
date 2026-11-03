@@ -3,6 +3,7 @@ package com.command.alarm
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.media.AudioManager
+import android.util.Log
 import com.command.data.OccurrenceRepository
 import com.command.domain.alarm.CheckInPoster
 import com.command.domain.alarm.RingController
@@ -19,6 +20,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -43,11 +45,18 @@ interface AlarmEntryPoint {
     }
 }
 
-/** Runs [block] off the main thread while keeping the receiver alive until it finishes. */
+private const val RECEIVER_TAG = "AlarmReceivers"
+
+/**
+ * Runs [block] off the main thread while keeping the receiver alive until it finishes. Nothing that goes wrong in it may take the
+ * process down: the same process may be ringing another alarm, and a receiver is not worth that. A failure is logged; the next
+ * reconcile, or the next alarm, puts right what it can.
+ */
 internal fun BroadcastReceiver.runAsync(context: Context, block: suspend (AlarmEntryPoint) -> Unit) {
     val pending = goAsync() // null when a test calls onReceive directly
     val entry = AlarmEntryPoint.from(context)
-    CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+    val failed = CoroutineExceptionHandler { _, e -> Log.w(RECEIVER_TAG, "a broadcast could not be handled: ${e.javaClass.simpleName}", e) }
+    CoroutineScope(SupervisorJob() + Dispatchers.Default + failed).launch {
         try {
             block(entry)
         } finally {

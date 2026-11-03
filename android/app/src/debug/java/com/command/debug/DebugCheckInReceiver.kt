@@ -4,7 +4,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.command.data.OccurrenceRepository
-import com.command.data.db.CommandDb
 import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
 import com.command.domain.alarm.AlarmScheduler
@@ -36,7 +35,6 @@ class DebugCheckInReceiver : BroadcastReceiver() {
     interface Graph {
         fun repository(): OccurrenceRepository
         fun clock(): Clock
-        fun database(): CommandDb
         fun scheduler(): AlarmScheduler
     }
 
@@ -47,7 +45,7 @@ class DebugCheckInReceiver : BroadcastReceiver() {
         CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
             try {
                 val occurrence = graph.repository().get(id) ?: return@launch
-                val index = intent.getIntExtra("index", graph.database().checkIns().forOccurrence(id).size)
+                val index = intent.getIntExtra("index", askedSoFar(occurrence.sessionJson))
                 when (intent.action) {
                     DUE -> graph.repository().apply(id, OccurrenceCommand.CheckInDue(index), EventSource.RECEIVER)
                     ARM -> {
@@ -65,5 +63,12 @@ class DebugCheckInReceiver : BroadcastReceiver() {
     companion object {
         const val DUE = "com.command.debug.CHECKIN_DUE"
         const val ARM = "com.command.debug.CHECKIN_ARM"
+
+        /**
+         * The questions asked in the occurrence's current session, which is the index the next one has. A reset begins a new session while
+         * the check_ins table keeps every row ever written, so counting rows would name a question the state machine refuses.
+         */
+        fun askedSoFar(sessionJson: String): Int =
+            Regex("\"checkInsAsked\"\\s*:\\s*(\\d+)").find(sessionJson)?.groupValues?.get(1)?.toIntOrNull() ?: 0
     }
 }
