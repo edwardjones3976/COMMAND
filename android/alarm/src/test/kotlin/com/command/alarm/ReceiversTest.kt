@@ -126,6 +126,15 @@ class ReceiversTest {
     }
 
     @Test
+    fun `the cycle-end alarm for a ring that was already silenced does nothing, whichever came first`() {
+        val o = occurrence(OccurrenceCommand.Arm(ArmMode.EXACT), OccurrenceCommand.Fire, OccurrenceCommand.SafetySilence)
+        CycleEndReceiver().onReceive(context, intent(o, AlarmContract.ACTION_CYCLE_END, "command://cycle-end/${o.id}", CycleEndReceiver::class.java))
+        awaitUntil(message = "rejection") { EventType.REJECTED_TRANSITION in eventTypes(o) }
+        assertEquals(OccurrenceState.SAFETY_SILENCED, stateOf(o))
+        assertTrue("no missed note for something the user silenced", shadowOf(context.getSystemService(NotificationManager::class.java)).allNotifications.isEmpty())
+    }
+
+    @Test
     fun `the cycle-end alarm for an occurrence that was already answered does nothing`() {
         val o = occurrence(OccurrenceCommand.Arm(ArmMode.EXACT), OccurrenceCommand.Fire, OccurrenceCommand.Acknowledge())
         CycleEndReceiver().onReceive(context, intent(o, AlarmContract.ACTION_CYCLE_END, "command://cycle-end/${o.id}", CycleEndReceiver::class.java))

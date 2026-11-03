@@ -123,7 +123,9 @@ class ReveilleService : Service() {
             }
             ServiceCompat.startForeground(this, ringing?.code ?: code, notification, FGS_TYPE)
         } catch (e: Exception) {
-            // Not allowed to run as a foreground service right now. Ring from a full-screen notification instead.
+            // Not allowed to run as a foreground service right now. Still answer the start if the platform will let us (its
+            // deadline is a few seconds and the fallback needs the database), then ring from a full-screen notification.
+            runCatching { ServiceCompat.startForeground(this, FALLBACK_ID, RingNotifications.starting(this), FGS_TYPE) }
             queue(null) { resolver.degrade(id, code, reasonOf(e)) }
             return
         }
@@ -179,20 +181,21 @@ class ReveilleService : Service() {
             row = current // restarted in the middle of this ring
         }
 
-        if (id in endedEarly) return // silenced or answered in the first moments: there is nothing left to sound
-
         val plan = SessionPlan.of(row)
-        if (plan == null || plan.endUtc <= clock.nowMs()) {
+        if (plan == null || plan.isOver(clock.nowMs(), clock.elapsedRealtimeMs())) {
             // The plan ended while nothing was alive to enforce it: record the miss and do not ring at all.
             timeOutRing(this, repository, row.id, code, EventSource.SERVICE)
             return
         }
-        takeOver(row, code, plan)
+        // The last suspension before the ring is installed comes first, and the check for an end that arrived in the
+        // meantime comes after it with nothing in between, so a silence can never slip through the gap.
+        val title = repository.missionTitle(row.missionId)
+        if (id in endedEarly) return // silenced or answered in the first moments: there is nothing left to sound
+        takeOver(row, code, plan, title)
     }
 
     /** Makes [row] the ring that is sounding. An earlier ring's sound loop ends; its occurrence is left as it is. */
-    private suspend fun takeOver(row: OccurrenceRow, code: Int, plan: SessionPlan) {
-        val title = repository.missionTitle(row.missionId)
+    private fun takeOver(row: OccurrenceRow, code: Int, plan: SessionPlan, title: String?) {
         active?.playback?.cancel()
         val ring = ActiveRing(row.id, code, title)
         active = ring
@@ -210,12 +213,12 @@ class ReveilleService : Service() {
     }
 
     /**
-     * Sound during each ring cycle, silence in the gaps, ending exactly when the plan does. Where we are in the plan comes
-     * from one reading of the wall clock; every wait after that is measured on the monotonic clock, so setting the phone's
-     * clock back cannot stretch the ring and setting it forward cannot cut it short.
+     * Sound during each ring cycle, silence in the gaps, ending exactly when the plan does. Where we are in the plan comes from
+     * the stored monotonic deadline (or, after a reboot, one reading of the wall clock); every wait after that is measured on the
+     * monotonic clock, so setting the phone's clock cannot stretch the ring or cut it short, even across a restart.
      */
     private suspend fun runCycles(plan: SessionPlan) {
-        val sinceStart = (clock.nowMs() - plan.startUtc).coerceAtLeast(0)
+        val sinceStart = plan.elapsedMs(clock.nowMs(), clock.elapsedRealtimeMs())
         val origin = clock.elapsedRealtimeMs() - sinceStart
         fun position() = clock.elapsedRealtimeMs() - origin
         for (window in plan.cycleWindows) {

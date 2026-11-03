@@ -160,6 +160,7 @@ class ReveilleServiceTest {
         assertFalse("whatever sounded first is stopped again", output.ringing)
         assertEquals(OccurrenceState.SCHEDULED, stateOf(o))
         assertTrue(EventType.REJECTED_TRANSITION in eventTypes(o))
+        assertTrue("and the service says so itself", EventType.ALARM_FIRED_STALE in eventTypes(o))
     }
 
     @Test
@@ -290,6 +291,42 @@ class ReveilleServiceTest {
         }
         assertTrue("the ring ended with its five minute plan, not an hour late (waited $waited ms more)", waited <= 245_000)
         awaitUntil(message = "service stop") { shadowOf(service).isStoppedBySelf }
+    }
+
+    @Test
+    fun `a service restarted after the phone clock was set back goes on from the monotonic clock, not from the start`() {
+        val o = armed() // Steady: one two-minute ring
+        runBlocking { repo.apply(o.id, OccurrenceCommand.Fire, EventSource.SERVICE) }
+        clock.advance(100_000) // 100 of the 120 seconds have passed
+        clock.nowMs -= 60 * 60_000L // then the wall clock is set back an hour, and the process dies and restarts
+        val service = startService(fireIntent(o)).get()
+        awaitUntil(message = "ringing again") { service.ringingOccurrenceId == o.id }
+        var waited = 0L
+        awaitUntil(message = "miss after the twenty seconds that were left") {
+            if (waited < 60_000) {
+                step(5_000)
+                waited += 5_000
+            }
+            stateOf(o) == OccurrenceState.MISSED
+        }
+        assertTrue("the 20 seconds that were left, not the whole ring again (waited $waited ms)", waited <= 30_000)
+    }
+
+    @Test
+    fun `an end that arrives right after the alarm was fired still silences it, whatever the service was doing`() {
+        repeat(3) {
+            val o = armed()
+            val controller = startService(fireIntent(o))
+            awaitUntil(message = "fired") { stateOf(o) == OccurrenceState.FIRING }
+            session.end(o.id) // the service may be reading the mission title, or already ringing
+            shadowOf(Looper.getMainLooper()).idle()
+            awaitUntil(message = "quiet and stopped") { !output.ringing && shadowOf(controller.get()).isStoppedBySelf }
+            repeat(10) { // give a late continuation the chance to misbehave
+                shadowOf(Looper.getMainLooper()).idle()
+                Thread.sleep(5)
+            }
+            assertFalse("silenced stays silenced", output.ringing)
+        }
     }
 
     @Test
