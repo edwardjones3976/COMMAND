@@ -1,0 +1,6 @@
+{
+  "name": "Command",
+  "description": "Consent-driven personal execution director with Reveille handshakes, customizable personality voice packs, Google Calendar sync, and Command Streaks.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
