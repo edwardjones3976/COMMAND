@@ -79,7 +79,10 @@ internal class AndroidTtsEngine(context: Context, onReady: (Boolean) -> Unit) : 
     )
 
     override fun voices(): List<EngineVoice> =
-        runCatching { tts.voices?.map { it.toEngineVoice() } }.getOrNull().orEmpty()
+        runCatching { tts.voices?.map { it.toEngineVoice() } }.getOrNull().orEmpty().also { all ->
+            // What the engine offers, for whoever reads the log of a phone that will not speak: names and flags, never any words.
+            Log.d(TAG, "the engine offers ${all.size} voices: " + all.take(MAX_LOGGED).joinToString { "${it.name}(network=${it.needsNetwork}, installed=${it.installed}, q=${it.quality})" })
+        }
 
     override fun currentVoice(): EngineVoice? = runCatching { tts.voice?.toEngineVoice() }.getOrNull()
 
@@ -115,6 +118,7 @@ internal class AndroidTtsEngine(context: Context, onReady: (Boolean) -> Unit) : 
 
     private companion object {
         const val TAG = "AndroidTtsEngine"
+        const val MAX_LOGGED = 40
     }
 
     private val listener = object : UtteranceProgressListener() {
