@@ -3,6 +3,8 @@ package com.command.schedule
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -79,6 +81,7 @@ fun ScheduleRoute(
 }
 
 /** Stateless, so it can be shown in tests without a view model. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ScheduleScreen(
     state: ScheduleUiState,
@@ -116,7 +119,7 @@ fun ScheduleScreen(
                     )
                 }
                 item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(onClick = onOpenReliability, modifier = Modifier.heightIn(min = 48.dp).testTag(ScheduleTags.LINK_RELIABILITY)) {
                             Text(stringResource(R.string.schedule_link_reliability), style = MaterialTheme.typography.labelLarge)
                         }

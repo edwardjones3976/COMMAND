@@ -101,6 +101,26 @@ class ReliabilityRepositoryTest {
     }
 
     @Test
+    fun `a mission the person deleted is not listed, but the hidden mission behind a test alarm is, because it is deleted by design`() = run {
+        val gone = alarm("Deleted", offsetMs = 60_000, fired = f.t0 + 61_000)
+        f.db.missions().softDelete(f.db.occurrences().get(gone)!!.missionId, f.t0)
+        val test = Fixture.missionRow("Try it", startAt = f.t0 + 120_000).copy(category = MissionRepository.TEST_CATEGORY, enabled = false, deletedAt = f.t0)
+        f.db.missions().insert(test)
+        val testOccurrence = f.repo.createOccurrence(test.id, f.t0 + 120_000, "UTC").occurrence
+        event(testOccurrence.id, EventType.ALARM_FIRED, f.t0 + 121_000)
+
+        val listed = recent()
+        assertEquals(listOf("Try it"), listed.map { it.title })
+        assertTrue(listed.single().isTest)
+    }
+
+    @Test
+    fun `an alarm that rang and was also recorded as missed counts as rung, because ringing is what happened first`() = run {
+        alarm("Both", offsetMs = 60_000, fired = f.t0 + 62_000, missedOffAt = f.t0 + 400_000)
+        assertEquals(AlarmOutcomeKind.ON_TIME, recent().single().kind)
+    }
+
+    @Test
     fun `the list follows the audit log as new alarms ring`() = run {
         val id = alarm("Standup", offsetMs = 60_000)
         assertTrue(recent().isEmpty())
