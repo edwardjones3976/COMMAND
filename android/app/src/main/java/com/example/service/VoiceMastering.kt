@@ -1,0 +1,193 @@
+package com.example.service
+
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.log10
+import kotlin.math.max
+import kotlin.math.pow
+import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.sqrt
+
+/**
+ * Light, transparent mastering for one synthesized speech line.
+ *
+ * The whole line is rendered before playback, so every level decision is made with the full
+ * buffer in view: one global gain, no pumping, and no clipping. The goal is "clean and evenly
+ * leveled", matched to the reference recordings in res/raw (about -21 to -24 LUFS). It is not
+ * meant to change the character of the voice; that comes from the voice and its style prompt.
+ *
+ * Pure Kotlin (no Android imports) so it can be unit-tested on the JVM.
+ */
+object VoiceMastering {
+
+    /** Speech-active RMS target. Matches the reference recordings. */
+    const val TARGET_SPEECH_DBFS = -22f
+
+    /** Hard ceiling for any sample after mastering. */
+    const val PEAK_CEILING_DBFS = -1f
+
+    private const val HIGH_PASS_HZ = 80.0
+    private const val MAX_NORMALIZE_GAIN_DB = 30f
+
+    /** Upper bound for the boost slider (150% maps to about +3.5 dB; allow headroom for custom packs). */
+    const val MAX_BOOST_DB = 8f
+    private const val EDGE_FADE_MS = 5
+
+    data class Result(
+        val pcm: ShortArray,
+        val speechRmsDbfs: Float,
+        val peakDbfs: Float
+    )
+
+    /**
+     * @param boostDb extra loudness above the target (the voice pack's boost slider). Peaks that
+     * the boost pushes past the ceiling are caught by a smooth limiter rather than clipped, so a
+     * boosted line gets louder and denser without distorting.
+     */
+    fun master(input: ShortArray, sampleRate: Int, boostDb: Float = 0f): Result {
+        if (input.isEmpty()) return Result(input, -96f, -96f)
+        val sr = sampleRate.coerceIn(8000, 96000)
+        val x = FloatArray(input.size) { input[it] / 32768f }
+
+        highPass(x, sr, HIGH_PASS_HZ)
+        compress(x, sr)
+
+        // One global gain to the target (plus boost); the limiter then holds peaks under the ceiling.
+        val level = speechRmsDbfs(x, sr)
+        val targetDb = TARGET_SPEECH_DBFS + boostDb.coerceIn(0f, MAX_BOOST_DB)
+        val wantedDb = if (level > -90f) (targetDb - level).coerceIn(-40f, MAX_NORMALIZE_GAIN_DB) else 0f
+        val gain = dbToLin(wantedDb)
+        for (i in x.indices) x[i] *= gain
+        limit(x, sr, dbToLin(PEAK_CEILING_DBFS))
+
+        val fade = (sr * EDGE_FADE_MS / 1000).coerceAtMost(x.size / 2)
+        val out = ShortArray(x.size) { i ->
+            val edge = when {
+                fade == 0 -> 1f
+                i < fade -> i.toFloat() / fade
+                i >= x.size - fade -> (x.size - 1 - i).toFloat() / fade
+                else -> 1f
+            }
+            (x[i] * edge * 32767f).roundToInt().coerceIn(-32767, 32767).toShort()
+        }
+
+        val outFloat = FloatArray(out.size) { out[it] / 32768f }
+        return Result(
+            pcm = out,
+            speechRmsDbfs = speechRmsDbfs(outFloat, sr),
+            peakDbfs = linToDb(outFloat.maxOf { abs(it) })
+        )
+    }
+
+    /**
+     * RMS of the frames that contain speech (20 ms frames within 30 dB of the loudest frame),
+     * so pauses between words don't drag the measured level down.
+     */
+    fun speechRmsDbfs(x: FloatArray, sampleRate: Int): Float {
+        val frame = (sampleRate / 50).coerceAtLeast(1)
+        val powers = ArrayList<Double>()
+        var i = 0
+        while (i < x.size) {
+            val end = minOf(i + frame, x.size)
+            var sum = 0.0
+            for (j in i until end) sum += x[j].toDouble() * x[j]
+            powers.add(sum / (end - i))
+            i = end
+        }
+        val loudest = powers.maxOrNull() ?: return -96f
+        if (loudest <= 1e-10) return -96f
+        val floor = max(loudest * 1e-3, 1e-6) // -30 dB relative, and never below -60 dBFS
+        val active = powers.filter { it >= floor }
+        val mean = active.average()
+        return (10.0 * log10(mean)).toFloat().coerceAtLeast(-96f)
+    }
+
+    /** Per-window loudness (0..1) for driving the UI meter from the actual audio. */
+    fun levelEnvelope(pcm: ShortArray, sampleRate: Int, windowMs: Int = 50): FloatArray {
+        val window = (sampleRate * windowMs / 1000).coerceAtLeast(1)
+        val count = (pcm.size + window - 1) / window
+        return FloatArray(count) { w ->
+            val start = w * window
+            val end = minOf(start + window, pcm.size)
+            var sum = 0.0
+            for (j in start until end) {
+                val s = pcm[j] / 32768.0
+                sum += s * s
+            }
+            val db = 10.0 * log10((sum / (end - start)).coerceAtLeast(1e-10))
+            ((db + 50.0) / 44.0).toFloat().coerceIn(0f, 1f) // -50 dBFS -> 0, -6 dBFS -> 1
+        }
+    }
+
+    /**
+     * Smooth peak limiter. The line is fully rendered, so it can look ahead: gain starts easing down
+     * ~2 ms before a peak (backward pass) and recovers over ~80 ms after it (forward pass). Every
+     * sample's gain is at or below what that sample needs, so nothing exceeds [ceiling], and the
+     * gain never steps, so there is no clipping distortion or clicking.
+     */
+    private fun limit(x: FloatArray, sampleRate: Int, ceiling: Float) {
+        val needed = FloatArray(x.size) { val a = abs(x[it]); if (a > ceiling) ceiling / a else 1f }
+        if (needed.all { it >= 1f }) return
+        val attack = 1f / (sampleRate * 0.002f).coerceAtLeast(1f)
+        for (i in x.size - 2 downTo 0) {
+            needed[i] = minOf(needed[i], needed[i + 1] + (1f - needed[i + 1]) * attack)
+        }
+        val release = 1f - exp(-1.0 / (sampleRate * 0.080)).toFloat()
+        var g = needed[0]
+        for (i in x.indices) {
+            g = minOf(needed[i], g + (1f - g) * release)
+            x[i] *= g
+        }
+    }
+
+    /** 2nd-order Butterworth high-pass (RBJ cookbook) to remove rumble and DC. */
+    private fun highPass(x: FloatArray, sampleRate: Int, cutoffHz: Double) {
+        val w0 = 2.0 * PI * cutoffHz / sampleRate
+        val alpha = sin(w0) / (2.0 * sqrt(0.5))
+        val c = cos(w0)
+        val a0 = 1.0 + alpha
+        val b0 = (1.0 + c) / 2.0 / a0
+        val b1 = -(1.0 + c) / a0
+        val b2 = (1.0 + c) / 2.0 / a0
+        val a1 = -2.0 * c / a0
+        val a2 = (1.0 - alpha) / a0
+        var x1 = 0.0; var x2 = 0.0; var y1 = 0.0; var y2 = 0.0
+        for (i in x.indices) {
+            val xi = x[i].toDouble()
+            val y = b0 * xi + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            x2 = x1; x1 = xi; y2 = y1; y1 = y
+            x[i] = y.toFloat()
+        }
+    }
+
+    /**
+     * Gentle 2:1 compression on the loudest syllables only (threshold sits 4 dB above the line's
+     * own speech level). This evens out shouted words so normalization isn't held back by a few
+     * peaks. Gain is computed in dB and smoothed, so there's no distortion or audible pumping.
+     */
+    private fun compress(x: FloatArray, sampleRate: Int) {
+        val level = speechRmsDbfs(x, sampleRate)
+        if (level <= -90f) return
+        val thresholdDb = level + 4f
+        val ratio = 2f
+        val attack = exp(-1.0 / (sampleRate * 0.005)).toFloat()   // 5 ms
+        val release = exp(-1.0 / (sampleRate * 0.150)).toFloat()  // 150 ms
+        var env = 0f
+        var gainDb = 0f
+        for (i in x.indices) {
+            val a = abs(x[i])
+            env = if (a > env) attack * env + (1f - attack) * a else release * env + (1f - release) * a
+            val envDb = linToDb(env)
+            val targetDb = if (envDb > thresholdDb) -(envDb - thresholdDb) * (1f - 1f / ratio) else 0f
+            val coeff = if (targetDb < gainDb) attack else release
+            gainDb = coeff * gainDb + (1f - coeff) * targetDb
+            x[i] *= dbToLin(gainDb)
+        }
+    }
+
+    fun dbToLin(db: Float): Float = 10f.pow(db / 20f)
+    fun linToDb(lin: Float): Float = if (lin > 1e-5f) 20f * log10(lin) else -96f
+}

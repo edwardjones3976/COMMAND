@@ -49,34 +49,6 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `mcrd vocal overdrive dsp processes 16-bit pcm with gravel and brickwall limiting`() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val engine = VoiceDirectorEngine(context, CoroutineScope(Dispatchers.Unconfined))
-        val sampleRate = 24000
-        val input = ShortArray(2400) { idx ->
-            (sin(2.0 * PI * 220.0 * (idx.toDouble() / sampleRate)) * 12000.0).toInt().toShort()
-        }
-
-        val processed = engine.processPcmWithMcrdVocalDsp(
-            input = input,
-            sampleRate = sampleRate,
-            modelType = VoiceModelType.USMC_MCRD_BARK,
-            gritPercent = 92,
-            aggressionPercent = 96,
-            boostFactor = 1.45f
-        )
-
-        assertEquals(input.size, processed.size)
-        val peak = processed.maxOf { abs(it.toInt()) }
-        assertTrue("Processed MCRD bark signal should have strong driven output", peak > 15000)
-        assertTrue("Brickwall limiter must prevent digital clipping overflow", peak <= 32767)
-
-        val defaultPacks = CommandRepository.defaultVoicePacks()
-        assertTrue("USMC MCRD Bark voice pack must be present in default seeds", defaultPacks.any { it.voiceModelType == VoiceModelType.USMC_MCRD_BARK.name })
-        engine.shutdown()
-    }
-
-    @Test
     fun `command streak telemetry generates 7-day bars and 24h cadence buckets`() {
         val app = ApplicationProvider.getApplicationContext<android.app.Application>()
         val viewModel = com.example.viewmodel.CommandViewModel(app)
@@ -117,43 +89,6 @@ class ExampleRobolectricTest {
         val miller = humanPacks.firstOrNull { it.id == "pack_sgt_miller" }
         assertNotNull("Staff Sgt. Miller U.S. public domain announcer must be seeded", miller)
         assertTrue(miller!!.licenseType.contains("17 U.S.C. § 105") || miller.licenseType.contains("Public Domain"))
-    }
-
-    @Test
-    fun `human voice stem dsp applies formant shift and pitch transpose within valid 16-bit bounds`() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val engine = VoiceDirectorEngine(context, CoroutineScope(Dispatchers.Unconfined))
-        val sampleRate = 24000
-        val input = ShortArray(2400) { idx ->
-            (sin(2.0 * PI * 180.0 * (idx.toDouble() / sampleRate)) * 14000.0).toInt().toShort()
-        }
-
-        // Deep baritone formant shift (-35%) with 0.85x pitch down-transposition
-        val deepChestProcessed = engine.processHumanVoiceStemDsp(
-            input = input,
-            sampleRate = sampleRate,
-            pitch = 0.85f,
-            formantShiftPercent = -35,
-            boostFactor = 1.2f
-        )
-        assertTrue(deepChestProcessed.isNotEmpty())
-        val peakDeep = deepChestProcessed.maxOf { abs(it.toInt()) }
-        assertTrue("Formant shifted signal must have healthy amplitude", peakDeep > 5000)
-        assertTrue("Limiter prevents clipping overflow", peakDeep <= 32767)
-
-        // High presence formant shift (+30%) with 1.15x pitch up-transposition
-        val highPresenceProcessed = engine.processHumanVoiceStemDsp(
-            input = input,
-            sampleRate = sampleRate,
-            pitch = 1.15f,
-            formantShiftPercent = 30,
-            boostFactor = 1.1f
-        )
-        assertTrue(highPresenceProcessed.isNotEmpty())
-        val peakHigh = highPresenceProcessed.maxOf { abs(it.toInt()) }
-        assertTrue("High presence signal must be limited without overflow", peakHigh <= 32767)
-
-        engine.shutdown()
     }
 
     @Test
@@ -214,85 +149,6 @@ class ExampleRobolectricTest {
         repo.deletePreset("preset_night_shift")
         val deleted = repo.getPresetById("preset_night_shift")
         assertEquals(null, deleted)
-    }
-
-    @Test
-    fun `cloned voice acoustic profiles correctly fingerprint all four director personalities`() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val engine = VoiceDirectorEngine(context, CoroutineScope(Dispatchers.Unconfined))
-        val defaultPacks = CommandRepository.defaultVoicePacks()
-
-        // 1. GySgt. Marcus Stone (USMC Drill Instructor)
-        val stonePack = defaultPacks.first { it.id == "pack_major_stone" }
-        val stoneProfile = engine.resolveClonedProfile(stonePack)
-        assertEquals("cloned_drill_sergeant", stoneProfile.id)
-        assertEquals(false, stoneProfile.genderIsFemale)
-        assertEquals(108.0, stoneProfile.f0FundamentalHz, 0.1)
-        assertEquals(480.0, stoneProfile.f1FormantHz, 0.1)
-        assertEquals(1380.0, stoneProfile.f2FormantHz, 0.1)
-        assertTrue(stoneProfile.vocalGritPercent >= 80)
-
-        // 2. Coach Jordan Vance (FBA Male Fitness Coach)
-        val jordanPack = defaultPacks.first { it.id == "pack_coach_ray" }
-        val jordanProfile = engine.resolveClonedProfile(jordanPack)
-        assertEquals("cloned_male_fitness", jordanProfile.id)
-        assertEquals(false, jordanProfile.genderIsFemale)
-        assertEquals(114.0, jordanProfile.f0FundamentalHz, 0.1)
-        assertEquals(440.0, jordanProfile.f1FormantHz, 0.1)
-        assertEquals(1290.0, jordanProfile.f2FormantHz, 0.1)
-        assertEquals(1.45f, jordanProfile.chestWarmthGain, 0.01f)
-        assertTrue(jordanProfile.vocalGritPercent in 10..20)
-
-        // 3. Director Eleanor Vance (Fortune 500 Executive)
-        val eleanorPack = defaultPacks.first { it.id == "pack_eleanor_vance" }
-        val eleanorProfile = engine.resolveClonedProfile(eleanorPack)
-        assertEquals("cloned_female_executive", eleanorProfile.id)
-        assertEquals(true, eleanorProfile.genderIsFemale)
-        assertEquals(180.0, eleanorProfile.f0FundamentalHz, 0.1)
-        assertEquals(510.0, eleanorProfile.f1FormantHz, 0.1)
-        assertEquals(1620.0, eleanorProfile.f2FormantHz, 0.1)
-        assertEquals(1.20f, eleanorProfile.airShelfGain, 0.01f)
-
-        // 4. Coach Maya Lin (Motivational Coach)
-        val mayaPack = defaultPacks.first { it.id == "pack_coach_maya" }
-        val mayaProfile = engine.resolveClonedProfile(mayaPack)
-        assertEquals("cloned_motivational_coach", mayaProfile.id)
-        assertEquals(true, mayaProfile.genderIsFemale)
-        assertEquals(218.0, mayaProfile.f0FundamentalHz, 0.1)
-        assertEquals(590.0, mayaProfile.f1FormantHz, 0.1)
-        assertEquals(1880.0, mayaProfile.f2FormantHz, 0.1)
-        assertEquals(1.35f, mayaProfile.airShelfGain, 0.01f)
-
-        engine.shutdown()
-    }
-
-    @Test
-    fun `cloned spectral dsp processes 16-bit pcm with biquad formants and limiter without distortion`() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val engine = VoiceDirectorEngine(context, CoroutineScope(Dispatchers.Unconfined))
-        val sampleRate = 24000
-        val input = ShortArray(2400) { idx ->
-            (sin(2.0 * PI * 180.0 * (idx.toDouble() / sampleRate)) * 14000.0).toInt().toShort()
-        }
-
-        val defaultPacks = CommandRepository.defaultVoicePacks()
-        val jordanPack = defaultPacks.first { it.id == "pack_coach_ray" }
-        val jordanProfile = engine.resolveClonedProfile(jordanPack)
-
-        val processed = engine.processClonedSpectralDsp(
-            input = input,
-            sampleRate = sampleRate,
-            profile = jordanProfile,
-            boostFactor = 1.35f
-        )
-
-        val expectedSize = (input.size / jordanProfile.targetPitchFactor).toInt()
-        assertEquals(expectedSize, processed.size)
-        val peak = processed.maxOf { abs(it.toInt()) }
-        assertTrue("Processed baritone warmth should have strong amplitude", peak > 8000)
-        assertTrue("Limiter prevents digital overflow (> 32767)", peak <= 32767)
-
-        engine.shutdown()
     }
 
     @Test
@@ -371,56 +227,33 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `broadcast vocal mastering strip cleans rumble, boosts presence, and levels dynamics`() {
-        val sampleRate = 24000
+    fun `every seeded voice pack resolves to a director voice with a style brief`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = VoiceDirectorEngine(context, CoroutineScope(Dispatchers.Unconfined))
+        val packs = CommandRepository.defaultVoicePacks()
 
-        // 1. Test 85Hz Sub-Rumble Cut
-        val lowRumbleInput = ShortArray(2400) { idx ->
-            (sin(2.0 * PI * 40.0 * (idx.toDouble() / sampleRate)) * 20000.0).toInt().toShort()
+        val expected = mapOf(
+            "pack_major_stone" to ("drill_sergeant" to false),
+            "pack_coach_ray" to ("male_fitness" to false),
+            "pack_eleanor_vance" to ("female_executive" to true),
+            "pack_coach_maya" to ("motivational_coach" to true)
+        )
+        expected.forEach { (packId, idAndGender) ->
+            val director = engine.resolveDirectorVoice(packs.first { it.id == packId })
+            assertEquals(idAndGender.first, director.id)
+            assertEquals(idAndGender.second, director.isFemale)
         }
-        val (rumbleMastered, _) = com.example.service.BroadcastVocalMastering.masterPcmAudio(
-            input = lowRumbleInput,
-            sampleRate = sampleRate
-        )
-        val rumblePeakAfter = rumbleMastered.maxOf { abs(it.toInt()) }
-        assertTrue("85Hz high-pass filter must significantly attenuate 40Hz sub-rumble", rumblePeakAfter < 12000)
 
-        // 2. Test 4.2kHz Presence Boost
-        val speechMidInput = ShortArray(2400) { idx ->
-            (sin(2.0 * PI * 4200.0 * (idx.toDouble() / sampleRate)) * 8000.0).toInt().toShort()
+        packs.forEach { pack ->
+            val director = engine.resolveDirectorVoice(pack)
+            assertTrue("${pack.id} needs a Gemini voice", director.geminiVoice.isNotBlank())
+            assertTrue("${pack.id} needs a style brief", director.styleBrief.length > 40)
+
+            val prompt = engine.buildTtsPrompt(director, pack, "Lock in the first action.")
+            assertTrue(prompt.trimEnd().endsWith("Lock in the first action."))
+            assertTrue(prompt.contains("## TRANSCRIPT"))
         }
-        val (midMastered, telemetry) = com.example.service.BroadcastVocalMastering.masterPcmAudio(
-            input = speechMidInput,
-            sampleRate = sampleRate,
-            presenceBoostDb = 4.2f
-        )
-        val midPeakAfter = midMastered.maxOf { abs(it.toInt()) }
-        assertTrue("Presence exciter should boost 4.2kHz articulation", midPeakAfter > 8000)
-        assertTrue(telemetry.masteringProfile.contains("CRISP BROADCAST STUDIO"))
 
-        // 3. Test Peak Limiter & Dynamic Compressor on hot signals
-        val hotSignal = ShortArray(2400) { idx ->
-            (sin(2.0 * PI * 1000.0 * (idx.toDouble() / sampleRate)) * 32000.0).toInt().toShort()
-        }
-        val (hotMastered, hotTelemetry) = com.example.service.BroadcastVocalMastering.masterPcmAudio(
-            input = hotSignal,
-            sampleRate = sampleRate
-        )
-        val hotPeak = hotMastered.maxOf { abs(it.toInt()) }
-        assertTrue("Brickwall limiter must strictly prevent digital overflow (> 32767)", hotPeak <= 32767)
-        assertTrue("Hot signal must engage compressor gain reduction", hotTelemetry.gainReductionDb >= 0f)
-
-        // 4. Test Equal-Power Crossfader
-        val bufA = ShortArray(480) { 10000.toShort() }
-        val bufB = ShortArray(480) { 12000.toShort() }
-        val crossfaded = com.example.service.BroadcastVocalMastering.crossfadePcmBuffers(
-            first = bufA,
-            second = bufB,
-            sampleRate = sampleRate,
-            crossfadeMs = 10
-        )
-        assertTrue(crossfaded.isNotEmpty())
-        assertTrue("Crossfaded buffer should have seamless length", crossfaded.size > bufA.size)
+        engine.shutdown()
     }
 }
-
