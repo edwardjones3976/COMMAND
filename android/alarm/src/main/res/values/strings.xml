@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="channel_alarm_name">Reveille</string>
+    <string name="channel_alarm_description">The alarm that opens when a commitment starts.</string>
+    <string name="channel_fallback_name">Reveille (backup)</string>
+    <string name="channel_fallback_description">Used only when the main alarm cannot start. Plays the alarm sound itself.</string>
+    <string name="channel_check_in_name">Check-ins</string>
+    <string name="channel_check_in_description">A short question about how the start went.</string>
+    <string name="channel_status_name">Status</string>
+    <string name="channel_status_description">Quiet notes about missed alarms and pauses.</string>
+
+    <string name="ring_title_generic">Reveille</string>
+    <string name="ring_text">Time to start. Tap to open, or silence the alarm.</string>
+    <string name="action_open">Open</string>
+    <string name="action_silence">Safety silence</string>
+    <string name="missed_title">Missed alarm</string>
+    <string name="missed_text">Nobody answered. Open to pick it up again, or skip it.</string>
+</resources>

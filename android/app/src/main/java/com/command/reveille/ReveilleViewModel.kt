@@ -1,0 +1,177 @@
+package com.command.reveille
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.command.data.ApplyExtras
+import com.command.data.ApplyResult
+import com.command.data.ChallengeRecord
+import com.command.data.OccurrenceRepository
+import com.command.data.db.OccurrenceRow
+import com.command.domain.dials.DialEffects
+import com.command.domain.dials.FrictionEvidence
+import com.command.domain.dials.HandshakeMode
+import com.command.domain.dials.LockPolicy
+import com.command.domain.dials.SkipReasonCode
+import com.command.domain.model.ChallengeOutcome
+import com.command.domain.model.EventSource
+import com.command.domain.occurrence.OccurrenceCommand
+import com.command.domain.occurrence.OccurrenceState
+import com.command.domain.occurrence.SkipReason
+import com.command.domain.time.Clock
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+/** Why the screen has nothing more to do. */
+enum class ClosedOutcome { STARTED, SKIPPED, DELAYED, MISSED, DONE, NOT_RINGING }
+
+sealed interface ReveilleUiState {
+    data object Loading : ReveilleUiState
+    data object NotFound : ReveilleUiState
+
+    /** The alarm is ringing: hold to acknowledge, or silence it. */
+    data class Firing(val title: String, val holdSeconds: Int, val earlyRelease: Boolean, val offerAccessibleConfirm: Boolean) : ReveilleUiState
+
+    /** Silenced or missed: nothing was started. The user can pick it up again or let it go. */
+    data class Silenced(val title: String) : ReveilleUiState
+
+    /** Acknowledged: the one concrete first step, and the one-tap answers. */
+    data class Direction(val title: String, val firstAction: String, val starterMinutes: Int) : ReveilleUiState
+
+    data class Closed(val title: String, val outcome: ClosedOutcome) : ReveilleUiState
+}
+
+/** A skip or delay that needs the user to do a little more first (Mission Lock), and what. */
+data class FrictionPrompt(val required: LockPolicy, val retry: (FrictionEvidence) -> Unit)
+
+/**
+ * Drives the lock-screen flow for one occurrence. The screen is a projection of the stored occurrence: every tap becomes a
+ * command to [OccurrenceRepository], so a relaunch after the process died lands on the right step.
+ */
+@HiltViewModel
+class ReveilleViewModel @Inject constructor(
+    private val repository: OccurrenceRepository,
+    private val clock: Clock,
+) : ViewModel() {
+
+    private val _state = MutableStateFlow<ReveilleUiState>(ReveilleUiState.Loading)
+    val state: StateFlow<ReveilleUiState> = _state.asStateFlow()
+
+    private val _friction = MutableStateFlow<FrictionPrompt?>(null)
+    val friction: StateFlow<FrictionPrompt?> = _friction.asStateFlow()
+
+    private var occurrenceId: String? = null
+    private var holdAttempts = 0
+    private var earlyRelease = false
+    var accessibilityTouchExploration = false
+
+    fun show(id: String) {
+        if (occurrenceId == id) return
+        occurrenceId = id
+        holdAttempts = 0
+        earlyRelease = false
+        viewModelScope.launch {
+            repository.observe(id).collectLatest { row -> _state.value = project(row) }
+        }
+    }
+
+    private suspend fun project(row: OccurrenceRow?): ReveilleUiState {
+        if (row == null) return ReveilleUiState.NotFound
+        val brief = repository.missionBrief(row.missionId) ?: return ReveilleUiState.NotFound
+        return when (row.state) {
+            OccurrenceState.FIRING -> {
+                val chain = DialEffects.defaultChain(repository.dialsOf(row).handshakeDifficulty)
+                // Only the hold challenge exists so far; typing, sequences and two-step arrive with the full handshake engine.
+                val hold = chain.steps.firstOrNull { it.mode == HandshakeMode.HOLD }?.holdSeconds ?: FALLBACK_HOLD_SECONDS
+                ReveilleUiState.Firing(brief.title, hold, earlyRelease, accessibilityTouchExploration)
+            }
+            OccurrenceState.SAFETY_SILENCED, OccurrenceState.MISSED -> ReveilleUiState.Silenced(brief.title)
+            OccurrenceState.ACKNOWLEDGED, OccurrenceState.GUIDED_START,
+            OccurrenceState.UNCONFIRMED, OccurrenceState.BLOCKED, OccurrenceState.RECOVERY_OFFERED ->
+                ReveilleUiState.Direction(brief.title, brief.firstAction, brief.starterMinutes)
+            OccurrenceState.STARTED_SELF_REPORTED, OccurrenceState.WORKING_SELF_REPORTED -> ReveilleUiState.Closed(brief.title, ClosedOutcome.STARTED)
+            OccurrenceState.COMPLETED_SELF_REPORTED -> ReveilleUiState.Closed(brief.title, ClosedOutcome.DONE)
+            OccurrenceState.SKIPPED -> ReveilleUiState.Closed(brief.title, ClosedOutcome.SKIPPED)
+            OccurrenceState.DELAYED -> ReveilleUiState.Closed(brief.title, ClosedOutcome.DELAYED)
+            OccurrenceState.SCHEDULED, OccurrenceState.ARMED -> ReveilleUiState.Closed(brief.title, ClosedOutcome.NOT_RINGING)
+        }
+    }
+
+    // --- the hold challenge ------------------------------------------------------------------------------------
+
+    /** A new press clears the "released early" hint from the last one. */
+    fun holdStarted() {
+        if (!earlyRelease) return
+        earlyRelease = false
+        (_state.value as? ReveilleUiState.Firing)?.let { _state.value = it.copy(earlyRelease = false) }
+    }
+
+    fun holdCompleted(startedAtMs: Long, endedAtMs: Long) = acknowledge(ChallengeOutcome.SUCCESS, startedAtMs, endedAtMs)
+
+    /** For people who cannot hold a finger down: an assistive confirm, recorded as such, never as a plain success. */
+    fun accessibleConfirm() = acknowledge(ChallengeOutcome.ACCESSIBLE_ALT, clock.nowMs(), clock.nowMs())
+
+    private fun acknowledge(outcome: ChallengeOutcome, startedAtMs: Long, endedAtMs: Long) {
+        val id = occurrenceId ?: return
+        holdAttempts += 1
+        viewModelScope.launch {
+            val record = ChallengeRecord(0, HandshakeMode.HOLD, holdAttempts, outcome, startedAtMs, endedAtMs)
+            val result = repository.apply(id, OccurrenceCommand.Acknowledge(accessibleAlternative = outcome == ChallengeOutcome.ACCESSIBLE_ALT), EventSource.USER, ApplyExtras(challenges = listOf(record)))
+            // Acknowledging is not starting: the next step is the direction, which is where starting is reported.
+            if (result is ApplyResult.Applied) repository.apply(id, OccurrenceCommand.StartGuidance, EventSource.USER)
+        }
+    }
+
+    fun holdReleasedEarly(startedAtMs: Long, endedAtMs: Long) {
+        val id = occurrenceId ?: return
+        holdAttempts += 1
+        earlyRelease = true
+        viewModelScope.launch {
+            repository.recordChallenge(id, ChallengeRecord(0, HandshakeMode.HOLD, holdAttempts, ChallengeOutcome.FAILED, startedAtMs, endedAtMs))
+        }
+        (_state.value as? ReveilleUiState.Firing)?.let { _state.value = it.copy(earlyRelease = true) }
+    }
+
+    // --- everything else is one tap ---------------------------------------------------------------------------
+
+    fun silence() = command(OccurrenceCommand.SafetySilence)
+    fun resume() = command(OccurrenceCommand.Resume)
+    fun started() = command(OccurrenceCommand.ReportStarted)
+
+    fun delay(minutes: Int) = withFriction { evidence -> OccurrenceCommand.Delay(minutes, evidence) }
+    fun skip() = withFriction { evidence -> OccurrenceCommand.Skip(SkipReason.USER, evidence) }
+
+    fun dismissFriction() { _friction.value = null }
+    fun confirmFriction(evidence: FrictionEvidence) { _friction.value?.retry?.invoke(evidence) }
+
+    private fun command(c: OccurrenceCommand) {
+        val id = occurrenceId ?: return
+        viewModelScope.launch { repository.apply(id, c, EventSource.USER) }
+    }
+
+    /** Tries the command bare; if the mission is fixed and wants more, asks, then tries again with what the user gave. */
+    private fun withFriction(build: (FrictionEvidence) -> OccurrenceCommand) {
+        val id = occurrenceId ?: return
+        fun attempt(evidence: FrictionEvidence) {
+            viewModelScope.launch {
+                when (val result = repository.apply(id, build(evidence), EventSource.USER)) {
+                    is ApplyResult.NeedsFriction -> _friction.value = FrictionPrompt(result.required) { given -> attempt(given) }
+                    else -> _friction.value = null
+                }
+            }
+        }
+        attempt(FrictionEvidence.None)
+    }
+
+    val reasons: List<SkipReasonCode> = SkipReasonCode.values().toList()
+
+    private companion object {
+        /** Used until the full handshake engine can run the user's chosen method. */
+        const val FALLBACK_HOLD_SECONDS = 3
+    }
+}
+

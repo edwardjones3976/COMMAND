@@ -1,5 +1,7 @@
 plugins {
   alias(libs.plugins.android.library)
+  alias(libs.plugins.google.devtools.ksp)
+  alias(libs.plugins.hilt.android)
 }
 
 android {
@@ -18,5 +20,22 @@ android {
 
 dependencies {
   coreLibraryDesugaring(libs.desugar.jdk.libs)
+  api(project(":domain"))
+  api(project(":data"))
+  implementation(libs.androidx.core.ktx)
+  implementation(libs.kotlinx.coroutines.android)
+  implementation(libs.hilt.android)
+  ksp(libs.hilt.compiler)
+
   testImplementation(libs.junit)
+  testImplementation(libs.robolectric)
+  testImplementation(libs.androidx.core)
+  testImplementation(libs.androidx.junit)
+  testImplementation(libs.kotlinx.coroutines.test)
+  testImplementation(libs.hilt.android.testing)
+  testImplementation(libs.androidx.room.runtime)
+  testImplementation(libs.androidx.room.ktx)
+  testImplementation(project(":testing-jvm"))
+  testImplementation(project(":testing-android"))
+  kspTest(libs.hilt.compiler)
 }

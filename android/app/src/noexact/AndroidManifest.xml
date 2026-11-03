@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- noexact: no install-time exact-alarm grant, so the platform's exact-alarm setting decides. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" tools:node="remove" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:node="replace" />
+
+    <application>
+        <receiver android:name="com.command.debug.DebugRingReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.command.debug.RING" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
