@@ -2,6 +2,7 @@ package com.command.testing
 
 import com.command.domain.alarm.AlarmRequest
 import com.command.domain.alarm.AlarmScheduler
+import com.command.domain.alarm.RingController
 import com.command.domain.alarm.WorkEnqueuer
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.WorkKind
@@ -51,5 +52,13 @@ class FakeWorkEnqueuer : WorkEnqueuer {
 
     override fun enqueue(kind: WorkKind, occurrenceId: String) {
         enqueued += kind to occurrenceId
+    }
+}
+
+class FakeRingController : RingController {
+    val stopped: MutableList<String> = ArrayList()
+
+    override fun stop(occurrenceId: String) {
+        stopped += occurrenceId
     }
 }
