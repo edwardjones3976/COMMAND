@@ -8,6 +8,9 @@ sealed interface Effect {
     data class ArmAlarm(val mode: ArmMode) : Effect
     data object DisarmAlarm : Effect
 
+    /** Stop the sound and vibration now. Emitted on every way out of FIRING, so silence never waits on a database poll. */
+    data object StopRinging : Effect
+
     /** A backstop alarm that ends the ring after [totalMs] even if the process is dead. */
     data class ArmCycleEnd(val totalMs: Long) : Effect
     data object CancelCycleEnd : Effect

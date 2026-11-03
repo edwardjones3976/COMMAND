@@ -14,6 +14,7 @@ import com.command.domain.model.StartKind
 import com.command.domain.model.ZoneMode
 import com.command.testing.FakeAlarmScheduler
 import com.command.testing.FakeClock
+import com.command.testing.FakeRingController
 import com.command.testing.FakeWorkEnqueuer
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
@@ -40,8 +41,9 @@ class Fixture(context: Context) {
     val work = FakeWorkEnqueuer()
     val poster = RecordingPoster()
     val roller = CountingRoller()
+    val ringer = FakeRingController()
     val db: CommandDb = CommandDb.inMemory(context)
-    val repo = OccurrenceRepository(db, clock, scheduler, work, poster, roller)
+    val repo = OccurrenceRepository(db, clock, scheduler, work, poster, roller, ringer)
 
     suspend fun mission(
         title: String = "Write the report",

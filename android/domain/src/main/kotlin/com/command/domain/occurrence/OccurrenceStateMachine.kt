@@ -16,6 +16,7 @@ import com.command.domain.occurrence.OccurrenceCommand.ReportDone
 import com.command.domain.occurrence.OccurrenceCommand.ReportStarted
 import com.command.domain.occurrence.OccurrenceCommand.ReportWorking
 import com.command.domain.occurrence.OccurrenceCommand.RequestRecovery
+import com.command.domain.occurrence.OccurrenceCommand.RescheduleRecovery
 import com.command.domain.occurrence.OccurrenceCommand.Resume
 import com.command.domain.occurrence.OccurrenceCommand.SafetySilence
 import com.command.domain.occurrence.OccurrenceCommand.Skip
@@ -95,12 +96,14 @@ object OccurrenceStateMachine {
                 is Acknowledge -> if (from == FIRING) {
                     go(ACKNOWLEDGED)
                     effects += Effect.CancelCycleEnd
+                    effects += Effect.StopRinging
                     applied()
                 } else illegal()
 
                 SafetySilence -> if (from == FIRING) {
                     go(SAFETY_SILENCED)
                     effects += Effect.CancelCycleEnd
+                    effects += Effect.StopRinging
                     applied()
                 } else illegal()
 
@@ -113,6 +116,7 @@ object OccurrenceStateMachine {
                 ReportBlocked -> if (from in FOLLOW_UP || from == UNCONFIRMED) finish(BLOCKED) else illegal()
                 RequestRecovery -> requestRecovery()
                 is AcceptRecovery -> acceptRecovery(cmd)
+                is RescheduleRecovery -> rescheduleRecovery(cmd)
                 is CheckInDue -> checkInDue(cmd.index)
                 NoResponse -> noResponse()
                 is Delay -> delay(cmd)
@@ -145,7 +149,10 @@ object OccurrenceStateMachine {
             }
             if (!legal) return illegal()
             go(MISSED)
-            if (reason == MissReason.TIMEOUT) effects += Effect.CancelCycleEnd
+            if (reason == MissReason.TIMEOUT) {
+                effects += Effect.CancelCycleEnd
+                effects += Effect.StopRinging
+            }
             if (reason != MissReason.TIMEOUT && from == ARMED) effects += Effect.DisarmAlarm
             if (reason == MissReason.DOWNTIME) events += DomainEvent(EventType.MISSED_WHILE_OFF)
             return applied()
@@ -159,15 +166,26 @@ object OccurrenceStateMachine {
             return applied()
         }
 
-        /** Replace any pending follow-up with the next question that is still owed, unless protected time applies. */
+        /** Replace any pending follow-up with the next question that is still owed. */
         private fun scheduleNextCheckIn() {
             effects += Effect.CancelCheckIns
             if (asked >= schedule.count) return
-            if (s.inRestWindow) {
-                events += DomainEvent(EventType.FOLLOWUP_SUPPRESSED, EventPayload.of("index" to asked))
-                return
+            scheduleCheckIn(asked)
+        }
+
+        /**
+         * Schedules question [index]. Inside protected time (sleep, leisure, driving) it is pushed back to after the
+         * window ends, so a question is neither asked at 3 a.m. nor silently lost.
+         */
+        private fun scheduleCheckIn(index: Int) {
+            val gap = schedule.gapsMs[minOf(index, schedule.count - 1)]
+            val restEnds = s.restEndsAtUtc
+            if (restEnds != null) {
+                events += DomainEvent(EventType.FOLLOWUP_SUPPRESSED, EventPayload.of("index" to index))
+                effects += Effect.ScheduleCheckIn(index, restEnds + gap)
+            } else {
+                effects += Effect.ScheduleCheckIn(index, now + gap)
             }
-            effects += Effect.ScheduleCheckIn(asked, now + schedule.gapsMs[asked])
         }
 
         /** A self-report that keeps the occurrence going (started, still working). */
@@ -208,21 +226,21 @@ object OccurrenceStateMachine {
 
         private fun checkInDue(index: Int): TransitionResult {
             if (s.state !in FOLLOW_UP) return illegal()
-            if (index == asked && index < schedule.count) {
-                asked = index + 1
-                if (s.inRestWindow) {
-                    events += DomainEvent(EventType.FOLLOWUP_SUPPRESSED, EventPayload.of("index" to index))
-                } else {
-                    events += DomainEvent(EventType.CHECK_IN_ASKED, EventPayload.of("index" to index))
-                    effects += Effect.PostCheckIn(index)
-                }
-                // After the last question, one more interval of silence is the final timeout.
-                val gap = schedule.gapsMs[minOf(asked, schedule.count - 1)]
-                effects += Effect.ScheduleCheckIn(asked, now + gap)
+            val nextQuestion = index == asked && index < schedule.count
+            val finalTimeout = index == schedule.count && asked == schedule.count
+            if (!nextQuestion && !finalTimeout) return illegal()
+            if (s.restEndsAtUtc != null) {
+                // Protected time: neither ask nor count the silence; try again after the window.
+                scheduleCheckIn(index)
                 return applied()
             }
-            if (index == schedule.count && asked == schedule.count) return unanswered()
-            return illegal()
+            if (finalTimeout) return unanswered()
+            asked = index + 1
+            events += DomainEvent(EventType.CHECK_IN_ASKED, EventPayload.of("index" to index))
+            effects += Effect.PostCheckIn(index)
+            // After the last question, one more interval of silence is the final timeout.
+            scheduleCheckIn(asked)
+            return applied()
         }
 
         /** Nobody answered. Only a start that was never reported becomes UNCONFIRMED. */
@@ -246,6 +264,19 @@ object OccurrenceStateMachine {
             }
             GUIDED_START, STARTED_SELF_REPORTED, WORKING_SELF_REPORTED -> unanswered()
             else -> illegal()
+        }
+
+        /** The recovery menu's reschedule option: a validated delay out of RECOVERY_OFFERED. */
+        private fun rescheduleRecovery(command: RescheduleRecovery): TransitionResult {
+            if (s.state != RECOVERY_OFFERED) return illegal()
+            val tomorrow = recovery.offerTomorrow && command.minutes == OccurrenceCommand.TOMORROW_MINUTES
+            if (RecoveryOption.RESCHEDULE !in recovery.menu || !(command.minutes in recovery.rescheduleMinutes || tomorrow)) return illegal()
+            if (!command.friction.satisfies(s.lockPolicy)) return TransitionResult.NeedsFriction(s.lockPolicy)
+            events += DomainEvent(EventType.RECOVERY_ACCEPTED, EventPayload.of("choice" to "RESCHEDULE", "minutes" to command.minutes))
+            go(DELAYED)
+            leaveActive()
+            effects += Effect.ArmChild(ChildKind.DELAY, now + command.minutes * MINUTE_MS)
+            return applied()
         }
 
         private fun delay(command: Delay): TransitionResult {
@@ -273,7 +304,10 @@ object OccurrenceStateMachine {
 
         private fun leaveActive() {
             when (s.state) {
-                FIRING -> effects += Effect.CancelCycleEnd
+                FIRING -> {
+                    effects += Effect.CancelCycleEnd
+                    effects += Effect.StopRinging
+                }
                 GUIDED_START, STARTED_SELF_REPORTED, WORKING_SELF_REPORTED, RECOVERY_OFFERED -> effects += Effect.CancelCheckIns
                 else -> Unit
             }

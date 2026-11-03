@@ -31,6 +31,7 @@ import com.command.domain.occurrence.OccurrenceCommand.ReportDone
 import com.command.domain.occurrence.OccurrenceCommand.ReportStarted
 import com.command.domain.occurrence.OccurrenceCommand.ReportWorking
 import com.command.domain.occurrence.OccurrenceCommand.RequestRecovery
+import com.command.domain.occurrence.OccurrenceCommand.RescheduleRecovery
 import com.command.domain.occurrence.OccurrenceCommand.Resume
 import com.command.domain.occurrence.OccurrenceCommand.SafetySilence
 import com.command.domain.occurrence.OccurrenceCommand.Skip
@@ -76,8 +77,8 @@ class OccurrenceStateMachineTest {
         lock: LockPolicy = LockPolicy.NONE,
         recoveryOffers: Int = 0,
         asked: Int = 0,
-        rest: Boolean = false,
-    ) = OccurrenceSnapshot(state, dials, lock, recoveryOffers, asked, rest)
+        restEndsAt: Long? = null,
+    ) = OccurrenceSnapshot(state, dials, lock, recoveryOffers, asked, restEndsAt)
 
     private fun run(s: OccurrenceSnapshot, c: OccurrenceCommand) = OccurrenceStateMachine.transition(s, c, now)
 
@@ -108,6 +109,7 @@ class OccurrenceStateMachineTest {
         "BLOCKED" to ReportBlocked,
         "RECOVERY" to RequestRecovery,
         "ACCEPT_RESET" to AcceptRecovery(RecoveryChoice.RESET),
+        "RESCHEDULE_RECOVERY" to RescheduleRecovery(30),
         "CHECK_IN_0" to CheckInDue(0),
         "NO_RESPONSE" to NoResponse,
         "DELAY" to Delay(15),
@@ -127,7 +129,7 @@ class OccurrenceStateMachineTest {
         WORKING_SELF_REPORTED to setOf("WORKING", "DONE", "BLOCKED", "RECOVERY", "CHECK_IN_0", "NO_RESPONSE", "DELAY", "SKIP_USER"),
         BLOCKED to setOf("STARTED", "DONE", "RECOVERY", "DELAY", "SKIP_USER"),
         UNCONFIRMED to setOf("STARTED", "WORKING", "DONE", "BLOCKED", "RECOVERY", "DELAY", "SKIP_USER"),
-        RECOVERY_OFFERED to setOf("ACCEPT_RESET", "NO_RESPONSE", "DELAY", "SKIP_USER"),
+        RECOVERY_OFFERED to setOf("ACCEPT_RESET", "RESCHEDULE_RECOVERY", "NO_RESPONSE", "DELAY", "SKIP_USER"),
         SKIPPED to emptySet(),
         DELAYED to emptySet(),
         COMPLETED_SELF_REPORTED to emptySet(),
@@ -189,11 +191,20 @@ class OccurrenceStateMachineTest {
     }
 
     @Test
-    fun `every way out of FIRING cancels the cycle-end backstop`() {
+    fun `every way out of FIRING cancels the cycle-end backstop and stops the sound`() {
         val exits = listOf(Acknowledge(), SafetySilence, Miss(MissReason.TIMEOUT), Delay(10), Skip(SkipReason.USER))
         for (c in exits) {
             val r = applied(snap(FIRING), c)
             assertTrue("${c.label} must cancel the backstop", Effect.CancelCycleEnd in r.effects)
+            assertTrue("${c.label} must stop the ringing", Effect.StopRinging in r.effects)
+        }
+    }
+
+    @Test
+    fun `nothing else asks for the sound to stop`() {
+        for (state in OccurrenceState.values().filter { it != FIRING }) for ((key, c) in matrixCommands) {
+            val r = run(snap(state), c) as? TransitionResult.Applied ?: continue
+            assertFalse("$state/$key", Effect.StopRinging in r.effects)
         }
     }
 
@@ -369,13 +380,37 @@ class OccurrenceStateMachineTest {
     }
 
     @Test
-    fun `protected time suppresses follow-up questions and says so`() {
-        val r = applied(snap(ACKNOWLEDGED, rest = true), StartGuidance)
-        assertTrue(r.effects.none { it is Effect.ScheduleCheckIn })
+    fun `protected time defers the first question to after the window instead of dropping it`() {
+        val restEnds = now + 3 * 60 * minute
+        val r = applied(snap(ACKNOWLEDGED, restEndsAt = restEnds), StartGuidance)
+        assertTrue("asked 7 minutes after the window ends", Effect.ScheduleCheckIn(0, restEnds + 7 * minute) in r.effects)
         assertTrue(r.events.any { it.type == EventType.FOLLOWUP_SUPPRESSED })
-        val due = applied(snap(GUIDED_START, rest = true), CheckInDue(0))
+    }
+
+    @Test
+    fun `a question that falls due in protected time is not asked or counted, and comes back after the window`() {
+        val restEnds = now + 2 * 60 * minute
+        val due = applied(snap(GUIDED_START, restEndsAt = restEnds), CheckInDue(0))
         assertTrue(due.effects.none { it is Effect.PostCheckIn })
+        assertEquals("the question was not used up", 0, due.snapshot.checkInsAsked)
+        assertTrue(Effect.ScheduleCheckIn(0, restEnds + 7 * minute) in due.effects)
         assertTrue(due.events.any { it.type == EventType.FOLLOWUP_SUPPRESSED })
+    }
+
+    @Test
+    fun `silence during protected time never turns a start into UNCONFIRMED`() {
+        val restEnds = now + 60 * minute
+        val s = snap(GUIDED_START, command.copy(followUpPersistence = 1), asked = 1, restEndsAt = restEnds)
+        val r = applied(s, CheckInDue(1)) // the final timeout falls due while asleep
+        assertEquals(GUIDED_START, r.state)
+        assertTrue(Effect.ScheduleCheckIn(1, restEnds + 10 * minute) in r.effects)
+    }
+
+    @Test
+    fun `an answer given in protected time schedules the next question after the window`() {
+        val restEnds = now + 60 * minute
+        val r = applied(snap(GUIDED_START, asked = 1, restEndsAt = restEnds), ReportStarted)
+        assertTrue(Effect.ScheduleCheckIn(1, restEnds + 7 * minute) in r.effects)
     }
 
     // --- recovery -------------------------------------------------------------------------------------------
@@ -402,6 +437,42 @@ class OccurrenceStateMachineTest {
         assertTrue(run(offered, AcceptRecovery(RecoveryChoice.SMALLER)) is TransitionResult.Illegal)
         assertEquals(GUIDED_START, applied(offered, AcceptRecovery(RecoveryChoice.RESET)).state)
         assertEquals(TransitionResult.RecoveryExhausted(1), run(applied(offered, AcceptRecovery(RecoveryChoice.RESET)).snapshot, RequestRecovery))
+    }
+
+    @Test
+    fun `the reschedule option takes only the minutes the menu offers`() {
+        val offered = snap(RECOVERY_OFFERED, command.copy(recoveryStructure = 3)) // reset, smaller, reschedule +15/+30/+60
+        for (ok in listOf(15, 30, 60)) {
+            val r = applied(offered, RescheduleRecovery(ok))
+            assertEquals(DELAYED, r.state)
+            assertTrue(Effect.ArmChild(ChildKind.DELAY, now + ok * minute) in r.effects)
+            assertTrue(r.events.any { it.type == EventType.RECOVERY_ACCEPTED })
+        }
+        assertTrue("45 is not on the menu", run(offered, RescheduleRecovery(45)) is TransitionResult.Illegal)
+        assertTrue("tomorrow is only offered from structure 4", run(offered, RescheduleRecovery(OccurrenceCommand.TOMORROW_MINUTES)) is TransitionResult.Illegal)
+    }
+
+    @Test
+    fun `tomorrow is a reschedule choice only where the menu offers it`() {
+        val four = snap(RECOVERY_OFFERED, command.copy(recoveryStructure = 4))
+        val r = applied(four, RescheduleRecovery(OccurrenceCommand.TOMORROW_MINUTES))
+        assertTrue(Effect.ArmChild(ChildKind.DELAY, now + 24 * 60 * minute) in r.effects)
+    }
+
+    @Test
+    fun `a menu without reschedule refuses it`() {
+        val resetOnly = snap(RECOVERY_OFFERED, command.copy(recoveryStructure = 1))
+        assertTrue(run(resetOnly, RescheduleRecovery(30)) is TransitionResult.Illegal)
+        val two = snap(RECOVERY_OFFERED, command.copy(recoveryStructure = 2)) // reset + reschedule +30/+60, no +15
+        assertTrue(run(two, RescheduleRecovery(15)) is TransitionResult.Illegal)
+        assertTrue(run(two, RescheduleRecovery(30)) is TransitionResult.Applied)
+    }
+
+    @Test
+    fun `rescheduling a rigid mission from recovery meets the same friction as any delay`() {
+        val rigid = snap(RECOVERY_OFFERED, command.copy(recoveryStructure = 3), lock = LockPolicy.CONFIRM)
+        assertEquals(TransitionResult.NeedsFriction(LockPolicy.CONFIRM), run(rigid, RescheduleRecovery(30)))
+        assertEquals(DELAYED, applied(rigid, RescheduleRecovery(30, FrictionEvidence.Confirmed)).state)
     }
 
     @Test

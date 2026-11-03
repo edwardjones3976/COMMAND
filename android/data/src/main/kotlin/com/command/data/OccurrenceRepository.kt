@@ -13,6 +13,7 @@ import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
 import com.command.domain.alarm.AlarmScheduler
 import com.command.domain.alarm.CheckInPoster
+import com.command.domain.alarm.RingController
 import com.command.domain.alarm.WindowRoller
 import com.command.domain.alarm.WorkEnqueuer
 import com.command.domain.dials.CheckInSchedule
@@ -100,6 +101,7 @@ class OccurrenceRepository @Inject constructor(
     private val work: WorkEnqueuer,
     private val poster: CheckInPoster,
     private val roller: WindowRoller,
+    private val ringController: RingController,
 ) {
     private class Pending(val occurrence: OccurrenceRow, val effect: Effect, val nowMs: Long)
 
@@ -190,7 +192,7 @@ class OccurrenceRepository @Inject constructor(
             lockPolicy = lock,
             recoveryOffers = session.recoveryOffers,
             checkInsAsked = session.checkInsAsked,
-            inRestWindow = inRestWindow(now),
+            restEndsAtUtc = restEndsAt(now),
         )
 
         when (val r = OccurrenceStateMachine.transition(snapshot, command, now)) {
@@ -306,15 +308,16 @@ class OccurrenceRepository @Inject constructor(
         } ?: Presets.dialsFor(PresetOrigin.STEADY)
     }
 
-    private suspend fun inRestWindow(nowMs: Long): Boolean {
+    /** When the protected window containing [nowMs] ends, or null if the user is not in one. */
+    private suspend fun restEndsAt(nowMs: Long): Long? {
         val rows: List<RestWindowRow> = db.restWindows().all()
-        if (rows.isEmpty()) return false
+        if (rows.isEmpty()) return null
         val windows = rows.mapNotNull { row ->
             runCatching {
                 RestWindow(DayOfWeek.of(row.weekday), LocalTime.parse(row.startLocal), LocalTime.parse(row.endLocal), row.kind)
             }.getOrNull()
         }
-        return RestWindows.contains(windows, nowMs, clock.zone())
+        return RestWindows.endOf(windows, nowMs, clock.zone())
     }
 
     private suspend fun log(type: EventType, occ: OccurrenceRow?, source: EventSource, payload: EventPayload = EventPayload.EMPTY) {
@@ -346,6 +349,7 @@ class OccurrenceRepository @Inject constructor(
                     }
                 }
                 Effect.DisarmAlarm -> scheduler.cancel(request(AlarmKind.FIRE))
+                Effect.StopRinging -> ringController.stop(occ.id)
                 is Effect.ArmCycleEnd -> scheduler.arm(request(AlarmKind.CYCLE_END, at = p.nowMs + e.totalMs))
                 Effect.CancelCycleEnd -> scheduler.cancel(request(AlarmKind.CYCLE_END))
                 is Effect.ScheduleCheckIn -> scheduler.arm(request(AlarmKind.CHECK_IN, at = e.atUtcMs, index = e.index))

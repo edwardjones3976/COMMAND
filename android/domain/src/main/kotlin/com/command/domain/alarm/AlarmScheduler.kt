@@ -49,3 +49,8 @@ interface CheckInPoster {
 fun interface WindowRoller {
     fun roll()
 }
+
+/** Stops the sound and vibration of a ring that has ended (on Android: an intent to the alarm service). */
+fun interface RingController {
+    fun stop(occurrenceId: String)
+}

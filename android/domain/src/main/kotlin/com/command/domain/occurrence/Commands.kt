@@ -36,6 +36,14 @@ sealed class OccurrenceCommand(val label: String) {
     data object RequestRecovery : OccurrenceCommand("REQUEST_RECOVERY")
     data class AcceptRecovery(val choice: RecoveryChoice) : OccurrenceCommand("ACCEPT_RECOVERY")
 
+    /**
+     * Take the recovery menu's reschedule option. [minutes] must be one of the menu's offered delays, or
+     * [TOMORROW_MINUTES]; the same friction as any other delay applies to a rigid mission.
+     */
+    data class RescheduleRecovery(val minutes: Int, val friction: FrictionEvidence = FrictionEvidence.None) : OccurrenceCommand("RESCHEDULE_RECOVERY") {
+        init { require(minutes in 1..MAX_DELAY_MINUTES) { "reschedule must be 1..$MAX_DELAY_MINUTES minutes" } }
+    }
+
     /** A follow-up alarm fired. The index must match the next expected check-in, so stale alarms are ignored. */
     data class CheckInDue(val index: Int) : OccurrenceCommand("CHECK_IN_DUE")
 
@@ -50,6 +58,9 @@ sealed class OccurrenceCommand(val label: String) {
 
     companion object {
         const val MAX_DELAY_MINUTES = 24 * 60
+
+        /** "Tomorrow": the same time the next day. */
+        const val TOMORROW_MINUTES = 24 * 60
     }
 }
 
@@ -61,8 +72,11 @@ data class OccurrenceSnapshot(
     val lockPolicy: LockPolicy,
     val recoveryOffers: Int = 0,
     val checkInsAsked: Int = 0,
-    /** Inside a protected window (sleep, leisure, driving): follow-up questions are suppressed. */
-    val inRestWindow: Boolean = false,
+    /**
+     * When the protected window (sleep, leisure, driving) that contains now ends, or null if now is not protected.
+     * While set, follow-up questions are deferred to after it ends instead of being asked or silently lost.
+     */
+    val restEndsAtUtc: Long? = null,
 )
 
 sealed interface TransitionResult {

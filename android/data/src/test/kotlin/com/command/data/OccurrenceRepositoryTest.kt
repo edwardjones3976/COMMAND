@@ -211,13 +211,24 @@ class OccurrenceRepositoryTest {
     }
 
     @Test
-    fun `protected time suppresses follow-up scheduling`() = run {
-        f.restWindowCoveringNow()
+    fun `protected time defers the follow-up question until the window ends`() = run {
+        f.restWindowCoveringNow() // Monday 08:00-10:00 UTC; it is 09:00
         val o = scheduled()
         apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
         apply(o, OccurrenceCommand.Acknowledge()); apply(o, OccurrenceCommand.StartGuidance)
-        assertTrue(f.scheduler.armed.values.none { it.kind == AlarmKind.CHECK_IN })
+        val firstQuestion = f.scheduler.armed.values.single { it.kind == AlarmKind.CHECK_IN }
+        // Steady asks 10 minutes after guidance; here that is 10 minutes after the window closes at 10:00.
+        assertEquals(f.t0 + 60 * 60_000L + 10 * 60_000L, firstQuestion.atUtcMs)
         assertTrue(f.db.events().ofType(EventType.FOLLOWUP_SUPPRESSED).isNotEmpty())
+    }
+
+    @Test
+    fun `every way out of a ring tells the service to stop the sound`() = run {
+        val o = scheduled()
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+        assertTrue(f.ringer.stopped.isEmpty())
+        apply(o, OccurrenceCommand.SafetySilence)
+        assertEquals(listOf(o.id), f.ringer.stopped)
     }
 
     // --- friction ------------------------------------------------------------------------------------------

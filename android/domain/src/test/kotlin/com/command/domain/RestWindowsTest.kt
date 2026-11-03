@@ -57,6 +57,22 @@ class RestWindowsTest {
     }
 
     @Test
+    fun `the end of a protected stretch is when the window closes`() {
+        assertEquals(at(newYork, 2026, 11, 2, 13, 0), RestWindows.endOf(listOf(lunch), at(newYork, 2026, 11, 2, 12, 20), newYork))
+        assertEquals("overnight windows end the next morning", at(newYork, 2026, 11, 3, 6, 0), RestWindows.endOf(listOf(sleep), at(newYork, 2026, 11, 2, 23, 0), newYork))
+        assertEquals("and from after midnight it is the same morning", at(newYork, 2026, 11, 3, 6, 0), RestWindows.endOf(listOf(sleep), at(newYork, 2026, 11, 3, 2, 0), newYork))
+        assertEquals(null, RestWindows.endOf(listOf(lunch), at(newYork, 2026, 11, 2, 14, 0), newYork))
+        assertEquals(null, RestWindows.endOf(emptyList(), at(newYork, 2026, 11, 2, 14, 0), newYork))
+    }
+
+    @Test
+    fun `back-to-back windows count as one stretch`() {
+        val first = RestWindow(DayOfWeek.MONDAY, LocalTime.of(12, 0), LocalTime.of(13, 0), RestKind.LEISURE)
+        val second = RestWindow(DayOfWeek.MONDAY, LocalTime.of(13, 0), LocalTime.of(14, 30), RestKind.DRIVING)
+        assertEquals(at(newYork, 2026, 11, 2, 14, 30), RestWindows.endOf(listOf(first, second), at(newYork, 2026, 11, 2, 12, 30), newYork))
+    }
+
+    @Test
     fun `withdrawing a consent withdraws only what depended on it`() {
         assertEquals(listOf(ConsentKey.GEMINI_TEXT, ConsentKey.GEMINI_TEXT_TITLES), ConsentCascade.withDependents(ConsentKey.GEMINI_TEXT))
         assertEquals(listOf(ConsentKey.GEMINI_VOICE, ConsentKey.GEMINI_VOICE_TITLES), ConsentCascade.withDependents(ConsentKey.GEMINI_VOICE))
