@@ -47,6 +47,7 @@ import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.MissReason
 import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.SkipReason
+import com.command.ui.pauseTitle
 import com.command.ui.whenLabel
 import com.example.R
 import java.time.LocalDate
@@ -57,6 +58,8 @@ object ScheduleTags {
     const val EMPTY = "schedule_empty"
     const val ATTENTION_BANNER = "schedule_banner_attention"
     const val ATTENTION_ACTION = "schedule_banner_attention_action"
+    const val PAUSED_BANNER = "schedule_banner_paused"
+    const val PAUSED_ACTION = "schedule_banner_paused_action"
     const val LINK_RELIABILITY = "schedule_link_reliability"
     const val LINK_CONSENTS = "schedule_link_consents"
     const val LINK_HISTORY = "schedule_link_history"
@@ -92,6 +95,7 @@ fun ScheduleRoute(
         onOpenConsents = onOpenConsents,
         onOpenHistory = onOpenHistory,
         onOpenSettings = onOpenSettings,
+        onEndPause = viewModel::endPause,
     )
 }
 
@@ -107,8 +111,9 @@ fun ScheduleScreen(
     onOpenOccurrence: (String) -> Unit = {},
     onOpenHistory: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    onEndPause: () -> Unit = {},
     zone: ZoneId = ZoneId.systemDefault(),
-    today: LocalDate = LocalDate.now(zone),
+    today: LocalDate = (state as? ScheduleUiState.Ready)?.today ?: LocalDate.now(zone),
 ) {
     Scaffold(
         floatingActionButton = {
@@ -152,6 +157,9 @@ fun ScheduleScreen(
                         }
                     }
                 }
+                if (state.pausedUntilUtcMs != null) {
+                    item { PausedBanner(pauseTitle(state.pausedUntilUtcMs, zone, today), onAction = onEndPause) }
+                }
                 if (state.problems > 0) {
                     item { AttentionBanner(problems = state.problems, onAction = onOpenReliability) }
                 }
@@ -160,11 +168,11 @@ fun ScheduleScreen(
                 }
                 if (state.upcoming.isNotEmpty()) {
                     item { SectionTitle(stringResource(R.string.schedule_section_upcoming)) }
-                    items(state.upcoming, key = { it.occurrenceId }) { RowCard(it, zone, today, onOpen, onOpenOccurrence) }
+                    items(state.upcoming, key = { it.occurrenceId }) { RowCard(it, zone, today, state.pausedUntilUtcMs, onOpen, onOpenOccurrence) }
                 }
                 if (state.recent.isNotEmpty()) {
                     item { SectionTitle(stringResource(R.string.schedule_section_recent)) }
-                    items(state.recent, key = { it.occurrenceId }) { RowCard(it, zone, today, onOpen, onOpenOccurrence) }
+                    items(state.recent, key = { it.occurrenceId }) { RowCard(it, zone, today, state.pausedUntilUtcMs, onOpen, onOpenOccurrence) }
                 }
                 // Room under the last row for the new-mission button.
                 item { Spacer(Modifier.height(72.dp)) }
@@ -187,6 +195,22 @@ private fun Empty() {
 }
 
 @Composable
+private fun PausedBanner(title: String, onAction: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().testTag(ScheduleTags.PAUSED_BANNER),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer, contentColor = MaterialTheme.colorScheme.onTertiaryContainer),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.pause_body), style = MaterialTheme.typography.bodyLarge)
+            TextButton(onClick = onAction, modifier = Modifier.heightIn(min = 48.dp).testTag(ScheduleTags.PAUSED_ACTION)) {
+                Text(stringResource(R.string.pause_resume), style = MaterialTheme.typography.labelLarge)
+            }
+        }
+    }
+}
+
+@Composable
 private fun AttentionBanner(problems: Int, onAction: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().testTag(ScheduleTags.ATTENTION_BANNER),
@@ -203,9 +227,9 @@ private fun AttentionBanner(problems: Int, onAction: () -> Unit) {
 }
 
 @Composable
-private fun RowCard(row: ScheduleRow, zone: ZoneId, today: LocalDate, onOpen: (String) -> Unit, onOpenOccurrence: (String) -> Unit) {
+private fun RowCard(row: ScheduleRow, zone: ZoneId, today: LocalDate, pausedUntilUtcMs: Long?, onOpen: (String) -> Unit, onOpenOccurrence: (String) -> Unit) {
     val whenText = whenLabel(row.scheduledAtUtc, zone, today)
-    val state = stateLabel(row)
+    val state = stateLabel(row, pausedUntilUtcMs)
     val description = stringResource(R.string.schedule_row_description, row.title, whenText, state)
     Card(
         // An occurrence that is waiting for an answer opens its questions; everything else opens the mission.
@@ -230,16 +254,25 @@ private fun RowCard(row: ScheduleRow, zone: ZoneId, today: LocalDate, onOpen: (S
 
 /** What happened to an occurrence, in the plain words the history will use. Silenced and missed are never called started. */
 @Composable
-private fun stateLabel(row: ScheduleRow): String = stringResource(
+private fun stateLabel(row: ScheduleRow, pausedUntilUtcMs: Long?): String = stringResource(
     when (row.state) {
         OccurrenceState.SCHEDULED, OccurrenceState.ARMED ->
-            if (row.armMode == ArmMode.INEXACT) R.string.schedule_state_set_inexact else R.string.schedule_state_set
+            when {
+                // Inside a pause nothing is armed, whatever the row says: it will not ring.
+                pausedUntilUtcMs != null && row.scheduledAtUtc < pausedUntilUtcMs -> R.string.schedule_state_held
+                row.armMode == ArmMode.INEXACT -> R.string.schedule_state_set_inexact
+                else -> R.string.schedule_state_set
+            }
         OccurrenceState.FIRING -> R.string.schedule_state_ringing
         OccurrenceState.ACKNOWLEDGED, OccurrenceState.GUIDED_START -> R.string.schedule_state_acknowledged
         OccurrenceState.STARTED_SELF_REPORTED, OccurrenceState.WORKING_SELF_REPORTED -> R.string.schedule_state_started
         OccurrenceState.COMPLETED_SELF_REPORTED -> R.string.schedule_state_done
         OccurrenceState.MISSED ->
-            if (row.missReason == MissReason.DOWNTIME) R.string.schedule_state_missed_off else R.string.schedule_state_missed
+            when (row.missReason) {
+                MissReason.DOWNTIME -> R.string.schedule_state_missed_off
+                MissReason.PAUSED -> R.string.schedule_state_paused
+                else -> R.string.schedule_state_missed
+            }
         OccurrenceState.SAFETY_SILENCED -> R.string.schedule_state_silenced
         OccurrenceState.SKIPPED ->
             if (row.skipReason == SkipReason.CALENDAR_CANCELLED || row.skipReason == SkipReason.CALENDAR_REMOVED) {

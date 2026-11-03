@@ -18,6 +18,7 @@ import com.command.data.db.MissionRow
 import com.command.domain.alarm.AlarmScheduler
 import com.command.domain.alarm.CheckInPoster
 import com.command.domain.alarm.CheckInPrompt
+import com.command.domain.alarm.PauseEffects
 import com.command.domain.alarm.RingController
 import com.command.domain.alarm.WindowRoller
 import com.command.domain.alarm.WorkEnqueuer
@@ -35,6 +36,7 @@ import com.command.domain.voice.Speaker
 import com.command.domain.voice.SpeechUsage
 import com.command.testing.FakeAlarmScheduler
 import com.command.testing.FakeClock
+import com.command.testing.FakePauseEffects
 import com.command.testing.FakeRingController
 import com.command.testing.FakeWorkEnqueuer
 import dagger.Module
@@ -185,6 +187,8 @@ object FakeAlarmModule {
     @Provides @Singleton fun poster(): RecordingPoster = RecordingPoster()
     @Provides @Singleton fun checkInPoster(fake: RecordingPoster): CheckInPoster = fake
     @Provides @Singleton fun roller(): WindowRoller = WindowRoller { }
+    @Provides @Singleton fun fakePause(): FakePauseEffects = FakePauseEffects()
+    @Provides @Singleton fun pauseEffects(fake: FakePauseEffects): PauseEffects = fake
     @Provides @Singleton fun fakeMonitor(recorder: PreconditionRecorder): FakeReliabilityMonitor = FakeReliabilityMonitor(recorder)
     @Provides @Singleton fun monitor(fake: FakeReliabilityMonitor): ReliabilityMonitor = fake
     @Provides @Singleton fun fakeSpeaker(): FakeSpeaker = FakeSpeaker()

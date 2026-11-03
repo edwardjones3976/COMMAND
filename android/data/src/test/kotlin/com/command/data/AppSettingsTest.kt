@@ -28,7 +28,7 @@ class AppSettingsTest {
     fun setUp() {
         f = Fixture(ApplicationProvider.getApplicationContext())
         settings = AppSettings(f.db)
-        missions = MissionRepository(f.db, f.repo, f.scheduler, f.clock)
+        missions = MissionRepository(f.db, f.repo, f.scheduler, f.clock, f.pauseEffects)
     }
 
     @After

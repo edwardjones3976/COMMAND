@@ -46,7 +46,7 @@ class MissionRepositoryTest {
     @Before
     fun setUp() {
         f = Fixture(ApplicationProvider.getApplicationContext())
-        missions = MissionRepository(f.db, f.repo, f.scheduler, f.clock)
+        missions = MissionRepository(f.db, f.repo, f.scheduler, f.clock, f.pauseEffects)
     }
 
     @After

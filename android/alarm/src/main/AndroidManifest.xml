@@ -28,6 +28,7 @@
         <receiver android:name=".CheckInReceiver" android:exported="false" />
         <receiver android:name=".CheckInAnswerReceiver" android:exported="false" />
         <receiver android:name=".SilenceReceiver" android:exported="false" />
+        <receiver android:name=".PauseResumeReceiver" android:exported="false" />
 
         <!--
             The events that can leave alarms wrong: a reboot clears every one, and so can an update, the clock or the zone being

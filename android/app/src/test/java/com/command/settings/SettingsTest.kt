@@ -9,8 +9,11 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.room.InvalidationTracker
 import com.command.data.AppSettings
+import com.command.data.MissionRepository
 import com.command.data.db.CommandDb
 import com.command.domain.voice.RoutePolicy
+import com.command.testing.FakeClock
+import com.command.testing.android.FakeAlarmModule
 import com.command.testing.android.awaitUntil
 import com.command.ui.theme.CommandTheme
 import dagger.hilt.android.testing.HiltAndroidRule
@@ -18,12 +21,18 @@ import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import javax.inject.Inject
 
 /** Where the spoken line is heard: chosen on a screen, written the moment it is chosen. */
@@ -36,6 +45,8 @@ class SettingsViewModelTest {
 
     @Inject lateinit var settings: AppSettings
     @Inject lateinit var db: CommandDb
+    @Inject lateinit var missions: MissionRepository
+    @Inject lateinit var clock: FakeClock
 
     @Before
     fun setUp() {
@@ -55,28 +66,28 @@ class SettingsViewModelTest {
 
     @Test
     fun `the line is heard on the speaker and a headset until the person says otherwise`() {
-        val vm = SettingsViewModel(settings)
+        val vm = SettingsViewModel(settings, missions, clock)
         awaitUntil(message = "ready") { ready(vm) != null }
         assertEquals(RoutePolicy.SPEAKER_AND_HEADSET, ready(vm)!!.routePolicy)
     }
 
     @Test
     fun `choosing headset only is written down, and then shown`() {
-        val vm = SettingsViewModel(settings)
+        val vm = SettingsViewModel(settings, missions, clock)
         awaitUntil(message = "ready") { ready(vm) != null }
 
         vm.chooseRoutePolicy(RoutePolicy.HEADSET_ONLY)
         awaitUntil(message = "written and shown") { ready(vm)?.routePolicy == RoutePolicy.HEADSET_ONLY }
         assertEquals("what is shown is what is stored", RoutePolicy.HEADSET_ONLY, runBlocking { settings.routePolicy() })
 
-        val reopened = SettingsViewModel(settings)
+        val reopened = SettingsViewModel(settings, missions, clock)
         awaitUntil(message = "ready again") { ready(reopened) != null }
         assertEquals("and it is still chosen when the screen is opened again", RoutePolicy.HEADSET_ONLY, ready(reopened)!!.routePolicy)
     }
 
     @Test
     fun `choosing what is already chosen writes nothing`() {
-        val vm = SettingsViewModel(settings)
+        val vm = SettingsViewModel(settings, missions, clock)
         awaitUntil(message = "ready") { ready(vm) != null }
         // The database seeds the default route when it is created, so a write is told from the seed by watching the settings table.
         var writes = 0
@@ -94,6 +105,31 @@ class SettingsViewModelTest {
         vm.chooseRoutePolicy(RoutePolicy.HEADSET_ONLY)
         awaitUntil(message = "the same watch sees a real write") { writes > 0 }
     }
+
+    @Test
+    fun `pausing for some hours is shown until its end, and ending the pause brings the choices back`() {
+        val vm = SettingsViewModel(settings, missions, clock)
+        awaitUntil(message = "ready") { ready(vm) != null }
+        assertNull(ready(vm)!!.pausedUntilUtcMs)
+
+        vm.pauseFor(4)
+        awaitUntil(message = "paused") { ready(vm)?.pausedUntilUtcMs == FakeAlarmModule.T0 + 4 * 3_600_000L }
+
+        vm.endPause()
+        awaitUntil(message = "resumed") { ready(vm)?.pausedUntilUtcMs == null }
+    }
+
+    @Test
+    fun `a pause whose end has passed is no longer shown, before anything has closed it`() {
+        val vm = SettingsViewModel(settings, missions, clock)
+        awaitUntil(message = "ready") { ready(vm) != null }
+        vm.pauseFor(1)
+        awaitUntil(message = "paused") { ready(vm)?.pausedUntilUtcMs != null }
+
+        clock.advance(2 * 3_600_000L)
+        vm.chooseRoutePolicy(RoutePolicy.HEADSET_ONLY) // anything that makes the screen look again
+        awaitUntil(message = "shown as over") { ready(vm)?.routePolicy == RoutePolicy.HEADSET_ONLY && ready(vm)?.pausedUntilUtcMs == null }
+    }
 }
 
 // A tall screen, so that nothing needs scrolling to be found.
@@ -109,19 +145,32 @@ class SettingsScreenTest {
         var reliability = 0
         var consents = 0
         var back = 0
+        val pauses = ArrayList<Int>()
+        var endPause = 0
     }
 
-    private fun show(policy: RoutePolicy = RoutePolicy.SPEAKER_AND_HEADSET, taps: Taps = Taps()): Taps {
+    private val today = LocalDate.of(2026, 11, 2)
+
+    private fun at(day: Int, hour: Int, minute: Int = 0): Long =
+        java.time.ZonedDateTime.of(2026, 11, day, hour, minute, 0, 0, ZoneOffset.UTC).toInstant().toEpochMilli()
+
+    private fun timeOf(utcMs: Long) = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).format(Instant.ofEpochMilli(utcMs).atZone(ZoneOffset.UTC))
+
+    private fun show(policy: RoutePolicy = RoutePolicy.SPEAKER_AND_HEADSET, taps: Taps = Taps(), pausedUntil: Long? = null): Taps {
         compose.setContent {
             CommandTheme(darkTheme = true) {
                 SettingsScreen(
-                    state = SettingsUiState.Ready(policy),
+                    state = SettingsUiState.Ready(policy, pausedUntil),
                     onBack = { taps.back++ },
                     onChooseRoute = { taps.routes += it },
                     onOpenHistory = { taps.history++ },
                     onOpenReliability = { taps.reliability++ },
                     onOpenConsents = { taps.consents++ },
                     version = "4.0",
+                    onPause = { taps.pauses += it },
+                    onEndPause = { taps.endPause++ },
+                    zone = ZoneOffset.UTC,
+                    today = today,
                 )
             }
         }
@@ -161,5 +210,42 @@ class SettingsScreenTest {
         show()
         compose.onNodeWithText("COMMAND, version 4.0").assertIsDisplayed()
         compose.onNodeWithText("Everything stays on this phone unless a feature you turn on says otherwise.").assertIsDisplayed()
+    }
+
+    @Test
+    fun `without a pause, three lengths are offered and each reports its hours`() {
+        val taps = show()
+        compose.onNodeWithText("Pause COMMAND").assertIsDisplayed()
+        compose.onNodeWithText("For 1 hour").assertIsDisplayed()
+        compose.onNodeWithText("For 4 hours").assertIsDisplayed()
+        compose.onNodeWithText("For 12 hours").assertIsDisplayed()
+        compose.onNodeWithTag(SettingsTags.PAUSED).assertDoesNotExist()
+
+        compose.onNodeWithTag(SettingsTags.PAUSE_1H).performClick()
+        compose.onNodeWithTag(SettingsTags.PAUSE_4H).performClick()
+        compose.onNodeWithTag(SettingsTags.PAUSE_12H).performClick()
+        assertEquals(listOf(1, 4, 12), taps.pauses)
+    }
+
+    @Test
+    fun `while paused it says until when, what that means, and offers only to resume`() {
+        val until = at(2, 15, 42)
+        val taps = show(pausedUntil = until)
+        compose.onNodeWithText("Paused until ${timeOf(until)}").assertIsDisplayed()
+        compose.onNodeWithText("History says it was paused, not missed.", substring = true).assertIsDisplayed()
+        compose.onNodeWithTag(SettingsTags.PAUSE_1H).assertDoesNotExist()
+        compose.onNodeWithTag(SettingsTags.PAUSE_12H).assertDoesNotExist()
+
+        compose.onNodeWithTag(SettingsTags.RESUME).performClick()
+        assertEquals(1, taps.endPause)
+        assertEquals(emptyList<Int>(), taps.pauses)
+    }
+
+    @Test
+    fun `a pause that ends on another day names the day`() {
+        val until = at(3, 8)
+        show(pausedUntil = until)
+        val date = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).format(Instant.ofEpochMilli(until).atZone(ZoneOffset.UTC))
+        compose.onNodeWithText("Paused until $date at ${timeOf(until)}").assertIsDisplayed()
     }
 }

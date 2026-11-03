@@ -7,6 +7,7 @@ import com.command.data.db.ScheduleRow
 import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
 import com.command.domain.alarm.AlarmScheduler
+import com.command.domain.alarm.PauseEffects
 import com.command.domain.dials.Flexibility
 import com.command.domain.model.EventSource
 import com.command.domain.model.MissionSource
@@ -92,6 +93,7 @@ class MissionRepository @Inject constructor(
     private val occurrences: OccurrenceRepository,
     private val scheduler: AlarmScheduler,
     private val clock: Clock,
+    private val pauseEffects: PauseEffects,
 ) {
     private val generator = OccurrenceGenerator()
     private val writes = Mutex()
@@ -166,7 +168,7 @@ class MissionRepository @Inject constructor(
             }
         }
         occurrences.cancelAlarms(removed)
-        createAndArm(row, zone, wanted, EventSource.USER)
+        createAndArm(row, zone, wanted, EventSource.USER, PauseStore.active(db, now))
         SaveResult.Saved(row.id, wanted.size)
     }
 
@@ -221,9 +223,18 @@ class MissionRepository @Inject constructor(
      *    instead of ringing hours late; one that is only just due, armed or not, rings now.
      * Idempotent and cheap. Runs that the person did not start leave a line in the audit log even when they found nothing.
      */
-    suspend fun reconcile(trigger: ReconcileTrigger): ReconcileReport = writes.withLock {
+    suspend fun reconcile(trigger: ReconcileTrigger): ReconcileReport = writes.withLock { reconcileLocked(trigger) }
+
+    private suspend fun reconcileLocked(trigger: ReconcileTrigger): ReconcileReport {
         val now = clock.nowMs()
         val zone = clock.zone()
+        // A pause that has run out is closed first, so that what it held back is settled before anything is armed again.
+        var pause = PauseStore.read(db)
+        var paused = 0
+        if (pause != null && pause.isOver(now)) {
+            paused += endPause(pause, now, PauseEnd.EXPIRED)
+            pause = null
+        }
         var created = 0
         var discarded = 0
         var repaired = 0
@@ -231,7 +242,7 @@ class MissionRepository @Inject constructor(
             val z = zoneOf(mission, zone)
             val wanted = instantsOf(mission, z, now)
             discarded += discardFuture(mission.id, keep = wanted.toSet(), now, EventSource.SYSTEM)
-            val counts = createAndArm(mission, z, wanted, EventSource.SYSTEM)
+            val counts = createAndArm(mission, z, wanted, EventSource.SYSTEM, pause)
             created += counts.created
             repaired += counts.repaired
         }
@@ -240,6 +251,11 @@ class MissionRepository @Inject constructor(
         var missed = 0
         var precisionChanged = 0
         for (occ in db.occurrences().inStates(listOf(OccurrenceState.SCHEDULED, OccurrenceState.ARMED))) {
+            if (pause != null && occ.scheduledAtUtc < pause.untilUtcMs) {
+                // The pause holds it back: nothing arms it and nothing misses it; the end of the pause settles it.
+                if (occ.state == OccurrenceState.ARMED && occurrences.apply(occ.id, OccurrenceCommand.Disarm, EventSource.SYSTEM) is ApplyResult.Applied) paused++
+                continue
+            }
             if (occ.scheduledAtUtc < now - GRACE_MS) {
                 val result = occurrences.apply(occ.id, OccurrenceCommand.Miss(MissReason.DOWNTIME, lateMs = now - occ.scheduledAtUtc), EventSource.SYSTEM)
                 if (result is ApplyResult.Applied) missed++
@@ -259,17 +275,81 @@ class MissionRepository @Inject constructor(
                 if (occurrences.apply(occ.id, OccurrenceCommand.Arm(armModeNow()), EventSource.SYSTEM) is ApplyResult.Applied) repaired++
             }
         }
-        val report = ReconcileReport(created, discarded, rearmed, lost, missed, precisionChanged, repaired)
+        val report = ReconcileReport(created, discarded, rearmed, lost, missed, precisionChanged, repaired, paused)
         if (trigger.alwaysLogged || report.changedAnything) {
             occurrences.logEvent(
                 EventType.BOOT_RECONCILE, null, EventSource.SYSTEM,
                 EventPayload.of(
                     "trigger" to trigger, "created" to created, "discarded" to discarded,
                     "rearmed" to rearmed, "lost" to lost, "missed" to missed, "precision_changed" to precisionChanged, "repaired" to repaired,
+                    "paused" to paused,
                 ),
             )
         }
-        report
+        return report
+    }
+
+    // --- global pause -------------------------------------------------------------------------------------------
+
+    /** The pause that is stored: in force, or run out and not yet closed by a reconcile. Null when there is none. */
+    fun observePause(): Flow<Pause?> = PauseStore.observe(db)
+
+    /**
+     * Pauses COMMAND for [forMs]: nothing that is due before the end rings. The alarms already armed for that time are taken down (their
+     * occurrences go back to scheduled), occurrences created meanwhile are left unarmed, and a reconcile is queued for the end. A ring that
+     * is going and a question the person is being asked are not touched. Pausing while paused moves the end and keeps the start, so what
+     * the pause already held back stays blamed on it.
+     */
+    suspend fun pause(forMs: Long): Pause = writes.withLock {
+        require(forMs in MIN_PAUSE_MS..MAX_PAUSE_MS) { "a pause lasts between a minute and $MAX_PAUSE_HOURS hours" }
+        val now = clock.nowMs()
+        val stored = PauseStore.read(db)
+        // A pause that ran out and was never closed is closed first, so that what it held back is settled before a new one begins.
+        if (stored != null && stored.isOver(now)) endPause(stored, now, PauseEnd.EXPIRED)
+        val pause = Pause(sinceUtcMs = stored?.takeUnless { it.isOver(now) }?.sinceUtcMs ?: now, untilUtcMs = now + forMs)
+        PauseStore.write(db, pause)
+        var disarmed = 0
+        for (occ in db.occurrences().inStates(listOf(OccurrenceState.ARMED))) {
+            if (occ.scheduledAtUtc < pause.untilUtcMs && occurrences.apply(occ.id, OccurrenceCommand.Disarm, EventSource.USER) is ApplyResult.Applied) disarmed++
+        }
+        occurrences.logEvent(
+            EventType.PAUSED, null, EventSource.USER,
+            EventPayload.of("since" to pause.sinceUtcMs, "until" to pause.untilUtcMs, "disarmed" to disarmed),
+        )
+        pauseEffects.started(pause.untilUtcMs)
+        pause
+    }
+
+    /**
+     * Ends the pause now. What came due while it lasted is recorded as missed because of it, and everything still to come is armed again.
+     * Nothing happens when there is no pause.
+     */
+    suspend fun resume(): ReconcileReport = writes.withLock {
+        val pause = PauseStore.read(db) ?: return@withLock ReconcileReport()
+        endPause(pause, clock.nowMs(), PauseEnd.RESUMED)
+        reconcileLocked(ReconcileTrigger.RESUMED)
+    }
+
+    private enum class PauseEnd { EXPIRED, RESUMED }
+
+    /**
+     * Closes [pause]: what came due inside it and was held back (it is still scheduled, never armed) is recorded as missed because of it,
+     * the pause is forgotten and the platform is told. What is still to come is armed by the reconcile that follows. Returns how many it
+     * recorded.
+     */
+    private suspend fun endPause(pause: Pause, now: Long, how: PauseEnd): Int {
+        // Up to the end of the pause, or up to now when the person ended it early.
+        val boundary = minOf(pause.untilUtcMs, now)
+        var swallowed = 0
+        for (occ in db.occurrences().inStates(listOf(OccurrenceState.SCHEDULED))) {
+            if (occ.scheduledAtUtc >= pause.sinceUtcMs && occ.scheduledAtUtc < boundary &&
+                occurrences.apply(occ.id, OccurrenceCommand.Miss(MissReason.PAUSED), EventSource.SYSTEM) is ApplyResult.Applied
+            ) swallowed++
+        }
+        PauseStore.clear(db)
+        occurrences.logEvent(EventType.UNPAUSED, null, EventSource.SYSTEM, EventPayload.of("how" to how, "swallowed" to swallowed))
+        if (how == PauseEnd.RESUMED) pauseEffects.resumed() else pauseEffects.expired()
+        return swallowed
     }
 
     // --- helpers ------------------------------------------------------------------------------------------------
@@ -349,13 +429,15 @@ class MissionRepository @Inject constructor(
     /** What [createAndArm] did: occurrences created, and ones that already existed but had never been armed and now are. */
     private class ArmCounts(val created: Int, val repaired: Int)
 
-    private suspend fun createAndArm(m: MissionRow, zone: ZoneId, instants: List<Long>, source: EventSource): ArmCounts {
+    private suspend fun createAndArm(m: MissionRow, zone: ZoneId, instants: List<Long>, source: EventSource, pause: Pause? = null): ArmCounts {
         var created = 0
         var repaired = 0
         for (at in instants) {
             val result = occurrences.createOccurrence(m.id, at, zone.id)
             if (result.isNew) created++
             if (result.occurrence.state == OccurrenceState.SCHEDULED) {
+                // A pause holds back what is due inside it; the end of the pause settles it.
+                if (pause != null && at < pause.untilUtcMs) continue
                 val applied = occurrences.apply(result.occurrence.id, OccurrenceCommand.Arm(armModeNow()), source)
                 if (!result.isNew && applied is ApplyResult.Applied) repaired++
             }
@@ -388,6 +470,12 @@ class MissionRepository @Inject constructor(
         const val TEST_MISSION_ID = "builtin_test_mission"
         const val TEST_CATEGORY = "TEST"
         const val DEFAULT_STARTER_MINUTES = 5
+
+        /** A pause lasts at least a minute and at most a day: a longer one is a mission that should be deleted. */
+        const val MIN_PAUSE_MS = 60_000L
+        const val MAX_PAUSE_HOURS = 24
+        const val MAX_PAUSE_MS = MAX_PAUSE_HOURS * 3_600_000L
+
         const val MAX_STARTER_MINUTES = 60
         private const val DAY_MS = 24 * 60 * 60 * 1000L
         private const val HORIZON_MS = 7 * DAY_MS

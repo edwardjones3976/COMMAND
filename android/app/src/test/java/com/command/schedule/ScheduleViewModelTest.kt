@@ -43,6 +43,7 @@ class ScheduleViewModelTest {
     @Inject lateinit var missions: MissionRepository
     @Inject lateinit var repo: OccurrenceRepository
     @Inject lateinit var monitor: FakeReliabilityMonitor
+    @Inject lateinit var clock: com.command.testing.FakeClock
 
     private lateinit var vm: ScheduleViewModel
     private lateinit var collector: Job
@@ -50,7 +51,7 @@ class ScheduleViewModelTest {
     @Before
     fun setUp() {
         hilt.inject()
-        vm = ScheduleViewModel(missions, monitor)
+        vm = ScheduleViewModel(missions, monitor, clock)
         // The state is only live while someone is collecting it, as on screen.
         collector = CoroutineScope(Dispatchers.Main.immediate).launch { vm.state.collect { } }
     }
@@ -129,5 +130,28 @@ class ScheduleViewModelTest {
         vm.onResume()
         awaitUntil(message = "read") { monitor.refreshes >= 1 }
         assertEquals(0, ready()!!.problems)
+    }
+
+    @Test
+    fun `a pause is part of the state until it ends, and ending it takes the banner away`() {
+        awaitUntil(message = "ready") { ready() != null }
+        assertEquals(null, ready()!!.pausedUntilUtcMs)
+
+        runBlocking { missions.pause(2 * 3_600_000L) }
+        awaitUntil(message = "paused") { ready()?.pausedUntilUtcMs == com.command.testing.android.FakeAlarmModule.T0 + 2 * 3_600_000L }
+
+        vm.endPause()
+        awaitUntil(message = "resumed") { ready()?.pausedUntilUtcMs == null }
+    }
+
+    @Test
+    fun `the state carries today, so that the labels follow the clock even when nothing else changed`() {
+        awaitUntil(message = "ready") { ready() != null }
+        assertEquals(java.time.LocalDate.of(2026, 11, 2), ready()!!.today)
+
+        clock.advance(24 * 3_600_000L)
+        monitor.set(Precondition.EXACT_ALARMS, "denied") // makes the screen look again
+        vm.onResume()
+        awaitUntil(message = "the next day") { ready()?.today == java.time.LocalDate.of(2026, 11, 3) }
     }
 }

@@ -15,7 +15,13 @@ enum class ReconcileTrigger {
     ZONE_CHANGED,
 
     /** The person (or the system) changed the exact-alarm permission. */
-    EXACT_ALARM_CHANGED;
+    EXACT_ALARM_CHANGED,
+
+    /** A pause ran out; the run was queued for the moment it ends. */
+    PAUSE_ENDED,
+
+    /** The person ended a pause early. */
+    RESUMED;
 
     /** A run the person did not start is worth a line in the audit log even when it found nothing to do. */
     val alwaysLogged: Boolean get() = this != OPEN && this != PERIODIC
@@ -25,7 +31,8 @@ enum class ReconcileTrigger {
  * What one reconcile did. [rearmed] counts every armed alarm that was put back; [lost] is how many of those were found gone (a
  * floor, because the probe can miss a removal, see `AlarmScheduler.isArmed`); [precisionChanged] is how many came back with a
  * different precision than they had (an exact alarm that can only be inexact now because the permission was taken away, or the
- * other way round); [repaired] is how many had been stored but never armed (the app stopped between saving and arming) and now are.
+ * other way round); [repaired] is how many had been stored but never armed (the app stopped between saving and arming) and now are;
+ * [paused] is how many a global pause held back in this run (an armed alarm taken down, an occurrence it had held recorded as missed).
  */
 data class ReconcileReport(
     val created: Int = 0,
@@ -35,6 +42,7 @@ data class ReconcileReport(
     val missed: Int = 0,
     val precisionChanged: Int = 0,
     val repaired: Int = 0,
+    val paused: Int = 0,
 ) {
-    val changedAnything: Boolean get() = created + discarded + lost + missed + precisionChanged + repaired > 0
+    val changedAnything: Boolean get() = created + discarded + lost + missed + precisionChanged + repaired + paused > 0
 }

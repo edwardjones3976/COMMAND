@@ -30,6 +30,9 @@ object AlarmContract {
     const val ACTION_CHECK_IN_ANSWER = "com.command.action.CHECK_IN_ANSWER"
     const val ACTION_OPEN_CHECK_IN = "com.command.action.OPEN_CHECK_IN"
 
+    /** From the Resume button of the notice that stays in the shade while COMMAND is paused. */
+    const val ACTION_RESUME_PAUSE = "com.command.action.RESUME_PAUSE"
+
     const val CHANNEL_ALARM = "reveille_alarm"
     const val CHANNEL_FALLBACK = "reveille_fallback"
     const val CHANNEL_CHECK_IN = "check_in"
@@ -55,6 +58,9 @@ object AlarmContract {
      * uses its occurrence's request code as its notification id and those count up from 1: this can never replace a ring.
      */
     const val ID_RECONCILE = -1
+
+    /** The notice that stays in the shade while COMMAND is paused. Negative for the same reason as [ID_RECONCILE]. */
+    const val ID_PAUSED = -2
 
     private val OCCURRENCE_ID = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 

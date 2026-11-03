@@ -52,6 +52,7 @@ class ScheduleScreenTest {
         var consents = 0
         var history = 0
         var settings = 0
+        var endPause = 0
     }
 
     private fun show(state: ScheduleUiState, r: Recorder = Recorder()) {
@@ -66,6 +67,7 @@ class ScheduleScreenTest {
                     onOpenConsents = { r.consents++ },
                     onOpenHistory = { r.history++ },
                     onOpenSettings = { r.settings++ },
+                    onEndPause = { r.endPause++ },
                     zone = ZoneOffset.UTC,
                     today = today,
                 )
@@ -73,8 +75,12 @@ class ScheduleScreenTest {
         }
     }
 
-    private fun ready(upcoming: List<ScheduleRow> = emptyList(), recent: List<ScheduleRow> = emptyList(), problems: Int = 0) =
-        ScheduleUiState.Ready(upcoming, recent, problems)
+    private fun ready(
+        upcoming: List<ScheduleRow> = emptyList(),
+        recent: List<ScheduleRow> = emptyList(),
+        problems: Int = 0,
+        pausedUntil: Long? = null,
+    ) = ScheduleUiState.Ready(upcoming, recent, problems, pausedUntil)
 
     @Test
     fun `with nothing scheduled it invites the first mission and the button adds one`() {
@@ -204,5 +210,34 @@ class ScheduleScreenTest {
         for (id in listOf("e", "f")) compose.onNodeWithTag(ScheduleTags.row(id)).performClick()
         assertEquals("a missed or finished one opens its mission, as before", listOf("mission-e", "mission-f"), r.opened)
         assertEquals(listOf("a", "b", "c", "d"), r.answered)
+    }
+
+    @Test
+    fun `a pause says until when and can be ended from the schedule, and what it holds back is not called set`() {
+        val r = Recorder()
+        show(
+            ready(
+                upcoming = listOf(row("in", "Standup", OccurrenceState.SCHEDULED, at(2, 11)), row("after", "Gym", OccurrenceState.ARMED, at(3, 7))),
+                pausedUntil = at(2, 15),
+            ),
+            r,
+        )
+        compose.onNodeWithTag(ScheduleTags.PAUSED_BANNER).assertIsDisplayed()
+        val three = java.time.format.DateTimeFormatter.ofLocalizedTime(java.time.format.FormatStyle.SHORT)
+            .format(java.time.Instant.ofEpochMilli(at(2, 15)).atZone(ZoneOffset.UTC))
+        compose.onNodeWithText("Paused until $three").assertIsDisplayed()
+        compose.onNodeWithText("On hold, paused").assertIsDisplayed()
+        compose.onNodeWithText("Set").assertIsDisplayed() // the one after the pause is untouched
+
+        compose.onNodeWithTag(ScheduleTags.PAUSED_ACTION).performClick()
+        assertEquals(1, r.endPause)
+    }
+
+    @Test
+    fun `without a pause there is no banner, and an occurrence a pause swallowed is told as paused, not missed`() {
+        show(ready(recent = listOf(row("p", "Standup", OccurrenceState.MISSED, at(2, 8), miss = MissReason.PAUSED))))
+        compose.onNodeWithTag(ScheduleTags.PAUSED_BANNER).assertDoesNotExist()
+        compose.onNodeWithText("Paused").assertIsDisplayed()
+        compose.onNodeWithText("Missed").assertDoesNotExist()
     }
 }

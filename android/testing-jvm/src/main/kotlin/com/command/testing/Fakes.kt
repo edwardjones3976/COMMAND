@@ -2,6 +2,7 @@ package com.command.testing
 
 import com.command.domain.alarm.AlarmRequest
 import com.command.domain.alarm.AlarmScheduler
+import com.command.domain.alarm.PauseEffects
 import com.command.domain.alarm.RingController
 import com.command.domain.alarm.WorkEnqueuer
 import com.command.domain.occurrence.ArmMode
@@ -54,6 +55,27 @@ class FakeWorkEnqueuer : WorkEnqueuer {
 
     override fun enqueue(kind: WorkKind, occurrenceId: String) {
         enqueued += kind to occurrenceId
+    }
+}
+
+/** Remembers what a pause asked of the platform: the end of each pause that began, and how many ended by running out or by being ended. */
+class FakePauseEffects : PauseEffects {
+    val startedUntil: MutableList<Long> = ArrayList()
+    var expirations = 0
+        private set
+    var resumptions = 0
+        private set
+
+    override fun started(untilUtcMs: Long) {
+        startedUntil += untilUtcMs
+    }
+
+    override fun expired() {
+        expirations++
+    }
+
+    override fun resumed() {
+        resumptions++
     }
 }
 

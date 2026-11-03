@@ -37,7 +37,7 @@ class AlarmManifestTest {
     fun `no component of the alarm module can be started by another app`() {
         val exported = Regex("""android:exported="true"""")
         assertFalse(exported.containsMatchIn(manifest))
-        for (name in listOf(".ReveilleService", ".ReveilleAlarmReceiver", ".CycleEndReceiver", ".CheckInReceiver", ".SilenceReceiver", ".SystemEventReceiver")) {
+        for (name in listOf(".ReveilleService", ".ReveilleAlarmReceiver", ".CycleEndReceiver", ".CheckInReceiver", ".SilenceReceiver", ".PauseResumeReceiver", ".SystemEventReceiver")) {
             assertTrue("$name must be declared", manifest.contains("""android:name="$name""""))
         }
     }

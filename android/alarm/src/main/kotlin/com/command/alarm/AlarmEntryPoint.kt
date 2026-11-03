@@ -4,8 +4,10 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.media.AudioManager
 import android.util.Log
+import com.command.data.MissionRepository
 import com.command.data.OccurrenceRepository
 import com.command.domain.alarm.CheckInPoster
+import com.command.domain.alarm.PauseEffects
 import com.command.domain.alarm.RingController
 import com.command.domain.time.Clock
 import com.command.domain.voice.Speaker
@@ -32,6 +34,7 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 interface AlarmEntryPoint {
     fun repository(): OccurrenceRepository
+    fun missions(): MissionRepository
     fun resolver(): RingModeResolver
     fun arming(): ArmingReconciler
     fun ringController(): RingController
@@ -74,6 +77,7 @@ abstract class AlarmBindings {
     @Binds abstract fun reliabilityMonitor(impl: PlatformReliabilityMonitor): ReliabilityMonitor
     @Binds abstract fun audioRoutes(impl: AndroidAudioRoutes): AudioRoutes
     @Binds abstract fun checkInPoster(impl: AndroidCheckInPoster): CheckInPoster
+    @Binds abstract fun pauseEffects(impl: AndroidPauseEffects): PauseEffects
 }
 
 /**

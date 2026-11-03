@@ -323,12 +323,16 @@ class OccurrenceRepository @Inject constructor(
                 recordCheckIns(occ, command, r, now)
 
                 val updated = db.occurrences().get(occ.id)!!
+                val pausedUntil = PauseStore.active(db, now)?.untilUtcMs
                 for (effect in r.effects) {
                     when (effect) {
                         is Effect.ArmChild -> {
                             val child = createInTx(occ.missionId, effect.atUtcMs, occ.zoneId, occ.id, avoidCollision = true).occurrence
-                            val childMode = if (scheduler.canScheduleExact()) ArmMode.EXACT else ArmMode.INEXACT
-                            applyInTx(child.id, OccurrenceCommand.Arm(childMode), EventSource.SYSTEM, ApplyExtras.NONE, pending)
+                            // A pause holds a delayed alarm back like any other that falls inside it; the end of the pause settles it.
+                            if (pausedUntil == null || child.scheduledAtUtc >= pausedUntil) {
+                                val childMode = if (scheduler.canScheduleExact()) ArmMode.EXACT else ArmMode.INEXACT
+                                applyInTx(child.id, OccurrenceCommand.Arm(childMode), EventSource.SYSTEM, ApplyExtras.NONE, pending)
+                            }
                         }
                         else -> pending += Pending(updated, effect, now)
                     }
@@ -440,8 +444,18 @@ class OccurrenceRepository @Inject constructor(
         } ?: Presets.dialsFor(PresetOrigin.STEADY)
     }
 
-    /** When the protected window containing [nowMs] ends, or null if the user is not in one. */
+    /**
+     * When the protected time containing [nowMs] ends, or null if the person is not in any: the end of the rest window they are in or of a
+     * global pause, whichever is later. A follow-up question is held back until then.
+     */
     private suspend fun restEndsAt(nowMs: Long): Long? {
+        val pausedUntil = PauseStore.active(db, nowMs)?.untilUtcMs
+        val windowEnd = restWindowEndsAt(nowMs)
+        return if (pausedUntil == null) windowEnd else maxOf(pausedUntil, windowEnd ?: pausedUntil)
+    }
+
+    /** When the rest window (sleep, leisure, driving) containing [nowMs] ends, or null if the person is not in one. */
+    private suspend fun restWindowEndsAt(nowMs: Long): Long? {
         val rows: List<RestWindowRow> = db.restWindows().all()
         if (rows.isEmpty()) return null
         val windows = rows.mapNotNull { row ->

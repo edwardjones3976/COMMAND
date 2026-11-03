@@ -41,6 +41,7 @@ class ReconcileAlarmsWorker(context: Context, params: WorkerParameters) : Corout
         const val KEY_TRIGGER = "trigger"
         const val NAME_NOW = "reconcile-now"
         const val NAME_PERIODIC = "reconcile-periodic"
+        const val NAME_PAUSE_END = "reconcile-pause-end"
         private const val MAX_ATTEMPTS = 3
     }
 }
