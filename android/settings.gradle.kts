@@ -25,3 +25,10 @@ dependencyResolutionManagement {
 rootProject.name = "Command"
 
 include(":app")
+include(":domain")
+include(":data")
+include(":alarm")
+include(":voice")
+include(":cloud")
+include(":testing-jvm")
+include(":testing-android")

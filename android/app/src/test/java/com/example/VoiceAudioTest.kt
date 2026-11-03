@@ -1,7 +1,7 @@
 package com.example
 
 import com.example.service.VoiceDirectorEngine
-import com.example.service.VoiceMastering
+import com.command.voice.VoiceMastering
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue

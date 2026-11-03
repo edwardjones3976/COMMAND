@@ -2,7 +2,7 @@ package com.example
 
 import com.example.oldchain.OldClonedSpectralDsp
 import com.example.service.VoiceDirectorEngine
-import com.example.service.VoiceMastering
+import com.command.voice.VoiceMastering
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
