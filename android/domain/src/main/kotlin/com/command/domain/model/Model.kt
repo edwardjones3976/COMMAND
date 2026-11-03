@@ -52,4 +52,10 @@ object SettingKeys {
     const val PERMISSION_SNAPSHOT = "permission_snapshot"
     const val LAST_PULL_AT = "last_pull_at"
     const val LEGACY_ALARMS_CANCELLED = "legacy_alarms_cancelled"
+
+    /** Set once the person has been through the first-run screens. */
+    const val ONBOARDING_DONE = "onboarding_done"
+
+    /** Set once the runtime notification request has been shown, so a later fix knows whether it can still be asked. */
+    const val NOTIFICATIONS_ASKED = "notifications_asked"
 }

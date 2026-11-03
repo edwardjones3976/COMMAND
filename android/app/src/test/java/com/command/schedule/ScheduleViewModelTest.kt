@@ -10,7 +10,8 @@ import com.command.domain.model.EventSource
 import com.command.domain.occurrence.MissReason
 import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.OccurrenceState
-import com.command.testing.FakeAlarmScheduler
+import com.command.domain.reliability.Precondition
+import com.command.testing.android.FakeReliabilityMonitor
 import com.command.testing.android.awaitUntil
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
@@ -41,7 +42,7 @@ class ScheduleViewModelTest {
 
     @Inject lateinit var missions: MissionRepository
     @Inject lateinit var repo: OccurrenceRepository
-    @Inject lateinit var scheduler: FakeAlarmScheduler
+    @Inject lateinit var monitor: FakeReliabilityMonitor
 
     private lateinit var vm: ScheduleViewModel
     private lateinit var collector: Job
@@ -49,7 +50,7 @@ class ScheduleViewModelTest {
     @Before
     fun setUp() {
         hilt.inject()
-        vm = ScheduleViewModel(missions, scheduler)
+        vm = ScheduleViewModel(missions, monitor)
         // The state is only live while someone is collecting it, as on screen.
         collector = CoroutineScope(Dispatchers.Main.immediate).launch { vm.state.collect { } }
     }
@@ -73,7 +74,7 @@ class ScheduleViewModelTest {
         awaitUntil(message = "ready") { ready() != null }
         assertTrue(ready()!!.upcoming.isEmpty())
         assertTrue(ready()!!.recent.isEmpty())
-        assertTrue(ready()!!.exactAlarmsAvailable)
+        assertEquals(0, ready()!!.problems)
     }
 
     @Test
@@ -102,13 +103,31 @@ class ScheduleViewModelTest {
     }
 
     @Test
-    fun `the exact alarm warning follows what the system allows and is checked again on return`() {
+    fun `the number of things that can stop an alarm follows what the phone says and is checked again on return`() {
         awaitUntil(message = "ready") { ready() != null }
-        scheduler.exactAllowed = false
+
+        monitor.set(Precondition.EXACT_ALARMS, "denied")
         vm.onResume()
-        awaitUntil(message = "warning") { ready()?.exactAlarmsAvailable == false }
-        scheduler.exactAllowed = true
+        awaitUntil(message = "one") { ready()?.problems == 1 }
+
+        monitor.set(Precondition.NOTIFICATIONS, "denied")
         vm.onResume()
-        awaitUntil(message = "cleared") { ready()?.exactAlarmsAvailable == true }
+        awaitUntil(message = "two") { ready()?.problems == 2 }
+
+        monitor.set(Precondition.EXACT_ALARMS, "granted")
+        monitor.set(Precondition.NOTIFICATIONS, "granted")
+        vm.onResume()
+        awaitUntil(message = "cleared") { ready()?.problems == 0 }
+    }
+
+    @Test
+    fun `advice and warnings are not counted, only what can stop an alarm`() {
+        awaitUntil(message = "ready") { ready() != null }
+        monitor.set(Precondition.BATTERY_OPTIMIZATION, "optimized")
+        monitor.set(Precondition.BACKGROUND_RESTRICTED, "yes")
+        monitor.set(Precondition.STANDBY_BUCKET, "RARE")
+        vm.onResume()
+        awaitUntil(message = "read") { monitor.refreshes >= 1 }
+        assertEquals(0, ready()!!.problems)
     }
 }

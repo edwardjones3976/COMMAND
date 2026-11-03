@@ -1,16 +1,35 @@
 package com.command.nav
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.command.consents.ConsentCenterRoute
 import com.command.editor.MissionEditorRoute
+import com.command.onboarding.FirstMissionRoute
+import com.command.onboarding.PermissionsRoute
+import com.command.onboarding.WelcomeScreen
+import com.command.reliability.ReliabilityRoute
 import com.command.schedule.ScheduleRoute
 
 object Routes {
+    const val WELCOME = "welcome"
+    const val PERMISSIONS = "permissions"
+    const val FIRST_MISSION = "first_mission"
     const val SCHEDULE = "schedule"
+    const val RELIABILITY = "reliability"
+    const val CONSENTS = "consents"
     const val ARG_ID = "id"
     private const val EDITOR = "mission"
 
@@ -22,15 +41,51 @@ object Routes {
 
 /** The screens of the app and the ways between them. The lock-screen flow is a separate activity and is not part of this. */
 @Composable
-fun CommandNav() {
-    val navController = rememberNavController()
-    NavHost(navController = navController, startDestination = Routes.SCHEDULE) {
+fun CommandNav(entry: AppEntryViewModel = hiltViewModel()) {
+    val start by entry.start.collectAsStateWithLifecycle()
+    val destination = start
+    if (destination == null) {
+        // The setting is read in a moment; until then show the app's own background rather than a screen that is about to change.
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+    } else {
+        CommandNavHost(startDestination = destination)
+    }
+}
+
+@Composable
+private fun CommandNavHost(startDestination: String, navController: NavHostController = rememberNavController()) {
+    NavHost(navController = navController, startDestination = startDestination) {
+        composable(Routes.WELCOME) {
+            WelcomeScreen(onContinue = { navController.navigate(Routes.PERMISSIONS) })
+        }
+        composable(Routes.PERMISSIONS) {
+            PermissionsRoute(
+                onContinue = {
+                    navController.navigate(Routes.FIRST_MISSION) { popUpTo(Routes.WELCOME) { inclusive = true } }
+                },
+            )
+        }
+        composable(Routes.FIRST_MISSION) {
+            val toSchedule = { navController.navigate(Routes.SCHEDULE) { popUpTo(Routes.FIRST_MISSION) { inclusive = true } } }
+            FirstMissionRoute(
+                onCreate = {
+                    // The schedule goes underneath, so saving the mission lands there.
+                    toSchedule()
+                    navController.navigate(Routes.editor())
+                },
+                onSkip = { toSchedule() },
+            )
+        }
         composable(Routes.SCHEDULE) {
             ScheduleRoute(
                 onAdd = { navController.navigate(Routes.editor()) },
                 onOpen = { missionId -> navController.navigate(Routes.editor(missionId)) },
+                onOpenReliability = { navController.navigate(Routes.RELIABILITY) },
+                onOpenConsents = { navController.navigate(Routes.CONSENTS) },
             )
         }
+        composable(Routes.RELIABILITY) { ReliabilityRoute(onBack = { navController.popBackStack() }) }
+        composable(Routes.CONSENTS) { ConsentCenterRoute(onBack = { navController.popBackStack() }) }
         composable(
             Routes.EDITOR_PATTERN,
             arguments = listOf(

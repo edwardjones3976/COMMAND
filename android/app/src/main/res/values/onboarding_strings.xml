@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="onboarding_welcome_title">Welcome to COMMAND</string>
+    <string name="onboarding_welcome_lead">Start what matters, when you said you would.</string>
+    <string name="onboarding_welcome_point_ring">At the time you choose, COMMAND rings, tells you your first step, and asks you to confirm that you are starting.</string>
+    <string name="onboarding_welcome_point_control">You stay in charge. Every permission is optional and explained, and you can change your mind at any time.</string>
+    <string name="onboarding_welcome_point_private">Everything stays on this phone unless you turn on an optional feature that says otherwise.</string>
+    <string name="onboarding_continue">Continue</string>
+
+    <string name="onboarding_permissions_title">Let alarms work properly</string>
+    <string name="onboarding_permissions_lead">COMMAND works best with these. Skipping any of them is fine; the app will tell you what that costs.</string>
+    <string name="onboarding_permissions_later">You can review all of this again under Reliability.</string>
+    <string name="onboarding_permissions_all_set">Everything COMMAND needs is allowed.</string>
+
+    <string name="onboarding_first_title">Set your first mission</string>
+    <string name="onboarding_first_lead">A mission is one thing you want to start at a set time. You can try its alarm before you save it.</string>
+    <string name="onboarding_first_create">Create a mission</string>
+    <string name="onboarding_first_skip">Not now</string>
+    <string name="onboarding_have_title">You already have missions</string>
+    <string name="onboarding_have_lead">Your missions are still here. You can add more at any time.</string>
+    <string name="onboarding_have_done">Done</string>
+</resources>

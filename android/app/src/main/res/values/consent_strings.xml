@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="consent_title">Permissions and privacy</string>
+    <string name="consent_back">Back</string>
+    <string name="consent_intro">Everything COMMAND asks your consent for is listed here, with when it last changed and who changed it. Nothing else is switched on.</string>
+    <string name="consent_footer">Optional features that need their own consent, such as calendar, camera or cloud voices, are not in this version. When one arrives it will be listed here before it can be used.</string>
+
+    <string name="consent_state_granted">Allowed</string>
+    <string name="consent_state_off">Not allowed</string>
+    <string name="consent_state_unknown">Not checked yet</string>
+    <string name="consent_changed_by_you">Changed %1$s by you</string>
+    <string name="consent_changed_by_android">Changed %1$s in Android\'s settings</string>
+    <string name="consent_history_show">Show history</string>
+    <string name="consent_history_hide">Hide history</string>
+    <string name="consent_history_granted">Allowed</string>
+    <string name="consent_history_revoked">Turned off</string>
+    <string name="consent_history_by_you">by you</string>
+    <string name="consent_history_by_android">in Android\'s settings</string>
+    <string name="consent_history_row">%1$s %2$s, %3$s</string>
+    <string name="consent_open_settings">Open Android settings</string>
+    <string name="consent_platform_note">Android keeps this permission. COMMAND can only ask and show you the right screen.</string>
+
+    <string name="consent_notifications_title">Notifications</string>
+    <string name="consent_notifications_allows">Lets an alarm appear over the lock screen and leaves a note when one is missed.</string>
+    <string name="consent_exact_title">Exact alarms</string>
+    <string name="consent_exact_allows">Lets an alarm ring at the minute you set instead of at some point in a window.</string>
+    <string name="consent_fullscreen_title">Full-screen alarms</string>
+    <string name="consent_fullscreen_allows">Lets a ringing alarm take over a locked screen.</string>
+</resources>

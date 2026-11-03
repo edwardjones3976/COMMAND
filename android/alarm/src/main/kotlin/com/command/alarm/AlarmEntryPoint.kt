@@ -51,6 +51,7 @@ abstract class AlarmBindings {
     @Binds abstract fun scheduler(impl: AndroidAlarmScheduler): com.command.domain.alarm.AlarmScheduler
     @Binds abstract fun ringController(impl: AndroidRingController): RingController
     @Binds abstract fun ringOutput(impl: AndroidRingOutput): RingOutput
+    @Binds abstract fun reliabilityMonitor(impl: PlatformReliabilityMonitor): ReliabilityMonitor
 }
 
 /**

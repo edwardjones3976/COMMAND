@@ -1,7 +1,6 @@
 package com.command.alarm
 
 import com.command.data.MissionRepository
-import com.command.data.PreconditionRecorder
 import com.command.data.ReconcileReport
 import com.command.data.ReconcileTrigger
 import javax.inject.Inject
@@ -15,12 +14,11 @@ import javax.inject.Singleton
 @Singleton
 class ArmingReconciler @Inject constructor(
     private val missions: MissionRepository,
-    private val probe: PreconditionProbe,
-    private val recorder: PreconditionRecorder,
+    private val monitor: ReliabilityMonitor,
 ) {
     suspend fun run(trigger: ReconcileTrigger): ReconcileReport {
         // First what the platform allows now, so a permission that was just taken away is on the record before alarms are re-armed.
-        recorder.record(probe.read())
+        monitor.refresh()
         return missions.reconcile(trigger)
     }
 }

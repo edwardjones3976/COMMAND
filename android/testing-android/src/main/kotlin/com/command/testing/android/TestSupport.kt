@@ -3,12 +3,14 @@ package com.command.testing.android
 import android.content.Context
 import com.command.alarm.AlarmBindings
 import com.command.alarm.PendingPorts
+import com.command.alarm.ReliabilityMonitor
 import com.command.alarm.RingOutput
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import com.command.data.ConsentRevocationListener
 import com.command.data.DataModule
 import com.command.data.NoOpConsentRevocationListener
+import com.command.data.PreconditionRecorder
 import com.command.data.db.CommandDb
 import com.command.data.db.MissionRow
 import com.command.domain.alarm.AlarmScheduler
@@ -20,6 +22,8 @@ import com.command.domain.dials.Flexibility
 import com.command.domain.model.MissionSource
 import com.command.domain.model.StartKind
 import com.command.domain.model.ZoneMode
+import com.command.domain.reliability.Precondition
+import com.command.domain.reliability.PreconditionSnapshot
 import com.command.domain.time.Clock
 import com.command.testing.FakeAlarmScheduler
 import com.command.testing.FakeClock
@@ -45,6 +49,36 @@ class FakeRingOutput : RingOutput {
 
     override fun start() { starts++; ringing = true }
     override fun stop() { stops++; ringing = false }
+}
+
+/**
+ * A phone whose settings the test controls. It starts healthy (everything allowed, the alarm stream audible) and records every
+ * reading with the real recorder, so the audit log and the consent history behave as they do on a device.
+ */
+class FakeReliabilityMonitor(private val recorder: PreconditionRecorder) : ReliabilityMonitor {
+    var snapshot: PreconditionSnapshot = healthy()
+    var refreshes = 0
+        private set
+
+    override suspend fun refresh(): PreconditionSnapshot {
+        refreshes++
+        return snapshot.also { recorder.record(it) }
+    }
+
+    /** Changes one precondition, the way the person would in Android's settings. */
+    fun set(precondition: Precondition, value: String) {
+        snapshot = PreconditionSnapshot(snapshot.values + (precondition to value))
+    }
+
+    companion object {
+        fun healthy() = PreconditionSnapshot(
+            mapOf(
+                Precondition.EXACT_ALARMS to "granted", Precondition.NOTIFICATIONS to "granted", Precondition.FULL_SCREEN_INTENT to "granted",
+                Precondition.ALARM_CHANNEL to "HIGH", Precondition.ALARM_VOLUME to "audible", Precondition.BATTERY_OPTIMIZATION to "exempt",
+                Precondition.BACKGROUND_RESTRICTED to "no", Precondition.STANDBY_BUCKET to "ACTIVE",
+            ),
+        )
+    }
 }
 
 class RecordingPoster : CheckInPoster {
@@ -74,6 +108,8 @@ object FakeAlarmModule {
     @Provides @Singleton fun poster(): RecordingPoster = RecordingPoster()
     @Provides @Singleton fun checkInPoster(fake: RecordingPoster): CheckInPoster = fake
     @Provides @Singleton fun roller(): WindowRoller = WindowRoller { }
+    @Provides @Singleton fun fakeMonitor(recorder: PreconditionRecorder): FakeReliabilityMonitor = FakeReliabilityMonitor(recorder)
+    @Provides @Singleton fun monitor(fake: FakeReliabilityMonitor): ReliabilityMonitor = fake
 }
 
 fun testMission(title: String = "Write the report", profileId: String? = null): MissionRow = MissionRow(
@@ -84,8 +120,12 @@ fun testMission(title: String = "Write the report", profileId: String? = null): 
     firstActionVariantsJson = "[]", enabled = true, deletedAt = null, syncRev = 0, syncDirty = false,
 )
 
-/** Lets coroutines that resume on the main looper make progress while the test waits for [condition]. */
-fun awaitUntil(timeoutMs: Long = 10_000, message: String = "condition", condition: () -> Boolean) {
+/**
+ * Lets coroutines that resume on the main looper make progress while the test waits for [condition]. The generous default is
+ * for the first test on an Android version in a test worker, which loads a whole new sandbox and has taken twenty seconds on a
+ * busy machine; a test that passes does not wait for it.
+ */
+fun awaitUntil(timeoutMs: Long = 45_000, message: String = "condition", condition: () -> Boolean) {
     val end = System.currentTimeMillis() + timeoutMs
     while (!condition()) {
         shadowOf(Looper.getMainLooper()).idle()

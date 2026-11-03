@@ -106,6 +106,9 @@ class MissionRepository @Inject constructor(
 
     suspend fun get(id: String): MissionRow? = db.missions().get(id)?.takeIf { it.deletedAt == null }
 
+    /** Whether the person has a mission of their own that is switched on; the hidden mission behind a test alarm is not one. */
+    suspend fun hasMissions(): Boolean = db.missions().enabled().any { it.category != TEST_CATEGORY && it.source == MissionSource.MANUAL }
+
     /** The editor's view of a stored mission, or null if its rule can no longer be read. */
     fun draftOf(mission: MissionRow): MissionDraft? {
         val schedule: ScheduleDraft = when (mission.startKind) {
