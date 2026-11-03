@@ -45,8 +45,11 @@ sealed class OccurrenceCommand(val label: String) {
         init { require(minutes in 1..MAX_DELAY_MINUTES) { "reschedule must be 1..$MAX_DELAY_MINUTES minutes" } }
     }
 
-    /** A follow-up alarm fired. The index must match the next expected check-in, so stale alarms are ignored. */
-    data class CheckInDue(val index: Int) : OccurrenceCommand("CHECK_IN_DUE")
+    /**
+     * A follow-up alarm fired. The index must match the next expected check-in, so stale alarms are ignored. [lateMs] is how long after
+     * its time the platform delivered it (a dozing phone may hold an alarm back); it is stored with the question.
+     */
+    data class CheckInDue(val index: Int, val lateMs: Long = 0) : OccurrenceCommand("CHECK_IN_DUE")
 
     /** A prompt (a recovery offer) went unanswered. */
     data object NoResponse : OccurrenceCommand("NO_RESPONSE")

@@ -56,6 +56,9 @@ object OccurrenceStateMachine {
 
     private const val MINUTE_MS = 60_000L
 
+    /** A follow-up question that reaches the person this much after its time is worth a line in the log. */
+    private const val LATE_NOTICE_MS = 10_000L
+
     private class Run(val s: OccurrenceSnapshot, val cmd: OccurrenceCommand, val now: Long) {
         private var state = s.state
         private var recoveryOffers = s.recoveryOffers
@@ -117,7 +120,7 @@ object OccurrenceStateMachine {
                 RequestRecovery -> requestRecovery()
                 is AcceptRecovery -> acceptRecovery(cmd)
                 is RescheduleRecovery -> rescheduleRecovery(cmd)
-                is CheckInDue -> checkInDue(cmd.index)
+                is CheckInDue -> checkInDue(cmd.index, cmd.lateMs)
                 NoResponse -> noResponse()
                 is Delay -> delay(cmd)
                 is Skip -> skip(cmd)
@@ -226,7 +229,7 @@ object OccurrenceStateMachine {
             return enterGuidance()
         }
 
-        private fun checkInDue(index: Int): TransitionResult {
+        private fun checkInDue(index: Int, lateMs: Long): TransitionResult {
             if (s.state !in FOLLOW_UP) return illegal()
             val nextQuestion = index == asked && index < schedule.count
             val finalTimeout = index == schedule.count && asked == schedule.count
@@ -239,6 +242,7 @@ object OccurrenceStateMachine {
             if (finalTimeout) return unanswered()
             asked = index + 1
             events += DomainEvent(EventType.CHECK_IN_ASKED, EventPayload.of("index" to index))
+            if (lateMs >= LATE_NOTICE_MS) events += DomainEvent(EventType.CHECKIN_LATE, EventPayload.of("index" to index, "late_s" to lateMs / 1000))
             effects += Effect.PostCheckIn(index)
             // After the last question, one more interval of silence is the final timeout.
             scheduleCheckIn(asked)

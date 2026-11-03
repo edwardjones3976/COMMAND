@@ -111,8 +111,8 @@ class PublicationSafetyTest {
         assertEquals(
             mapOf(
                 "android/app/src/main/AndroidManifest.xml" to setOf("com.command.MainActivity"),
-                "android/app/src/debug/AndroidManifest.xml" to setOf(DEBUG_RING_STARTER),
-                "android/app/src/noexact/AndroidManifest.xml" to setOf(DEBUG_RING_STARTER),
+                "android/app/src/debug/AndroidManifest.xml" to setOf(DEBUG_RING_STARTER, DEBUG_CHECKIN_STARTER),
+                "android/app/src/noexact/AndroidManifest.xml" to setOf(DEBUG_RING_STARTER, DEBUG_CHECKIN_STARTER),
             ),
             found,
         )
@@ -158,5 +158,6 @@ class PublicationSafetyTest {
         val IMAGE_ALLOWLIST = emptySet<String>()
 
         const val DEBUG_RING_STARTER = "com.command.debug.DebugRingReceiver"
+        const val DEBUG_CHECKIN_STARTER = "com.command.debug.DebugCheckInReceiver"
     }
 }

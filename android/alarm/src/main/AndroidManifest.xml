@@ -26,6 +26,7 @@
         <receiver android:name=".ReveilleAlarmReceiver" android:exported="false" />
         <receiver android:name=".CycleEndReceiver" android:exported="false" />
         <receiver android:name=".CheckInReceiver" android:exported="false" />
+        <receiver android:name=".CheckInAnswerReceiver" android:exported="false" />
         <receiver android:name=".SilenceReceiver" android:exported="false" />
 
         <!--

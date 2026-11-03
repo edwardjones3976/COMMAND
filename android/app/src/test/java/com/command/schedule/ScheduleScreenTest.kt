@@ -47,6 +47,7 @@ class ScheduleScreenTest {
     private class Recorder {
         var added = 0
         val opened = ArrayList<String>()
+        val answered = ArrayList<String>()
         var reliability = 0
         var consents = 0
     }
@@ -58,6 +59,7 @@ class ScheduleScreenTest {
                     state = state,
                     onAdd = { r.added++ },
                     onOpen = { r.opened += it },
+                    onOpenOccurrence = { r.answered += it },
                     onOpenReliability = { r.reliability++ },
                     onOpenConsents = { r.consents++ },
                     zone = ZoneOffset.UTC,
@@ -163,5 +165,30 @@ class ScheduleScreenTest {
         compose.onNodeWithTag(ScheduleTags.LINK_CONSENTS).performClick()
         assertEquals(1, r.reliability)
         assertEquals(1, r.consents)
+    }
+
+    @Test
+    fun `an occurrence that is waiting for an answer opens its questions, and any other opens the mission`() {
+        val r = Recorder()
+        show(
+            ready(
+                upcoming = listOf(row("a", "Writing", OccurrenceState.GUIDED_START, at(2, 9))),
+                recent = listOf(
+                    row("b", "Reading", OccurrenceState.WORKING_SELF_REPORTED, at(2, 8)),
+                    row("c", "Unanswered", OccurrenceState.UNCONFIRMED, at(2, 7)),
+                    row("d", "Reset", OccurrenceState.RECOVERY_OFFERED, at(2, 6)),
+                    row("e", "Missed one", OccurrenceState.MISSED, at(2, 5)),
+                    row("f", "Finished", OccurrenceState.COMPLETED_SELF_REPORTED, at(2, 4)),
+                ),
+            ),
+            r,
+        )
+        for (id in listOf("a", "b", "c", "d")) compose.onNodeWithTag(ScheduleTags.row(id)).performClick()
+        assertEquals(listOf("a", "b", "c", "d"), r.answered)
+        assertEquals(emptyList<String>(), r.opened)
+
+        for (id in listOf("e", "f")) compose.onNodeWithTag(ScheduleTags.row(id)).performClick()
+        assertEquals("a missed or finished one opens its mission, as before", listOf("mission-e", "mission-f"), r.opened)
+        assertEquals(listOf("a", "b", "c", "d"), r.answered)
     }
 }

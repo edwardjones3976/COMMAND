@@ -65,6 +65,14 @@ class AlarmSchedulerTest {
     }
 
     @Test
+    fun `every alarm carries the time it was meant for, so that its receiver can tell how late the platform delivered it`() {
+        scheduler.arm(request(AlarmKind.CHECK_IN, index = 2))
+        val intent = shadowOf(scheduled().single().operation).savedIntent
+        assertEquals(at, intent.getLongExtra(AlarmContract.EXTRA_AT, 0))
+        assertEquals(2, intent.getIntExtra(AlarmContract.EXTRA_INDEX, -1))
+    }
+
+    @Test
     fun `without the exact-alarm grant everything degrades to inexact and says so`() {
         if (android.os.Build.VERSION.SDK_INT < 31) return // before Android 12 exact alarms need no grant
         ShadowAlarmManager.setCanScheduleExactAlarms(false)

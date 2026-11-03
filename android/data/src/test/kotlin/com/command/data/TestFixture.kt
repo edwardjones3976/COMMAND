@@ -5,6 +5,7 @@ import com.command.data.db.CommandDb
 import com.command.data.db.MissionRow
 import com.command.data.db.RestWindowRow
 import com.command.domain.alarm.CheckInPoster
+import com.command.domain.alarm.CheckInPrompt
 import com.command.domain.alarm.WindowRoller
 import com.command.domain.dials.Flexibility
 import com.command.domain.dials.LockPolicy
@@ -21,9 +22,14 @@ import java.time.ZonedDateTime
 import java.util.UUID
 
 class RecordingPoster : CheckInPoster {
-    val posted = ArrayList<Triple<String, Int, Int>>()
-    override fun post(occurrenceId: String, requestCode: Int, index: Int) {
-        posted += Triple(occurrenceId, requestCode, index)
+    val posted = ArrayList<CheckInPrompt>()
+    val cancelled = ArrayList<String>()
+    override fun post(prompt: CheckInPrompt) {
+        posted += prompt
+    }
+
+    override fun cancel(occurrenceId: String) {
+        cancelled += occurrenceId
     }
 }
 

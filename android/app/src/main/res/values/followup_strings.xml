@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The follow-up questions: how is it going, a reset, and where it ends -->
+    <string name="followup_title">Check-in</string>
+    <string name="followup_back">Back</string>
+    <string name="followup_close">Close</string>
+    <string name="followup_cancel">Cancel</string>
+    <string name="followup_not_found_title">This one is gone</string>
+    <string name="followup_not_found_body">It was deleted, so there is nothing left to answer.</string>
+
+    <string name="followup_ask_start">Have you started?</string>
+    <string name="followup_ask_progress">How is it going?</string>
+    <string name="followup_ask_unconfirmed">You did not answer. Did you start?</string>
+    <string name="followup_first_step">Your first step: %1$s</string>
+    <string name="followup_resets_used_up">There are no more resets for this one. You can still delay it or skip it.</string>
+
+    <string name="followup_started">Started</string>
+    <string name="followup_working">Still working</string>
+    <string name="followup_done">Done</string>
+    <string name="followup_reset">Need a reset</string>
+    <string name="followup_delay">Delay</string>
+    <string name="followup_skip">Skip</string>
+    <string name="followup_delay_title">Delay for how long?</string>
+    <string name="followup_delay_10">10 minutes</string>
+    <string name="followup_delay_30">30 minutes</string>
+    <string name="followup_delay_60">1 hour</string>
+
+    <string name="followup_recovery_title">Let us make it easier to start</string>
+    <string name="followup_recovery_body">Pick one. A reset is not a failure, and nothing here is checked.</string>
+    <string name="followup_recovery_reset">Start again for five minutes</string>
+    <string name="followup_recovery_later">Or try again later</string>
+    <string name="followup_recovery_in_15">In 15 minutes</string>
+    <string name="followup_recovery_in_30">In 30 minutes</string>
+    <string name="followup_recovery_in_60">In an hour</string>
+    <string name="followup_recovery_in_other">Later</string>
+    <string name="followup_recovery_tomorrow">Tomorrow, at the same time</string>
+    <string name="followup_recovery_not_now">Not now</string>
+
+    <string name="followup_done_title">Marked done</string>
+    <string name="followup_done_body">That is your own record. Nothing is checked.</string>
+    <string name="followup_skipped_title">Skipped</string>
+    <string name="followup_skipped_body">Recorded as skipped, not as done.</string>
+    <string name="followup_delayed_title">Delayed</string>
+    <string name="followup_delayed_body">It will ring again at the new time.</string>
+    <string name="followup_waiting_title">Nothing to answer yet</string>
+    <string name="followup_waiting_body">It has not started, or it is ringing. Open the alarm from its notification.</string>
+</resources>

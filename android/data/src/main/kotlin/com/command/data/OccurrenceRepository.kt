@@ -13,6 +13,7 @@ import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
 import com.command.domain.alarm.AlarmScheduler
 import com.command.domain.alarm.CheckInPoster
+import com.command.domain.alarm.CheckInPrompt
 import com.command.domain.alarm.RingController
 import com.command.domain.alarm.WindowRoller
 import com.command.domain.alarm.WorkEnqueuer
@@ -303,7 +304,8 @@ class OccurrenceRepository @Inject constructor(
         val checkIns = db.checkIns()
         for (effect in r.effects) {
             if (effect is Effect.PostCheckIn) {
-                checkIns.upsert(CheckInRow(occ.id, effect.index, askedAt = now, answeredAt = null, answer = null, delayMin = null, lateMs = 0))
+                val late = (command as? OccurrenceCommand.CheckInDue)?.lateMs ?: 0
+                checkIns.upsert(CheckInRow(occ.id, effect.index, askedAt = now, answeredAt = null, answer = null, delayMin = null, lateMs = late))
             }
         }
         val answer: CheckInAnswer? = when (command) {
@@ -445,9 +447,15 @@ class OccurrenceRepository @Inject constructor(
                 is Effect.ArmCycleEnd -> scheduler.arm(request(AlarmKind.CYCLE_END, at = p.nowMs + e.totalMs))
                 Effect.CancelCycleEnd -> scheduler.cancel(request(AlarmKind.CYCLE_END))
                 is Effect.ScheduleCheckIn -> scheduler.arm(request(AlarmKind.CHECK_IN, at = e.atUtcMs, index = e.index))
-                is Effect.PostCheckIn -> poster.post(occ.id, occ.requestCode, e.index)
+                is Effect.PostCheckIn -> {
+                    val title = missionBrief(occ.missionId)?.title.orEmpty()
+                    poster.post(CheckInPrompt(occ.id, occ.requestCode, e.index, title, started = occ.state != OccurrenceState.GUIDED_START))
+                }
                 // Index == count is the final-timeout alarm, so the highest index in use is MAX_COUNT itself.
-                Effect.CancelCheckIns -> for (i in 0..CheckInSchedule.MAX_COUNT) scheduler.cancel(request(AlarmKind.CHECK_IN, index = i))
+                Effect.CancelCheckIns -> {
+                    for (i in 0..CheckInSchedule.MAX_COUNT) scheduler.cancel(request(AlarmKind.CHECK_IN, index = i))
+                    poster.cancel(occ.id)
+                }
                 is Effect.ArmChild -> Unit // handled inside the transaction
                 Effect.RollWindow -> roller.roll()
                 is Effect.EnqueueWork -> work.enqueue(e.kind, occ.id)

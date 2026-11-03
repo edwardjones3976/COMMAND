@@ -7,5 +7,12 @@
                 <action android:name="com.command.debug.RING" />
             </intent-filter>
         </receiver>
+        <!-- Debug builds only: moves an occurrence's follow-up questions along from a shell. See DebugCheckInReceiver. -->
+        <receiver android:name="com.command.debug.DebugCheckInReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.command.debug.CHECKIN_DUE" />
+                <action android:name="com.command.debug.CHECKIN_ARM" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

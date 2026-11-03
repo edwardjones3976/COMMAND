@@ -17,6 +17,7 @@ import com.command.data.db.CommandDb
 import com.command.data.db.MissionRow
 import com.command.domain.alarm.AlarmScheduler
 import com.command.domain.alarm.CheckInPoster
+import com.command.domain.alarm.CheckInPrompt
 import com.command.domain.alarm.RingController
 import com.command.domain.alarm.WindowRoller
 import com.command.domain.alarm.WorkEnqueuer
@@ -156,8 +157,10 @@ class FakeAudioRoutes : AudioRoutes {
 }
 
 class RecordingPoster : CheckInPoster {
-    val posted = ArrayList<Triple<String, Int, Int>>()
-    override fun post(occurrenceId: String, requestCode: Int, index: Int) { posted += Triple(occurrenceId, requestCode, index) }
+    val posted = ArrayList<CheckInPrompt>()
+    val cancelled = ArrayList<String>()
+    override fun post(prompt: CheckInPrompt) { posted += prompt }
+    override fun cancel(occurrenceId: String) { cancelled += occurrenceId }
 }
 
 /** Replaces every real binding with a fake, so the service, receivers and repository run against an in-memory database. */

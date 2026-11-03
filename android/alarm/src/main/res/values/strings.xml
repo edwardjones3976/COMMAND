@@ -14,6 +14,13 @@
     <string name="ring_text">Time to start. Tap to open, or silence the alarm.</string>
     <string name="action_open">Open</string>
     <string name="action_silence">Safety silence</string>
+    <string name="action_open_check_in">Open check-in</string>
+    <string name="action_started">Started</string>
+    <string name="action_still_working">Still working</string>
+    <string name="action_done">Done</string>
+    <string name="checkin_title_generic">Check-in</string>
+    <string name="checkin_text_start">Have you started?</string>
+    <string name="checkin_text_progress">How is it going?</string>
     <string name="missed_title">Missed alarm</string>
     <string name="missed_text">Nobody answered. Open to pick it up again, or skip it.</string>
 

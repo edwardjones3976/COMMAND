@@ -199,7 +199,10 @@ class OccurrenceRepositoryTest {
         apply(o, OccurrenceCommand.Acknowledge()); apply(o, OccurrenceCommand.StartGuidance)
         assertTrue(f.scheduler.armed.containsKey("command://checkin/${o.id}/0"))
         apply(o, OccurrenceCommand.CheckInDue(0))
-        assertEquals(listOf(Triple(o.id, o.requestCode, 0)), f.poster.posted)
+        val asked = f.poster.posted.single()
+        assertEquals(listOf(o.id, o.requestCode, 0), listOf(asked.occurrenceId, asked.requestCode, asked.index))
+        assertEquals("Write the report", asked.title)
+        assertFalse(asked.started)
         var rows = f.db.checkIns().forOccurrence(o.id)
         assertEquals(1, rows.size)
         assertNull(rows.single().answer)
@@ -357,5 +360,42 @@ class OccurrenceRepositoryTest {
         val afterFire = f.scheduler.calls.size
         assertNull("it is ringing: a reconcile that read the row a moment earlier must not touch it", f.repo.rearm(o.id))
         assertEquals(afterFire, f.scheduler.calls.size)
+    }
+
+    @Test
+    fun `a question is taken out of the shade when it is answered, and the next one is asked as a progress question`() = run {
+        val o = scheduled()
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+        apply(o, OccurrenceCommand.Acknowledge()); apply(o, OccurrenceCommand.StartGuidance)
+        f.poster.cancelled.clear()
+        apply(o, OccurrenceCommand.CheckInDue(0))
+        assertTrue("asking does not take the question away", f.poster.cancelled.isEmpty())
+
+        apply(o, OccurrenceCommand.ReportStarted)
+        assertEquals("answering does", listOf(o.id), f.poster.cancelled.distinct())
+
+        apply(o, OccurrenceCommand.CheckInDue(1))
+        assertTrue("after a start was reported the question is about progress", f.poster.posted.last().started)
+    }
+
+    @Test
+    fun `a question that reached the person late is stored with how late, and noted in the log`() = run {
+        val o = scheduled()
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+        apply(o, OccurrenceCommand.Acknowledge()); apply(o, OccurrenceCommand.StartGuidance)
+        apply(o, OccurrenceCommand.CheckInDue(0, lateMs = 95_000))
+        assertEquals(95_000L, f.db.checkIns().forOccurrence(o.id).single().lateMs)
+        val late = f.db.events().forOccurrence(o.id).single { it.type == EventType.CHECKIN_LATE }
+        assertTrue(late.payloadJson.contains("\"late_s\":\"95\""))
+    }
+
+    @Test
+    fun `a question that came on time is stored as on time and leaves no late note`() = run {
+        val o = scheduled()
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+        apply(o, OccurrenceCommand.Acknowledge()); apply(o, OccurrenceCommand.StartGuidance)
+        apply(o, OccurrenceCommand.CheckInDue(0, lateMs = 800))
+        assertEquals(800L, f.db.checkIns().forOccurrence(o.id).single().lateMs)
+        assertTrue(f.db.events().forOccurrence(o.id).none { it.type == EventType.CHECKIN_LATE })
     }
 }

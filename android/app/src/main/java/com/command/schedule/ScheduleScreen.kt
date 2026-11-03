@@ -41,6 +41,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.data.db.ScheduleRow
+import com.command.followup.isFollowUp
 import com.command.domain.dials.Flexibility
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.MissReason
@@ -65,6 +66,7 @@ object ScheduleTags {
 fun ScheduleRoute(
     onAdd: () -> Unit,
     onOpen: (String) -> Unit,
+    onOpenOccurrence: (String) -> Unit,
     onOpenReliability: () -> Unit,
     onOpenConsents: () -> Unit,
     viewModel: ScheduleViewModel = hiltViewModel(),
@@ -77,7 +79,14 @@ fun ScheduleRoute(
         onPauseOrDispose { }
     }
 
-    ScheduleScreen(state = state, onAdd = onAdd, onOpen = onOpen, onOpenReliability = onOpenReliability, onOpenConsents = onOpenConsents)
+    ScheduleScreen(
+        state = state,
+        onAdd = onAdd,
+        onOpen = onOpen,
+        onOpenOccurrence = onOpenOccurrence,
+        onOpenReliability = onOpenReliability,
+        onOpenConsents = onOpenConsents,
+    )
 }
 
 /** Stateless, so it can be shown in tests without a view model. */
@@ -89,6 +98,7 @@ fun ScheduleScreen(
     onOpen: (String) -> Unit,
     onOpenReliability: () -> Unit,
     onOpenConsents: () -> Unit,
+    onOpenOccurrence: (String) -> Unit = {},
     zone: ZoneId = ZoneId.systemDefault(),
     today: LocalDate = LocalDate.now(zone),
 ) {
@@ -136,11 +146,11 @@ fun ScheduleScreen(
                 }
                 if (state.upcoming.isNotEmpty()) {
                     item { SectionTitle(stringResource(R.string.schedule_section_upcoming)) }
-                    items(state.upcoming, key = { it.occurrenceId }) { RowCard(it, zone, today, onOpen) }
+                    items(state.upcoming, key = { it.occurrenceId }) { RowCard(it, zone, today, onOpen, onOpenOccurrence) }
                 }
                 if (state.recent.isNotEmpty()) {
                     item { SectionTitle(stringResource(R.string.schedule_section_recent)) }
-                    items(state.recent, key = { it.occurrenceId }) { RowCard(it, zone, today, onOpen) }
+                    items(state.recent, key = { it.occurrenceId }) { RowCard(it, zone, today, onOpen, onOpenOccurrence) }
                 }
                 // Room under the last row for the new-mission button.
                 item { Spacer(Modifier.height(72.dp)) }
@@ -179,12 +189,13 @@ private fun AttentionBanner(problems: Int, onAction: () -> Unit) {
 }
 
 @Composable
-private fun RowCard(row: ScheduleRow, zone: ZoneId, today: LocalDate, onOpen: (String) -> Unit) {
+private fun RowCard(row: ScheduleRow, zone: ZoneId, today: LocalDate, onOpen: (String) -> Unit, onOpenOccurrence: (String) -> Unit) {
     val whenText = whenLabel(row.scheduledAtUtc, zone, today)
     val state = stateLabel(row)
     val description = stringResource(R.string.schedule_row_description, row.title, whenText, state)
     Card(
-        onClick = { onOpen(row.missionId) },
+        // An occurrence that is waiting for an answer opens its questions; everything else opens the mission.
+        onClick = { if (row.state.isFollowUp()) onOpenOccurrence(row.occurrenceId) else onOpen(row.missionId) },
         modifier = Modifier.fillMaxWidth().testTag(ScheduleTags.row(row.occurrenceId)).semantics(mergeDescendants = true) { contentDescription = description },
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

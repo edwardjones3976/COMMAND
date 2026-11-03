@@ -20,12 +20,14 @@ import com.command.domain.occurrence.EventType
 import com.command.domain.occurrence.MissReason
 import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.OccurrenceState
+import com.command.domain.time.Clock
 import com.command.testing.FakeRingController
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -50,6 +52,7 @@ class ReceiversTest {
     @Inject lateinit var db: CommandDb
     @Inject lateinit var ringer: FakeRingController
     @Inject lateinit var poster: RecordingPoster
+    @Inject lateinit var clock: Clock
 
     private lateinit var context: Context
 
@@ -184,7 +187,10 @@ class ReceiversTest {
             intent(o, AlarmContract.ACTION_CHECK_IN, "command://checkin/${o.id}/0", CheckInReceiver::class.java).putExtra(AlarmContract.EXTRA_INDEX, 0),
         )
         awaitUntil(message = "question") { poster.posted.isNotEmpty() }
-        assertEquals(Triple(o.id, o.requestCode, 0), poster.posted.single())
+        val asked = poster.posted.single()
+        assertEquals(listOf(o.id, o.requestCode, 0), listOf(asked.occurrenceId, asked.requestCode, asked.index))
+        assertEquals("Write the report", asked.title)
+        assertFalse("nothing has been reported yet, so the question is whether it was started", asked.started)
     }
 
     @Test
@@ -199,5 +205,97 @@ class ReceiversTest {
         )
         awaitUntil(message = "rejection") { EventType.REJECTED_TRANSITION in eventTypes(o) }
         assertTrue(poster.posted.isEmpty())
+    }
+
+    // --- how late a question was --------------------------------------------------------------------------------------------------
+
+    private fun guided() = occurrence(OccurrenceCommand.Arm(ArmMode.EXACT), OccurrenceCommand.Fire, OccurrenceCommand.Acknowledge(), OccurrenceCommand.StartGuidance)
+
+    @Test
+    fun `a check-in alarm that the platform held back says how late it was, in the record and the log`() {
+        val o = guided()
+        CheckInReceiver().onReceive(
+            context,
+            intent(o, AlarmContract.ACTION_CHECK_IN, "command://checkin/${o.id}/0", CheckInReceiver::class.java)
+                .putExtra(AlarmContract.EXTRA_INDEX, 0)
+                .putExtra(AlarmContract.EXTRA_AT, clock.nowMs() - 95_000),
+        )
+        awaitUntil(message = "question") { poster.posted.isNotEmpty() }
+        assertEquals(95_000L, runBlocking { db.checkIns().forOccurrence(o.id).single().lateMs })
+        assertTrue(EventType.CHECKIN_LATE in eventTypes(o))
+    }
+
+    @Test
+    fun `a check-in alarm that came on time, or with no time on it, says nothing about being late`() {
+        val o = guided()
+        CheckInReceiver().onReceive(
+            context,
+            intent(o, AlarmContract.ACTION_CHECK_IN, "command://checkin/${o.id}/0", CheckInReceiver::class.java)
+                .putExtra(AlarmContract.EXTRA_INDEX, 0)
+                .putExtra(AlarmContract.EXTRA_AT, clock.nowMs() - 500),
+        )
+        awaitUntil(message = "question") { poster.posted.isNotEmpty() }
+        assertEquals(500L, runBlocking { db.checkIns().forOccurrence(o.id).single().lateMs })
+        assertFalse(EventType.CHECKIN_LATE in eventTypes(o))
+
+        val untimed = guided()
+        CheckInReceiver().onReceive(
+            context,
+            intent(untimed, AlarmContract.ACTION_CHECK_IN, "command://checkin/${untimed.id}/0", CheckInReceiver::class.java).putExtra(AlarmContract.EXTRA_INDEX, 0),
+        )
+        awaitUntil(message = "second question") { poster.posted.size == 2 }
+        assertEquals(0L, runBlocking { db.checkIns().forOccurrence(untimed.id).single().lateMs })
+    }
+
+    // --- the answers on the notification ----------------------------------------------------------------------------------------------
+
+    private fun answer(o: OccurrenceRow, name: String?): Intent =
+        Intent(context, CheckInAnswerReceiver::class.java).setAction(AlarmContract.ACTION_CHECK_IN_ANSWER)
+            .setData(Uri.parse("command://checkin-answer/${o.id}/$name"))
+            .putExtra(AlarmContract.EXTRA_OCCURRENCE_ID, o.id)
+            .apply { if (name != null) putExtra(AlarmContract.EXTRA_ANSWER, name) }
+
+    @Test
+    fun `tapping Started on the question reports the start and takes the question away`() {
+        val o = guided()
+        CheckInAnswerReceiver().onReceive(context, answer(o, "STARTED"))
+        awaitUntil(message = "started") { stateOf(o) == OccurrenceState.STARTED_SELF_REPORTED }
+        awaitUntil(message = "question removed") { o.id in poster.cancelled }
+    }
+
+    @Test
+    fun `Still working and Done report themselves, and Done ends the follow-up`() {
+        val working = occurrence(
+            OccurrenceCommand.Arm(ArmMode.EXACT), OccurrenceCommand.Fire, OccurrenceCommand.Acknowledge(), OccurrenceCommand.StartGuidance, OccurrenceCommand.ReportStarted,
+        )
+        CheckInAnswerReceiver().onReceive(context, answer(working, "WORKING"))
+        awaitUntil(message = "working") { stateOf(working) == OccurrenceState.WORKING_SELF_REPORTED }
+
+        CheckInAnswerReceiver().onReceive(context, answer(working, "DONE"))
+        awaitUntil(message = "done") { stateOf(working) == OccurrenceState.COMPLETED_SELF_REPORTED }
+    }
+
+    @Test
+    fun `an answer to a question that has outlived its occurrence changes nothing, and the question still goes`() {
+        val o = guided()
+        runBlocking { repo.apply(o.id, OccurrenceCommand.ReportDone, EventSource.USER) }
+        poster.cancelled.clear()
+        CheckInAnswerReceiver().onReceive(context, answer(o, "STARTED"))
+        awaitUntil(message = "question removed") { o.id in poster.cancelled }
+        assertEquals("it stayed done", OccurrenceState.COMPLETED_SELF_REPORTED, stateOf(o))
+    }
+
+    @Test
+    fun `an answer that is not one of the three, or names no occurrence, is ignored`() {
+        val o = guided()
+        CheckInAnswerReceiver().onReceive(context, answer(o, "NEED_RESET"))
+        CheckInAnswerReceiver().onReceive(context, answer(o, "nonsense"))
+        CheckInAnswerReceiver().onReceive(context, answer(o, null))
+        CheckInAnswerReceiver().onReceive(context, Intent(context, CheckInAnswerReceiver::class.java).setAction(AlarmContract.ACTION_CHECK_IN_ANSWER).putExtra(AlarmContract.EXTRA_ANSWER, "STARTED"))
+        // A valid answer afterwards is the marker that the earlier ones, handled in order, have all been dealt with.
+        CheckInAnswerReceiver().onReceive(context, answer(o, "DONE"))
+        awaitUntil(message = "done") { stateOf(o) == OccurrenceState.COMPLETED_SELF_REPORTED }
+        assertEquals("only the valid answer took the question away", listOf(o.id), poster.cancelled.distinct())
+        assertFalse(EventType.REJECTED_TRANSITION in eventTypes(o))
     }
 }

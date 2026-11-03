@@ -4,7 +4,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.media.AudioManager
 import com.command.data.OccurrenceRepository
+import com.command.domain.alarm.CheckInPoster
 import com.command.domain.alarm.RingController
+import com.command.domain.time.Clock
 import com.command.domain.voice.Speaker
 import com.command.voice.AndroidSpeechSynthesizer
 import com.command.voice.AudioTrackPlayer
@@ -32,6 +34,8 @@ interface AlarmEntryPoint {
     fun arming(): ArmingReconciler
     fun ringController(): RingController
     fun scheduler(): com.command.domain.alarm.AlarmScheduler
+    fun checkInPoster(): CheckInPoster
+    fun clock(): Clock
 
     companion object {
         fun from(context: Context): AlarmEntryPoint =
@@ -60,6 +64,7 @@ abstract class AlarmBindings {
     @Binds abstract fun ringOutput(impl: AndroidRingOutput): RingOutput
     @Binds abstract fun reliabilityMonitor(impl: PlatformReliabilityMonitor): ReliabilityMonitor
     @Binds abstract fun audioRoutes(impl: AndroidAudioRoutes): AudioRoutes
+    @Binds abstract fun checkInPoster(impl: AndroidCheckInPoster): CheckInPoster
 }
 
 /**
@@ -77,8 +82,7 @@ object VoiceProviders {
 
 /**
  * Ports whose real implementation arrives in a later milestone. They do nothing, on purpose and visibly: the state
- * machine's effects for them are simply not carried out yet (work enqueueing and window top-up in M5, follow-up
- * notifications in M7).
+ * machine's effects for them are simply not carried out yet (work enqueueing and window top-up).
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -88,8 +92,4 @@ object PendingPorts {
     }
 
     @Provides fun roller(): com.command.domain.alarm.WindowRoller = com.command.domain.alarm.WindowRoller { }
-
-    @Provides fun poster(): com.command.domain.alarm.CheckInPoster = object : com.command.domain.alarm.CheckInPoster {
-        override fun post(occurrenceId: String, requestCode: Int, index: Int) = Unit
-    }
 }

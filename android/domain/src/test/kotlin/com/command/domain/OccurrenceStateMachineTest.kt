@@ -508,4 +508,24 @@ class OccurrenceStateMachineTest {
         applied(before, RequestRecovery)
         assertEquals(copy, before)
     }
+
+    @Test
+    fun `a question that arrives late says how late, and one that is on time says nothing`() {
+        val late = applied(snap(GUIDED_START), CheckInDue(0, lateMs = 95_000))
+        val note = late.events.single { it.type == EventType.CHECKIN_LATE }
+        assertEquals("95", note.payload.values["late_s"])
+        assertEquals("0", note.payload.values["index"])
+        assertTrue("it was asked all the same", late.effects.any { it is Effect.PostCheckIn })
+
+        val onTime = applied(snap(GUIDED_START), CheckInDue(0, lateMs = 2_000))
+        assertTrue(onTime.events.none { it.type == EventType.CHECKIN_LATE })
+    }
+
+    @Test
+    fun `a late alarm inside protected time is deferred, and is not noted as a late question because none was asked`() {
+        val restEnds = now + 3_600_000
+        val deferred = applied(snap(GUIDED_START, restEndsAt = restEnds), CheckInDue(0, lateMs = 95_000))
+        assertTrue(deferred.events.none { it.type == EventType.CHECKIN_LATE })
+        assertTrue(deferred.effects.none { it is Effect.PostCheckIn })
+    }
 }
