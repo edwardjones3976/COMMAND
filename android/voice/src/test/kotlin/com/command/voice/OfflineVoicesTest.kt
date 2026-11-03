@@ -78,4 +78,27 @@ class OfflineVoicesTest {
     fun `an engine that does not say which voices it has cannot be shown to work offline, so nothing is said`() {
         assertFalse(OfflineVoices.pin(FakeEngine(emptyList(), current = null), Locale.US))
     }
+
+    @Test
+    fun `a voice that works on the phone is kept when it is not in the phone's language, because the line's own words are English`() {
+        val english = voice("english")
+        val engine = FakeEngine(listOf(english), current = english)
+        assertTrue(OfflineVoices.pin(engine, Locale.GERMANY))
+        assertNull("nothing was switched", engine.selected)
+    }
+
+    @Test
+    fun `a phone whose language has no offline voice of its own gets an English one rather than silence, and its own language is preferred when there is one`() {
+        val network = voice("network", locale = Locale.GERMANY, network = true)
+        val english = voice("english", quality = 400)
+        val german = voice("german", locale = Locale.GERMANY, quality = 200)
+
+        val onlyEnglish = FakeEngine(listOf(network, english), current = network)
+        assertTrue(OfflineVoices.pin(onlyEnglish, Locale.GERMANY))
+        assertEquals(english, onlyEnglish.selected)
+
+        val both = FakeEngine(listOf(network, english, german), current = network)
+        assertTrue(OfflineVoices.pin(both, Locale.GERMANY))
+        assertEquals(german, both.selected)
+    }
 }

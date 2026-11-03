@@ -45,17 +45,21 @@ internal interface TtsEngine {
 }
 
 /**
- * The person's own words are only ever given to a voice that works on the phone. The engine's current voice is kept when it does; when it
- * asks a server (or its data is not there, which can start a download) an installed voice that works offline is chosen, best quality of
- * the person's language first. With no such voice, or an engine that does not say which voices it has, nothing is said.
+ * The person's own words are only ever given to a voice that works on the phone. The engine's current voice is kept when it does, whatever
+ * language it is in: it is the voice the engine chose for the language it was asked for, and the line's own words are English, so a
+ * phone whose language has no voice of its own still speaks. When the current voice asks a server (or its data is not installed, which
+ * can start a download) an installed voice that works offline is chosen instead: the phone's language first, then English, best quality
+ * first. With no such voice, or an engine that does not say which voices it has, nothing is said.
  */
 internal object OfflineVoices {
 
     fun pin(engine: TtsEngine, locale: Locale): Boolean {
         val current = engine.currentVoice()
         if (current != null && current.usable) return true
-        val choice = engine.voices()
-            .filter { it.usable && it.locale.language == locale.language }
+        val usable = engine.voices().filter { it.usable }
+        val candidates = usable.filter { it.locale.language == locale.language }
+            .ifEmpty { usable.filter { it.locale.language == Locale.ENGLISH.language } }
+        val choice = candidates
             .sortedWith(compareByDescending<EngineVoice> { it.locale.country == locale.country }.thenByDescending { it.quality })
             .firstOrNull() ?: return false
         return engine.selectVoice(choice)
@@ -69,6 +73,11 @@ internal class AndroidTtsEngine(context: Context, onReady: (Boolean) -> Unit) : 
 
     private val callbacks = ConcurrentHashMap<String, (Boolean) -> Unit>()
     private val tts = TextToSpeech(context) { status -> onReady(status == TextToSpeech.SUCCESS) }
+
+    init {
+        // Once, for the life of the engine: each line is told apart by its own utterance id.
+        tts.setOnUtteranceProgressListener(listener())
+    }
 
     private fun Voice.toEngineVoice() = EngineVoice(
         name = name,
@@ -97,7 +106,6 @@ internal class AndroidTtsEngine(context: Context, onReady: (Boolean) -> Unit) : 
 
     override fun synthesizeToFile(text: String, file: File, utteranceId: String, finished: (Boolean) -> Unit): Boolean {
         callbacks[utteranceId] = finished
-        tts.setOnUtteranceProgressListener(listener)
         // For whoever reads the log of a phone: which voice is about to speak, and whether it needs a network. The words are never logged.
         runCatching { tts.voice }.getOrNull()?.let { Log.i(TAG, "speaking with voice ${it.name} (network required: ${it.isNetworkConnectionRequired})") }
         val accepted = tts.synthesizeToFile(text, null, file, utteranceId) == TextToSpeech.SUCCESS
@@ -121,7 +129,7 @@ internal class AndroidTtsEngine(context: Context, onReady: (Boolean) -> Unit) : 
         const val MAX_LOGGED = 40
     }
 
-    private val listener = object : UtteranceProgressListener() {
+    private fun listener() = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String?) = Unit
 
         override fun onDone(utteranceId: String?) {
