@@ -50,9 +50,7 @@ android {
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
-      // AI Studio.
-      signingConfig = signingConfigs.getByName("debugConfig")
+      // Local test build: AI Studio's debug.keystore isn't in the export, so AGP's default debug key is used.
     }
   }
   compileOptions {
@@ -66,10 +64,6 @@ android {
   testOptions {
     unitTests {
       isIncludeAndroidResources = true
-      all {
-        it.systemProperty("robolectric.dependency.repo.url", "file:///home/appuser/.m2/repository")
-        it.systemProperty("robolectric.dependency.repo.id", "local")
-      }
     }
   }
   dependenciesInfo {
