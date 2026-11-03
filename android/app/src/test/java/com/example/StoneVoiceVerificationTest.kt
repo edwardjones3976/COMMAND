@@ -9,6 +9,8 @@ import com.example.data.VoiceModelType
 import com.example.data.VoicePackEntity
 import com.example.service.DirectorBriefs
 import com.example.service.DirectorVoice
+import com.example.service.GeminiAudio
+import com.example.service.GeminiSpeechSource
 import com.example.service.VoiceDirectorEngine
 import com.example.service.VoiceMastering
 import com.example.service.VoicePlaybackState
@@ -152,7 +154,14 @@ class StoneVoiceVerificationTest {
         val square = ShortArray(sampleRate) { if ((it / 40) % 2 == 0) 32_767 else -32_767 }
         // A quarter-sample-rate sine sampled at 45 degrees: samples sit at 0.707 while the waveform peaks at 1.0.
         val interSample = ShortArray(sampleRate) { (sin(PI / 2 * it + PI / 4) * 32_767).toInt().toShort() }
-        listOf(square, interSample, speechLike(30_000.0)).forEach { input ->
+        // Issue #17: a 16-sample 6 kHz burst in silence, the case a half-sample estimate let through at about +0.04 dBTP.
+        val bursts = listOf(0.0, PI / 6, PI / 4, PI / 3).map { phase ->
+            ShortArray(sampleRate / 2) { i ->
+                val k = i - sampleRate / 4
+                if (k in 0 until 16) (sin(2 * PI * 6_000.0 * k / sampleRate + phase) * 20_000).toInt().toShort() else 0
+            }
+        }
+        (listOf(square, interSample, speechLike(30_000.0)) + bursts).forEach { input ->
             val out = VoiceMastering.master(input, sampleRate, boostDb = VoiceMastering.MAX_BOOST_DB)
             assertTrue(out.pcm.maxOf { abs(it.toInt()) } <= ceiling)
             assertTrue(out.peakDbfs <= VoiceMastering.PEAK_CEILING_DBFS + 0.05f)
@@ -256,34 +265,41 @@ class StoneVoiceVerificationTest {
     fun `a saved render is reused from disk by a fresh engine without calling Gemini`() {
         seedCache(newEngine(), stone.reveilleScript)
 
-        val second = newEngine() // nothing in memory: the hit has to come from disk
+        val gemini = RecordingGemini { _, _ -> error("cache hit must not reach Gemini") }
+        val second = newEngine(gemini) // nothing in memory: the hit has to come from disk
         assertTrue(second.speakWithVoicePack(stone, stone.reveilleScript))
         val log = awaitLineLogs(1).single()
         assertTrue(log, log.startsWith("line source=cache voice=Algenib"))
-        assertNoGeminiAttempt()
+        assertTrue("Gemini was called: ${gemini.voices}", gemini.voices.isEmpty())
         assertMasteredForStone(log)
     }
 
     @Test
-    fun `when Gemini is held off the phone's voice renders the line and it is mastered once`() {
-        val engine = newEngine()
+    fun `when Gemini rejects the request the phone's voice renders the line and it is mastered once`() {
+        // The same failure App Check enforcement produces without a registered token.
+        val gemini = RecordingGemini { _, _ -> throw IllegalStateException("401: App Check token is invalid") }
+        val engine = newEngine(gemini)
         engine.onInit(TextToSpeech.SUCCESS)
-        holdOffGemini(engine)
 
         assertTrue(engine.speakWithVoicePack(stone, "Move."))
         answerSyntheses(1)
         val log = awaitLineLogs(1).single()
         assertTrue(log, log.startsWith("line source=system-tts voice=Algenib"))
         assertEquals("Eyes front! Move! Do it now, move!", shadowTts().lastSynthesizeToFileText)
-        assertNoGeminiAttempt()
+        assertEquals(listOf("Algenib"), gemini.voices)
+        assertTrue(engineLogs().any { it.startsWith("Gemini TTS failed; Algenib uses system TTS for 120s") })
         assertMasteredForStone(log)
     }
 
     @Test
-    fun `A-B comparison plays voice A then voice B and then resets`() {
-        val engine = newEngine()
+    fun `A-B comparison plays voice A then voice B, and A's Gemini failure doesn't push B onto system TTS`() {
+        // Issue #5: Stone's Gemini voice fails, Eleanor's still answers.
+        val gemini = RecordingGemini { voice, _ ->
+            if (voice == "Algenib") throw IllegalStateException("Algenib unavailable")
+            GeminiAudio(pcmBytes(speechLike(9_000.0, seconds = 1.0)), "audio/L16;codec=pcm;rate=24000")
+        }
+        val engine = newEngine(gemini)
         engine.onInit(TextToSpeech.SUCCESS)
-        holdOffGemini(engine)
         val eleanor = packs.getValue("pack_eleanor_vance")
 
         engine.runAbComparison(stone, eleanor, "Move.")
@@ -300,8 +316,9 @@ class StoneVoiceVerificationTest {
         assertEquals(listOf("A", "B"), slots)
         val logs = lineLogs()
         assertEquals(2, logs.size)
-        assertTrue(logs[0], logs[0].contains("voice=Algenib"))
-        assertTrue(logs[1], logs[1].contains("voice=Kore"))
+        assertTrue(logs[0], logs[0].startsWith("line source=system-tts voice=Algenib"))
+        assertTrue(logs[1], logs[1].startsWith("line source=gemini voice=Kore"))
+        assertEquals(listOf("Algenib", "Kore"), gemini.voices)
         assertEquals(VoicePlaybackState(), engine.playbackState.value)
     }
 
@@ -309,8 +326,22 @@ class StoneVoiceVerificationTest {
     // Helpers
     // ---------------------------------------------------------------------------------------
 
-    private fun newEngine(): VoiceDirectorEngine =
-        VoiceDirectorEngine(context, CoroutineScope(Dispatchers.Unconfined)).also { engines += it }
+    /** Fake Gemini that records which voices were asked for and answers with [reply]. */
+    private class RecordingGemini(private val reply: suspend (String, String) -> GeminiAudio?) : GeminiSpeechSource {
+        val voices: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList()
+        override suspend fun synthesize(voiceName: String, prompt: String): GeminiAudio? {
+            voices += voiceName
+            return reply(voiceName, prompt)
+        }
+    }
+
+    /** Engines default to a Gemini that fails fast, so no test reaches the network. */
+    private fun newEngine(
+        gemini: GeminiSpeechSource = GeminiSpeechSource { _, _ -> throw IllegalStateException("no Gemini in tests") }
+    ): VoiceDirectorEngine =
+        VoiceDirectorEngine(context, CoroutineScope(Dispatchers.Unconfined), gemini).also { engines += it }
+
+    private fun engineLogs(): List<String> = ShadowLog.getLogsForTag("VoiceDirectorEngine").map { it.msg }
 
     /** Writes the disk-cache entry a Gemini render of [text] would have left, keyed exactly as the engine keys it. */
     private fun seedCache(engine: VoiceDirectorEngine, text: String) {
@@ -347,12 +378,6 @@ class StoneVoiceVerificationTest {
             .invoke(engine, ShadowTextToSpeech.getLastTextToSpeechInstance(), pack, engine.resolveDirectorVoice(pack))
     }
 
-    /** Puts the engine in the state a Gemini failure (such as an App Check 401) leaves it in for 120 s. */
-    private fun holdOffGemini(engine: VoiceDirectorEngine) {
-        VoiceDirectorEngine::class.java.getDeclaredField("geminiBackoffUntil")
-            .apply { isAccessible = true }
-            .setLong(engine, Long.MAX_VALUE)
-    }
 
     /** Plays the phone's TTS engine: writes a speech-like WAV where it was asked to and reports the utterance done. */
     private fun answerPendingSynthesis(answered: MutableSet<String>): Boolean {
@@ -382,10 +407,6 @@ class StoneVoiceVerificationTest {
         return lineLogs().also { assertEquals("lines reaching mastering", count, it.size) }
     }
 
-    private fun assertNoGeminiAttempt() {
-        val gemini = ShadowLog.getLogsForTag("VoiceDirectorEngine").map { it.msg }.filter { it.contains("Gemini") }
-        assertTrue("unexpected Gemini activity: $gemini", gemini.isEmpty())
-    }
 
     /** Stone's line lands near the speech target plus his +4.5 dB boost, with peaks held at the ceiling. */
     private fun assertMasteredForStone(log: String) {

@@ -29,8 +29,27 @@ object VoiceMastering {
     /** Hard ceiling for any sample after mastering. */
     const val PEAK_CEILING_DBFS = -1f
 
-    /** The limiter's 2x peak estimate can miss a little inter-sample overshoot; this keeps true peaks under the ceiling. */
+    /** Headroom for 16-bit rounding and the edge fade after limiting, so true peaks stay under the ceiling. */
     private const val TRUE_PEAK_MARGIN_DB = 0.1f
+
+    /** The limiter re-measures after each pass; a second pass catches overshoot where gain moved under a peak. */
+    private const val LIMITER_PASSES = 3
+
+    /** One side of the 4x true-peak interpolator (32 taps in all, Hann-windowed sinc). */
+    private const val TRUE_PEAK_TAPS = 16
+
+    /** Interpolation kernels for the points 1/4, 1/2 and 3/4 of the way to the next sample. */
+    private val truePeakKernels: List<FloatArray> = (1..3).map { phase ->
+        val frac = phase / 4.0
+        FloatArray(2 * TRUE_PEAK_TAPS) { j ->
+            val t = (j - TRUE_PEAK_TAPS + 1) - frac
+            val window = 0.5 + 0.5 * cos(PI * t / TRUE_PEAK_TAPS)
+            (sin(PI * t) / (PI * t) * window).toFloat()
+        }
+    }
+
+    /** No interpolated point can exceed the nearby sample peak times this, so quieter stretches are skipped. */
+    private val truePeakKernelGain: Float = truePeakKernels.maxOf { k -> k.sumOf { abs(it).toDouble() } }.toFloat()
 
     private const val HIGH_PASS_HZ = 80.0
     private const val MAX_NORMALIZE_GAIN_DB = 30f
@@ -104,6 +123,7 @@ object VoiceMastering {
         if (loudest <= 1e-10) return -96f
         val floor = max(loudest * 1e-3, 1e-6) // -30 dB relative, and never below -60 dBFS
         val active = powers.filter { it >= floor }
+        if (active.isEmpty()) return -96f // every frame is under the -60 dBFS speech floor: silence
         val mean = active.average()
         return (10.0 * log10(mean)).toFloat().coerceAtLeast(-96f)
     }
@@ -129,32 +149,56 @@ object VoiceMastering {
      * Smooth peak limiter. The line is fully rendered, so it can look ahead: gain starts easing down
      * ~2 ms before a peak (backward pass) and recovers over ~80 ms after it (forward pass). Every
      * sample's gain is at or below what that sample needs, so nothing exceeds [ceiling], and the
-     * gain never steps, so there is no clipping distortion or clicking. Peaks are judged including
-     * the waveform between samples, so the reconstructed (true) peak also stays under the ceiling.
+     * gain never steps, so there is no clipping distortion or clicking. Peaks are measured on the
+     * waveform between samples too (4x true peak), so the reconstructed peak stays under the ceiling.
      */
     private fun limit(x: FloatArray, sampleRate: Int, ceiling: Float) {
-        val needed = FloatArray(x.size) { val a = peakAround(x, it); if (a > ceiling) ceiling / a else 1f }
-        if (needed.all { it >= 1f }) return
         val attack = 1f / (sampleRate * 0.002f).coerceAtLeast(1f)
-        for (i in x.size - 2 downTo 0) {
-            needed[i] = minOf(needed[i], needed[i + 1] + (1f - needed[i + 1]) * attack)
-        }
         val release = 1f - exp(-1.0 / (sampleRate * 0.080)).toFloat()
-        var g = needed[0]
-        for (i in x.indices) {
-            g = minOf(needed[i], g + (1f - g) * release)
-            x[i] *= g
+        repeat(LIMITER_PASSES) {
+            val peaks = truePeaks(x, ceiling)
+            val needed = FloatArray(x.size) { if (peaks[it] > ceiling) ceiling / peaks[it] else 1f }
+            if (needed.all { it >= 1f }) return
+            for (i in x.size - 2 downTo 0) {
+                needed[i] = minOf(needed[i], needed[i + 1] + (1f - needed[i + 1]) * attack)
+            }
+            var g = needed[0]
+            for (i in x.indices) {
+                g = minOf(needed[i], g + (1f - g) * release)
+                x[i] *= g
+            }
         }
     }
 
     /**
-     * Largest of sample [i] and the half-sample points on either side, estimated with a 4-point
-     * cubic (Catmull-Rom) through the neighbours. Roughly a 2x-oversampled peak meter.
+     * Per sample: the larger of |x[i]| and the waveform at i + 1/4, 1/2 and 3/4, reconstructed with
+     * a windowed sinc (a 4x-oversampled true-peak meter). Stretches whose nearby samples are too quiet
+     * to reach [ceiling] even after interpolation are skipped.
      */
-    private fun peakAround(x: FloatArray, i: Int): Float {
-        fun at(j: Int) = x[j.coerceIn(0, x.size - 1)]
-        fun midpoint(a: Int) = (-at(a - 1) + 9f * at(a) + 9f * at(a + 1) - at(a + 2)) / 16f
-        return maxOf(abs(x[i]), abs(midpoint(i - 1)), abs(midpoint(i)))
+    private fun truePeaks(x: FloatArray, ceiling: Float): FloatArray {
+        val peaks = FloatArray(x.size) { abs(x[it]) }
+        val block = 64
+        val blockMax = FloatArray((x.size + block - 1) / block) { b ->
+            var m = 0f
+            for (j in b * block until minOf(x.size, (b + 1) * block)) m = max(m, peaks[j])
+            m
+        }
+        for (i in x.indices) {
+            val lo = (i - TRUE_PEAK_TAPS + 1).coerceAtLeast(0)
+            val hi = (i + TRUE_PEAK_TAPS).coerceAtMost(x.size - 1)
+            var nearby = 0f
+            for (b in lo / block..hi / block) nearby = max(nearby, blockMax[b])
+            if (nearby * truePeakKernelGain <= ceiling) continue
+            for (kernel in truePeakKernels) {
+                var acc = 0f
+                for (j in kernel.indices) {
+                    val idx = i + j - TRUE_PEAK_TAPS + 1
+                    if (idx in x.indices) acc += x[idx] * kernel[j]
+                }
+                peaks[i] = max(peaks[i], abs(acc))
+            }
+        }
+        return peaks
     }
 
     /** 2nd-order Butterworth high-pass (RBJ cookbook) to remove rumble and DC. */
