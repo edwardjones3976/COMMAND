@@ -124,4 +124,16 @@ class CheckInNotificationsTest {
         AndroidCheckInPoster(context).post(prompt())
         assertNull(shadowOf(manager).getNotification("occ-1", AlarmContract.ID_CHECK_IN))
     }
+
+    @Test
+    @Config(sdk = [25])
+    fun `before Android 8 there is no channel to make the question heard, so it asks for the default sound itself`() {
+        val n = CheckInNotifications.question(context, prompt())
+        assertTrue("sound", n.defaults and Notification.DEFAULT_SOUND != 0)
+    }
+
+    @Test
+    fun `from Android 8 the channel decides how the question sounds, and the notification asks for nothing itself`() {
+        assertEquals(0, CheckInNotifications.question(context, prompt()).defaults)
+    }
 }

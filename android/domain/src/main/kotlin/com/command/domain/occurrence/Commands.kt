@@ -63,7 +63,7 @@ sealed class OccurrenceCommand(val label: String) {
     companion object {
         const val MAX_DELAY_MINUTES = 24 * 60
 
-        /** "Tomorrow": the same time the next day. */
+        /** "Tomorrow": the same local time on the next calendar day (not 24 hours later: on a day the clocks change that is an hour off). */
         const val TOMORROW_MINUTES = 24 * 60
     }
 }
@@ -81,6 +81,8 @@ data class OccurrenceSnapshot(
      * While set, follow-up questions are deferred to after it ends instead of being asked or silently lost.
      */
     val restEndsAtUtc: Long? = null,
+    /** The zone the occurrence's times are kept in, for what is said in local terms: "tomorrow, at the same time". */
+    val zoneId: String = "UTC",
 )
 
 sealed interface TransitionResult {

@@ -3,6 +3,7 @@ package com.command
 import android.content.Intent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.core.app.ApplicationProvider
@@ -11,6 +12,7 @@ import com.command.data.AppSettings
 import com.command.data.OccurrenceRepository
 import com.command.data.db.CommandDb
 import com.command.data.db.OccurrenceRow
+import com.command.schedule.ScheduleTags
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.OccurrenceCommand
@@ -20,6 +22,7 @@ import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -62,9 +65,11 @@ class MainActivityOpenCheckInTest {
     }
 
     /** The intent that CheckInNotifications.open builds, as far as the activity can tell. */
-    private fun open(o: OccurrenceRow) = Intent(ApplicationProvider.getApplicationContext(), MainActivity::class.java)
+    private fun open(o: OccurrenceRow) = openId(o.id)
+
+    private fun openId(id: String) = Intent(ApplicationProvider.getApplicationContext(), MainActivity::class.java)
         .setAction(AlarmContract.ACTION_OPEN_CHECK_IN)
-        .putExtra(AlarmContract.EXTRA_OCCURRENCE_ID, o.id)
+        .putExtra(AlarmContract.EXTRA_OCCURRENCE_ID, id)
 
     private fun seen(text: String) = compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
 
@@ -105,6 +110,23 @@ class MainActivityOpenCheckInTest {
 
         controller.get().onBackPressedDispatcher.onBackPressed()
         compose.waitUntil(timeoutMillis = 30_000) { !seen("Have you started?") }
+        controller.pause().stop().destroy()
+    }
+
+    @Test
+    fun `text that cannot be an occurrence's id is ignored, and the app opens as it always does`() {
+        for (bad in listOf("a/b", "../x", "x?y=1", "", "{id}", "followup")) {
+            val controller = Robolectric.buildActivity(MainActivity::class.java, openId(bad)).setup()
+            compose.waitUntil(timeoutMillis = 30_000) { compose.onAllNodesWithTag(ScheduleTags.ADD).fetchSemanticsNodes().isNotEmpty() }
+            assertTrue("no question opened for [$bad]", !seen("Have you started?"))
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test
+    fun `the id of an occurrence that is no longer there opens a screen that says so`() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java, openId("00000000-0000-4000-8000-000000000000")).setup()
+        waitFor("This one is gone")
         controller.pause().stop().destroy()
     }
 }

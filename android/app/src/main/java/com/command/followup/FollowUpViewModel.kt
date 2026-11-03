@@ -91,7 +91,14 @@ class FollowUpViewModel @Inject constructor(
         _notice.value = null
         _state.value = FollowUpUiState.Loading
         observing = viewModelScope.launch {
-            repository.observe(id).collectLatest { row -> _state.value = project(row) }
+            repository.observe(id).collectLatest { row ->
+                if (row?.state == OccurrenceState.ACKNOWLEDGED) {
+                    // Acknowledged but never moved on to guided start (the process died between the two): finish the step, so that the answers
+                    // on this screen are ones the state machine will take. The row that follows says where it is.
+                    repository.apply(row.id, OccurrenceCommand.StartGuidance, EventSource.USER)
+                }
+                _state.value = project(row)
+            }
         }
     }
 
@@ -99,8 +106,9 @@ class FollowUpViewModel @Inject constructor(
         if (row == null) return FollowUpUiState.NotFound
         val brief = repository.missionBrief(row.missionId) ?: return FollowUpUiState.NotFound
         return when (row.state) {
-            OccurrenceState.GUIDED_START, OccurrenceState.ACKNOWLEDGED, OccurrenceState.BLOCKED ->
+            OccurrenceState.GUIDED_START, OccurrenceState.BLOCKED ->
                 FollowUpUiState.Ask(brief.title, brief.firstAction, started = false, unconfirmed = false)
+            OccurrenceState.ACKNOWLEDGED -> FollowUpUiState.Loading // being moved on to guided start, see show()
             OccurrenceState.STARTED_SELF_REPORTED, OccurrenceState.WORKING_SELF_REPORTED ->
                 FollowUpUiState.Ask(brief.title, brief.firstAction, started = true, unconfirmed = false)
             OccurrenceState.UNCONFIRMED -> FollowUpUiState.Ask(brief.title, brief.firstAction, started = false, unconfirmed = true)

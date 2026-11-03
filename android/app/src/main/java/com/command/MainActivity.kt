@@ -53,6 +53,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handle(intent: Intent?) {
-        if (intent?.action == AlarmContract.ACTION_OPEN_CHECK_IN) AlarmContract.occurrenceId(intent)?.let { openOccurrence.value = it }
+        if (intent?.action == AlarmContract.ACTION_OPEN_CHECK_IN) {
+            AlarmContract.occurrenceId(intent)?.takeIf(AlarmContract::isOccurrenceId)?.let { openOccurrence.value = it }
+        }
     }
 }

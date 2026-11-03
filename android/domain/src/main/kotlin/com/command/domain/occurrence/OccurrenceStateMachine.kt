@@ -1,5 +1,9 @@
 package com.command.domain.occurrence
 
+import java.time.DateTimeException
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 import com.command.domain.dials.DialEffects
 import com.command.domain.dials.RecoveryOption
 import com.command.domain.occurrence.OccurrenceCommand.AcceptRecovery
@@ -281,7 +285,7 @@ object OccurrenceStateMachine {
             events += DomainEvent(EventType.RECOVERY_ACCEPTED, EventPayload.of("choice" to "RESCHEDULE", "minutes" to command.minutes))
             go(DELAYED)
             leaveActive()
-            effects += Effect.ArmChild(ChildKind.DELAY, now + command.minutes * MINUTE_MS)
+            effects += Effect.ArmChild(ChildKind.DELAY, if (tomorrow) sameTimeTomorrow(now, s.zoneId) else now + command.minutes * MINUTE_MS)
             return applied()
         }
 
@@ -319,4 +323,17 @@ object OccurrenceStateMachine {
             }
         }
     }
+}
+
+/**
+ * The same local time on the next calendar day in [zoneId]. Not 24 hours later: on a day the clocks change that is an hour off. A zone that
+ * is not known falls back to UTC, which has no such days.
+ */
+private fun sameTimeTomorrow(nowMs: Long, zoneId: String): Long {
+    val zone: ZoneId = try {
+        ZoneId.of(zoneId)
+    } catch (e: DateTimeException) {
+        ZoneOffset.UTC
+    }
+    return Instant.ofEpochMilli(nowMs).atZone(zone).plusDays(1).toInstant().toEpochMilli()
 }

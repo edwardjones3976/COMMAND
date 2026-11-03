@@ -44,6 +44,8 @@ import com.command.domain.schedule.RestWindow
 import com.command.domain.schedule.RestWindows
 import com.command.domain.time.Clock
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.DayOfWeek
 import java.time.LocalTime
 import java.time.ZoneId
@@ -107,6 +109,18 @@ class OccurrenceRepository @Inject constructor(
     private val roller: WindowRoller,
     private val ringController: RingController,
 ) {
+    /**
+     * A command's platform effects run after its transaction has committed, outside the database, so two commands for one occurrence must
+     * not interleave there: a later cancel could otherwise be undone by an earlier command's effect that was still on its way (a question
+     * posted for an occurrence that is already done, a follow-up alarm armed after it was cancelled). One lock per occurrence, from a fixed
+     * set picked by its id so that there is nothing to clean up, is held from the start of [apply]'s transaction to the end of its effects.
+     * No effect calls back into [apply], so nothing waits on itself. Commands that share a transaction through [inTransaction] span several
+     * occurrences and are not covered.
+     */
+    private val locks = Array(OCCURRENCE_LOCKS) { Mutex() }
+
+    private fun lockOf(occurrenceId: String): Mutex = locks[(occurrenceId.hashCode() and Int.MAX_VALUE) % OCCURRENCE_LOCKS]
+
     internal class Pending(val occurrence: OccurrenceRow, val effect: Effect, val nowMs: Long)
 
     /** Commands applied through this scope share one transaction; their platform effects run after it commits. */
@@ -206,11 +220,11 @@ class OccurrenceRepository @Inject constructor(
         command: OccurrenceCommand,
         source: EventSource,
         extras: ApplyExtras = ApplyExtras.NONE,
-    ): ApplyResult {
+    ): ApplyResult = lockOf(occurrenceId).withLock {
         val pending = ArrayList<Pending>()
         val result = db.withTransaction { applyInTx(occurrenceId, command, source, extras, pending) }
         if (result is ApplyResult.Applied) runEffects(pending, source)
-        return result
+        result
     }
 
     private suspend fun applyInTx(
@@ -233,6 +247,7 @@ class OccurrenceRepository @Inject constructor(
             recoveryOffers = session.recoveryOffers,
             checkInsAsked = session.checkInsAsked,
             restEndsAtUtc = restEndsAt(now),
+            zoneId = occ.zoneId,
         )
 
         when (val r = OccurrenceStateMachine.transition(snapshot, command, now)) {
@@ -463,3 +478,6 @@ class OccurrenceRepository @Inject constructor(
         }
     }
 }
+
+/** How many locks there are to share out between occurrences by their id. */
+private const val OCCURRENCE_LOCKS = 64

@@ -5,6 +5,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.command.data.db.OccurrenceRow
 import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
+import com.command.domain.alarm.CheckInPoster
+import com.command.domain.alarm.CheckInPrompt
 import com.command.domain.dials.Dials
 import com.command.domain.dials.Flexibility
 import com.command.domain.dials.FrictionEvidence
@@ -23,6 +25,9 @@ import com.command.domain.occurrence.WorkKind
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -397,5 +402,74 @@ class OccurrenceRepositoryTest {
         apply(o, OccurrenceCommand.CheckInDue(0, lateMs = 800))
         assertEquals(800L, f.db.checkIns().forOccurrence(o.id).single().lateMs)
         assertTrue(f.db.events().forOccurrence(o.id).none { it.type == EventType.CHECKIN_LATE })
+    }
+
+    // --- effects of two commands never interleave -------------------------------------------------------------------------------------
+
+    /** Holds the question on its way to the shade until the test lets go of it, and writes down what happened in what order. */
+    private class HeldPoster : CheckInPoster {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val order: MutableList<String> = java.util.Collections.synchronizedList(ArrayList())
+
+        override fun post(prompt: CheckInPrompt) {
+            order += "post"
+            entered.countDown()
+            release.await(30, TimeUnit.SECONDS)
+            order += "posted"
+        }
+
+        override fun cancel(occurrenceId: String) {
+            order += "cancel"
+        }
+    }
+
+    @Test
+    fun `an answer that arrives while the question is still on its way waits for it, so that taking the question away is the last word`() = run {
+        val poster = HeldPoster()
+        val repo = OccurrenceRepository(f.db, f.clock, f.scheduler, f.work, poster, f.roller, f.ringer)
+        val m = f.mission()
+        val o = repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        for (c in listOf(OccurrenceCommand.Arm(ArmMode.EXACT), OccurrenceCommand.Fire, OccurrenceCommand.Acknowledge(), OccurrenceCommand.StartGuidance)) {
+            repo.apply(o.id, c, EventSource.SYSTEM)
+        }
+        poster.order.clear() // getting here took a cancel or two of its own; what counts is what happens from now on
+
+        val threads = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
+        val question = threads.async { repo.apply(o.id, OccurrenceCommand.CheckInDue(0), EventSource.RECEIVER) }
+        assertTrue("the question reached the poster", poster.entered.await(30, TimeUnit.SECONDS))
+
+        // The person answers while that is still going on.
+        val answer = threads.async { repo.apply(o.id, OccurrenceCommand.ReportDone, EventSource.USER) }
+        assertNull("it has to wait its turn", withTimeoutOrNull(700) { answer.await() })
+
+        poster.release.countDown()
+        assertTrue(question.await() is ApplyResult.Applied)
+        assertTrue(answer.await() is ApplyResult.Applied)
+
+        assertEquals(OccurrenceState.COMPLETED_SELF_REPORTED, repo.get(o.id)!!.state)
+        assertEquals("the question was posted first and taken away last", listOf("post", "posted", "cancel"), poster.order.toList())
+        assertTrue(
+            "and the follow-up alarm the question armed is gone",
+            f.scheduler.armed.keys.none { it.startsWith("command://checkin/${o.id}") },
+        )
+    }
+
+    @Test
+    fun `tomorrow from the recovery menu is the same local time in the occurrence's zone`() = run {
+        val ny = java.time.ZoneId.of("America/New_York")
+        fun at(y: Int, m: Int, d: Int) = java.time.ZonedDateTime.of(y, m, d, 9, 0, 0, 0, ny).toInstant().toEpochMilli()
+        val m = f.mission(profileId = "builtin_reveille_max") // its recovery setting offers tomorrow
+        f.clock.nowMs = at(2026, 10, 31)
+        val o = f.repo.createOccurrence(m.id, f.clock.nowMs + 60_000, "America/New_York").occurrence
+        for (c in listOf(OccurrenceCommand.Arm(ArmMode.EXACT), OccurrenceCommand.Fire, OccurrenceCommand.Acknowledge(), OccurrenceCommand.StartGuidance, OccurrenceCommand.RequestRecovery)) {
+            apply(o, c)
+        }
+        assertEquals(OccurrenceState.RECOVERY_OFFERED, state(o))
+
+        val r = apply(o, OccurrenceCommand.RescheduleRecovery(OccurrenceCommand.TOMORROW_MINUTES))
+        assertTrue(r is ApplyResult.Applied)
+        val child = f.db.occurrences().forMission(m.id).single { it.parentOccurrenceId == o.id }
+        assertEquals("09:00 the next morning, 25 hours later because the clocks went back that night", at(2026, 11, 1), child.scheduledAtUtc)
     }
 }

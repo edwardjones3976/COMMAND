@@ -29,8 +29,8 @@ class FakeClock(
 
 /** Remembers what is armed, keyed by identity exactly like platform alarms, and records every call. */
 class FakeAlarmScheduler(var exactAllowed: Boolean = true) : AlarmScheduler {
-    val armed: MutableMap<String, AlarmRequest> = LinkedHashMap()
-    val calls: MutableList<String> = ArrayList()
+    val armed: MutableMap<String, AlarmRequest> = java.util.Collections.synchronizedMap(LinkedHashMap())
+    val calls: MutableList<String> = java.util.Collections.synchronizedList(ArrayList())
 
     override fun canScheduleExact(): Boolean = exactAllowed
 

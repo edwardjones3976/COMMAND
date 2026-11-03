@@ -158,6 +158,18 @@ class FollowUpViewModelTest {
     // --- a reset ----------------------------------------------------------------------------------------------------
 
     @Test
+    fun `an occurrence left acknowledged is moved on to guided start when it is opened, and only then asks`() {
+        val o = occurrence(OccurrenceCommand.Arm(ArmMode.EXACT), OccurrenceCommand.Fire, OccurrenceCommand.Acknowledge())
+        assertEquals(OccurrenceState.ACKNOWLEDGED, stateOf(o))
+
+        vm.show(o.id)
+        awaitUntil(message = "guided start") { stateOf(o) == OccurrenceState.GUIDED_START }
+        awaitUi("ask") { it is FollowUpUiState.Ask }
+        vm.started()
+        awaitUntil(message = "started") { stateOf(o) == OccurrenceState.STARTED_SELF_REPORTED }
+    }
+
+    @Test
     fun `asking for a reset shows the menu the person's recovery setting allows`() {
         val o = guided(profile = "builtin_steady") // recovery structure 2: a restart, or later at 30 or 60 minutes, once
         vm.show(o.id)

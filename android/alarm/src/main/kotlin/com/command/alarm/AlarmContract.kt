@@ -56,6 +56,14 @@ object AlarmContract {
      */
     const val ID_RECONCILE = -1
 
+    private val OCCURRENCE_ID = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+    /**
+     * Whether [id] could be an occurrence's id, which is a UUID. The app's launcher activity is exported, so another app can send it any
+     * text: it is checked before it is made part of a route.
+     */
+    fun isOccurrenceId(id: String): Boolean = OCCURRENCE_ID.matches(id)
+
     fun occurrenceId(intent: Intent?): String? =
         intent?.getStringExtra(EXTRA_OCCURRENCE_ID) ?: intent?.data?.takeIf { it.scheme == "command" }?.lastPathSegment
 

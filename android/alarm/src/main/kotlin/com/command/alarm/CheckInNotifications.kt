@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.net.toUri
 import com.command.domain.alarm.CheckInPrompt
@@ -37,6 +38,8 @@ object CheckInNotifications {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(open)
             .setAutoCancel(true)
+            // From Android 8 the channel says that a question is to be heard. Before it there is no channel, so the notification asks itself.
+            .apply { if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) setDefaults(NotificationCompat.DEFAULT_SOUND) }
             .addAction(0, context.getString(first.label), answer(context, prompt, first))
             .addAction(0, context.getString(Quick.DONE.label), answer(context, prompt, Quick.DONE))
             .addAction(0, context.getString(R.string.action_open_check_in), open)
