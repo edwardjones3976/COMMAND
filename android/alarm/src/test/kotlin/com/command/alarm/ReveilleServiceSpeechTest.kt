@@ -374,4 +374,38 @@ class ReveilleServiceSpeechTest {
         awaitUntil(message = "restored") { alarmVolume().getStreamVolume(AudioManager.STREAM_ALARM) == 3 }
         awaitUntil(message = "record cleared") { runBlocking { settings.volumeRestore() } == null }
     }
+
+    /** Lets everything that is queued run for a fixed time, with the main looper pumped as `awaitUntil` does: for what must not happen. */
+    private fun settle(ms: Long) {
+        val end = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < end) {
+            shadowOf(Looper.getMainLooper()).idle()
+            Thread.sleep(5)
+        }
+    }
+
+    @Test
+    fun `a clean-up an earlier ring queued, running after the next one has begun, leaves what that one raised alone`() {
+        runBlocking { consents.grant(ConsentKey.VOLUME_CONTROL) }
+        lowAlarmVolume()
+        val first = armed()
+        val controller = startService(first)
+        awaitUntil(message = "raised and ringing") { alarmVolume().getStreamVolume(AudioManager.STREAM_ALARM) == loudest && controller.get().ringingOccurrenceId == first.id }
+
+        val second = armed()
+        controller.withIntent(fireIntent(second)).startCommand(0, 2)
+        awaitUntil(message = "taken over") { controller.get().ringingOccurrenceId == second.id }
+        awaitUntil(message = "the raised volume now belongs to the second ring") { runBlocking { settings.volumeRestore() }?.occurrenceId == second.id }
+
+        // What the first ring's shutDown queued, arriving only now that the second one is sounding.
+        policy.restoreAnySoon()
+        settle(500) // what is queued has every chance to do its worst
+        assertEquals("the second ring still sounds at the level it raised", loudest, alarmVolume().getStreamVolume(AudioManager.STREAM_ALARM))
+        assertEquals("and the record is still its own", second.id, runBlocking { settings.volumeRestore() }?.occurrenceId)
+
+        session.end(second.id)
+        shadowOf(Looper.getMainLooper()).idle()
+        awaitUntil(message = "restored when it ends") { alarmVolume().getStreamVolume(AudioManager.STREAM_ALARM) == 3 }
+        awaitUntil(message = "record cleared") { runBlocking { settings.volumeRestore() } == null }
+    }
 }
