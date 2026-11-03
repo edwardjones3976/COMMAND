@@ -3,6 +3,7 @@ package com.command.consents
 import com.command.data.ConsentStore
 import com.command.domain.model.ConsentBoundaries
 import com.command.domain.model.ConsentKey
+import com.command.domain.model.ConsentOwner
 import com.command.domain.model.ConsentSource
 import com.command.domain.reliability.Fix
 import com.command.domain.reliability.Precondition
@@ -55,12 +56,18 @@ class ConsentCenterViewModelTest {
 
     private fun item(key: ConsentKey) = ready()!!.items.single { it.boundary.key == key }
 
+    private fun androidAllowed() = ready()?.items?.filter { it.boundary.owner == ConsentOwner.PLATFORM }?.all { it.granted == true } == true
+
     @Test
-    fun `every consent that exists in this version is listed, in order, and none is known before the phone has been asked`() {
+    fun `every consent that exists in this version is listed in order, Android's are unknown until the phone is asked, and the app's are off`() {
         awaitUntil(message = "ready") { ready() != null }
         assertEquals(ConsentBoundaries.all.map { it.key }, ready()!!.items.map { it.boundary.key })
         for (item in ready()!!.items) {
-            assertNull("nothing recorded yet for ${item.boundary.key}", item.granted)
+            if (item.boundary.owner == ConsentOwner.PLATFORM) {
+                assertNull("nothing recorded yet for ${item.boundary.key}", item.granted)
+            } else {
+                assertEquals("${item.boundary.key} is off until the person turns it on", false, item.granted)
+            }
             assertTrue(item.history.isEmpty())
         }
     }
@@ -69,7 +76,7 @@ class ConsentCenterViewModelTest {
     fun `asking the phone fills each consent from what Android says, recorded as the system's doing`() {
         awaitUntil(message = "ready") { ready() != null }
         vm.refresh()
-        awaitUntil(message = "recorded") { ready()?.items?.all { it.granted == true } == true }
+        awaitUntil(message = "recorded") { androidAllowed() }
 
         for (key in listOf(ConsentKey.NOTIFICATIONS, ConsentKey.EXACT_ALARM, ConsentKey.FULL_SCREEN)) {
             assertEquals(ConsentSource.SYSTEM, item(key).latest!!.source)
@@ -80,7 +87,7 @@ class ConsentCenterViewModelTest {
     @Test
     fun `a permission turned off in settings becomes a second line of history, newest first`() {
         vm.refresh()
-        awaitUntil(message = "first") { ready()?.items?.all { it.granted == true } == true }
+        awaitUntil(message = "first") { androidAllowed() }
 
         monitor.set(Precondition.NOTIFICATIONS, "denied")
         vm.refresh()
@@ -96,5 +103,35 @@ class ConsentCenterViewModelTest {
         assertEquals(Fix.ASK_NOTIFICATIONS, item(ConsentKey.NOTIFICATIONS).fix)
         assertEquals(Fix.OPEN_EXACT_ALARM_SETTINGS, item(ConsentKey.EXACT_ALARM).fix)
         assertEquals(Fix.OPEN_FULL_SCREEN_SETTINGS, item(ConsentKey.FULL_SCREEN).fix)
+        assertNull("the app keeps this one, so there is no Android screen for it", item(ConsentKey.VOLUME_CONTROL).fix)
+    }
+
+    @Test
+    fun `a consent the app keeps is switched on and off here, and each choice is recorded as the person's own, newest first`() {
+        awaitUntil(message = "ready") { ready() != null }
+        assertEquals(false, item(ConsentKey.VOLUME_CONTROL).granted)
+
+        vm.setGranted(ConsentKey.VOLUME_CONTROL, true)
+        awaitUntil(message = "on") { ready()?.let { item(ConsentKey.VOLUME_CONTROL).granted == true } == true }
+        vm.setGranted(ConsentKey.VOLUME_CONTROL, false)
+        awaitUntil(message = "off again") { ready()?.let { item(ConsentKey.VOLUME_CONTROL).history.size == 2 } == true }
+
+        val volume = item(ConsentKey.VOLUME_CONTROL)
+        assertEquals(listOf(false, true), volume.history.map { it.granted })
+        assertTrue(volume.history.all { it.source == ConsentSource.USER })
+        assertEquals(false, volume.granted)
+    }
+
+    @Test
+    fun `a permission that Android keeps cannot be switched from here, so nothing is recorded that Android does not say`() {
+        awaitUntil(message = "ready") { ready() != null }
+        vm.setGranted(ConsentKey.NOTIFICATIONS, true)
+        vm.setGranted(ConsentKey.EXACT_ALARM, false)
+        vm.setGranted(ConsentKey.VOLUME_CONTROL, true) // a write started before this one is on the record by the time this one is
+        awaitUntil(message = "volume") { ready()?.let { item(ConsentKey.VOLUME_CONTROL).granted == true } == true }
+
+        assertTrue(item(ConsentKey.NOTIFICATIONS).history.isEmpty())
+        assertTrue(item(ConsentKey.EXACT_ALARM).history.isEmpty())
+        assertNull(item(ConsentKey.NOTIFICATIONS).granted)
     }
 }

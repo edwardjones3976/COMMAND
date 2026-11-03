@@ -47,7 +47,8 @@ class PreconditionRecorderTest {
     private fun healthy() = PreconditionSnapshot(
         mapOf(
             Precondition.EXACT_ALARMS to "granted", Precondition.NOTIFICATIONS to "granted", Precondition.FULL_SCREEN_INTENT to "granted",
-            Precondition.ALARM_CHANNEL to "HIGH", Precondition.ALARM_VOLUME to "audible", Precondition.BATTERY_OPTIMIZATION to "optimized",
+            Precondition.ALARM_CHANNEL to "HIGH", Precondition.ALARM_VOLUME to "audible", Precondition.DO_NOT_DISTURB to "free",
+            Precondition.BATTERY_OPTIMIZATION to "optimized",
             Precondition.BACKGROUND_RESTRICTED to "no", Precondition.STANDBY_BUCKET to "ACTIVE",
         ),
     )
@@ -60,8 +61,8 @@ class PreconditionRecorderTest {
     fun `the first reading is a baseline, with every value logged, the permissions recorded as consents and no permission change`() = run {
         val changes = recorder.record(healthy())
 
-        assertEquals(8, changes.size)
-        assertEquals(8, types(EventType.PRECONDITION).size)
+        assertEquals(Precondition.values().size, changes.size)
+        assertEquals(Precondition.values().size, types(EventType.PRECONDITION).size)
         assertTrue("nothing changed yet", types(EventType.PERMISSION_CHANGED).isEmpty())
         for (key in listOf(ConsentKey.EXACT_ALARM, ConsentKey.NOTIFICATIONS, ConsentKey.FULL_SCREEN)) {
             val row = f.db.consents().latest(key)
@@ -132,7 +133,7 @@ class PreconditionRecorderTest {
     fun `a stored snapshot that cannot be read is treated as a first reading`() = run {
         f.db.settings().put(com.command.data.db.SettingRow(SettingKeys.PERMISSION_SNAPSHOT, "not json at all"))
         assertNull(recorder.last())
-        assertEquals(8, recorder.record(healthy()).size)
+        assertEquals(Precondition.values().size, recorder.record(healthy()).size)
     }
 
     @Test

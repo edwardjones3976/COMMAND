@@ -19,6 +19,7 @@ internal fun itemTitle(precondition: Precondition): String = stringResource(
         Precondition.FULL_SCREEN_INTENT -> R.string.reliability_fullscreen_title
         Precondition.ALARM_CHANNEL -> R.string.reliability_channel_title
         Precondition.ALARM_VOLUME -> R.string.reliability_volume_title
+        Precondition.DO_NOT_DISTURB -> R.string.reliability_dnd_title
         Precondition.BATTERY_OPTIMIZATION -> R.string.reliability_battery_title
         Precondition.BACKGROUND_RESTRICTED -> R.string.reliability_background_title
         Precondition.STANDBY_BUCKET -> R.string.reliability_standby_title
@@ -40,6 +41,7 @@ internal fun itemState(item: ReliabilityItem): String {
                 stringResource(R.string.reliability_channel_problem, stringResource(channelLevel(item.value)))
             }
         Precondition.ALARM_VOLUME -> stringResource(if (ok) R.string.reliability_volume_ok else R.string.reliability_volume_problem)
+        Precondition.DO_NOT_DISTURB -> stringResource(if (ok) R.string.reliability_dnd_ok else R.string.reliability_dnd_problem)
         Precondition.BATTERY_OPTIMIZATION -> stringResource(if (item.value == PreconditionValue.EXEMPT) R.string.reliability_battery_ok else R.string.reliability_battery_info)
         Precondition.BACKGROUND_RESTRICTED -> stringResource(if (ok) R.string.reliability_background_ok else R.string.reliability_background_problem)
         Precondition.STANDBY_BUCKET -> stringResource(standbyName(item.value))
@@ -75,6 +77,7 @@ internal fun itemBody(item: ReliabilityItem): String? {
             Precondition.FULL_SCREEN_INTENT -> R.string.reliability_fullscreen_body
             Precondition.ALARM_CHANNEL -> R.string.reliability_channel_body
             Precondition.ALARM_VOLUME -> R.string.reliability_volume_body
+            Precondition.DO_NOT_DISTURB -> R.string.reliability_dnd_body
             Precondition.BATTERY_OPTIMIZATION -> R.string.reliability_battery_body
             Precondition.BACKGROUND_RESTRICTED -> R.string.reliability_background_body
             Precondition.STANDBY_BUCKET -> R.string.reliability_standby_body

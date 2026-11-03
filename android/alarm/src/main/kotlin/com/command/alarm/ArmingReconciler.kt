@@ -15,9 +15,12 @@ import javax.inject.Singleton
 class ArmingReconciler @Inject constructor(
     private val missions: MissionRepository,
     private val monitor: ReliabilityMonitor,
+    private val volume: AlarmVolumePolicy,
 ) {
     suspend fun run(trigger: ReconcileTrigger): ReconcileReport {
-        // First what the platform allows now, so a permission that was just taken away is on the record before alarms are re-armed.
+        // What a ring that died raised is put back (a ring that is still going is left alone).
+        volume.restoreStale()
+        // Then what the platform allows now, so a permission that was just taken away is on the record before alarms are re-armed.
         monitor.refresh()
         return missions.reconcile(trigger)
     }

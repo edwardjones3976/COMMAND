@@ -5,12 +5,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
@@ -21,6 +23,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -33,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -57,6 +61,7 @@ object ConsentTags {
     fun state(key: ConsentKey) = "consent_state_${key.name}"
     fun settings(key: ConsentKey) = "consent_settings_${key.name}"
     fun historyToggle(key: ConsentKey) = "consent_history_toggle_${key.name}"
+    fun switch(key: ConsentKey) = "consent_switch_${key.name}"
     fun history(key: ConsentKey) = "consent_history_${key.name}"
 }
 
@@ -75,6 +80,7 @@ fun ConsentCenterRoute(onBack: () -> Unit, viewModel: ConsentCenterViewModel = h
         state = state,
         onBack = onBack,
         onOpenSettings = { fix -> SystemLinks.intentFor(context, fix)?.let { SystemLinks.open(context, it) } },
+        onToggle = viewModel::setGranted,
     )
 }
 
@@ -85,6 +91,7 @@ fun ConsentCenterScreen(
     state: ConsentCenterUiState,
     onBack: () -> Unit,
     onOpenSettings: (Fix) -> Unit,
+    onToggle: (ConsentKey, Boolean) -> Unit,
     zone: ZoneId = ZoneId.systemDefault(),
 ) {
     Scaffold(
@@ -109,7 +116,7 @@ fun ConsentCenterScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item { Text(stringResource(R.string.consent_intro), style = MaterialTheme.typography.bodyLarge) }
-                items(state.items, key = { it.boundary.key.name }) { ConsentCard(it, zone, onOpenSettings) }
+                items(state.items, key = { it.boundary.key.name }) { ConsentCard(it, zone, onOpenSettings, onToggle) }
                 item {
                     Text(stringResource(R.string.consent_footer), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag(ConsentTags.FOOTER))
                 }
@@ -119,13 +126,14 @@ fun ConsentCenterScreen(
 }
 
 @Composable
-private fun ConsentCard(item: ConsentItem, zone: ZoneId, onOpenSettings: (Fix) -> Unit) {
+private fun ConsentCard(item: ConsentItem, zone: ZoneId, onOpenSettings: (Fix) -> Unit, onToggle: (ConsentKey, Boolean) -> Unit) {
     val key = item.boundary.key
     var showHistory by rememberSaveable(key.name) { mutableStateOf(false) }
     Card(modifier = Modifier.fillMaxWidth().testTag(ConsentTags.item(key))) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(stringResource(consentTitle(key)), style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
             Text(stringResource(consentAllows(key)), style = MaterialTheme.typography.bodyLarge)
+            consentNot(key)?.let { Text(stringResource(it), style = MaterialTheme.typography.bodyLarge) }
             Text(
                 stringResource(
                     when (item.granted) {
@@ -147,6 +155,19 @@ private fun ConsentCard(item: ConsentItem, zone: ZoneId, onOpenSettings: (Fix) -
             }
             if (item.boundary.owner == ConsentOwner.PLATFORM) {
                 Text(stringResource(R.string.consent_platform_note), style = MaterialTheme.typography.bodyLarge)
+            } else {
+                val on = item.granted == true
+                Row(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                        .toggleable(value = on, role = Role.Switch, onValueChange = { onToggle(key, it) })
+                        .testTag(ConsentTags.switch(key)),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(stringResource(if (on) R.string.consent_switch_on else R.string.consent_switch_off), style = MaterialTheme.typography.titleLarge)
+                    Switch(checked = on, onCheckedChange = null)
+                }
+                Text(stringResource(R.string.consent_app_note), style = MaterialTheme.typography.bodyLarge)
             }
             item.fix?.let { fix ->
                 OutlinedButton(
@@ -186,6 +207,7 @@ private fun consentTitle(key: ConsentKey): Int = when (key) {
     ConsentKey.NOTIFICATIONS -> R.string.consent_notifications_title
     ConsentKey.EXACT_ALARM -> R.string.consent_exact_title
     ConsentKey.FULL_SCREEN -> R.string.consent_fullscreen_title
+    ConsentKey.VOLUME_CONTROL -> R.string.consent_volume_title
     else -> error("$key has no words yet: a consent is added to the list together with what it says")
 }
 
@@ -194,5 +216,13 @@ private fun consentAllows(key: ConsentKey): Int = when (key) {
     ConsentKey.NOTIFICATIONS -> R.string.consent_notifications_allows
     ConsentKey.EXACT_ALARM -> R.string.consent_exact_allows
     ConsentKey.FULL_SCREEN -> R.string.consent_fullscreen_allows
+    ConsentKey.VOLUME_CONTROL -> R.string.consent_volume_allows
     else -> error("$key has no words yet: a consent is added to the list together with what it says")
+}
+
+/** What a consent that the app owns does not allow, said as plainly as what it does. The ones Android keeps need no such line. */
+@StringRes
+private fun consentNot(key: ConsentKey): Int? = when (key) {
+    ConsentKey.VOLUME_CONTROL -> R.string.consent_volume_not
+    else -> null
 }

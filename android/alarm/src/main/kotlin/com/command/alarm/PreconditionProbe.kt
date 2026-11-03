@@ -36,6 +36,7 @@ class PreconditionProbe @Inject constructor(
         values[Precondition.ALARM_CHANNEL] = alarmChannelImportance()
         values[Precondition.FULL_SCREEN_INTENT] = granted(canUseFullScreenIntent())
         values[Precondition.ALARM_VOLUME] = if (alarmStreamAudible()) PreconditionValue.AUDIBLE else PreconditionValue.MUTED
+        values[Precondition.DO_NOT_DISTURB] = if (doNotDisturbBlocksAlarms()) PreconditionValue.DND_BLOCKS_ALARMS else PreconditionValue.DND_FREE
         values[Precondition.BATTERY_OPTIMIZATION] = if (ignoringBatteryOptimizations()) PreconditionValue.EXEMPT else PreconditionValue.OPTIMIZED
         values[Precondition.BACKGROUND_RESTRICTED] = if (backgroundRestricted()) PreconditionValue.YES else PreconditionValue.NO
         values[Precondition.STANDBY_BUCKET] = standbyBucket()
@@ -67,6 +68,22 @@ class PreconditionProbe @Inject constructor(
     private fun alarmStreamAudible(): Boolean {
         val audio = context.getSystemService(AudioManager::class.java) ?: return true
         return !audio.isStreamMute(AudioManager.STREAM_ALARM) && audio.getStreamVolume(AudioManager.STREAM_ALARM) > 0
+    }
+
+    /**
+     * Total silence blocks alarms; priority-only blocks them unless the person left the alarms switch on, which is the default. Before
+     * Android 9 there was no such switch and priority-only always let alarms through. Reading the filter and the policy needs no
+     * special access; changing them would, and the app never asks for it.
+     */
+    private fun doNotDisturbBlocksAlarms(): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        return when (manager.currentInterruptionFilter) {
+            NotificationManager.INTERRUPTION_FILTER_NONE -> true
+            NotificationManager.INTERRUPTION_FILTER_PRIORITY ->
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                    manager.notificationPolicy.priorityCategories and NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS == 0
+            else -> false
+        }
     }
 
     private fun ignoringBatteryOptimizations(): Boolean =

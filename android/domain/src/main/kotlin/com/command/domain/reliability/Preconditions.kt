@@ -16,6 +16,12 @@ object PreconditionValue {
     const val YES = "yes"
     const val NO = "no"
     const val IMPORTANCE_HIGH = "HIGH"
+
+    /** Do Not Disturb is off, or on in a way that lets alarms through. */
+    const val DND_FREE = "free"
+
+    /** Do Not Disturb is on and alarms are among what it blocks. */
+    const val DND_BLOCKS_ALARMS = "blocks_alarms"
 }
 
 /**
@@ -38,6 +44,9 @@ enum class Precondition(val consent: ConsentKey?, val fix: Fix?) {
 
     /** The alarm stream is muted or at zero: an alarm that makes no sound is the failure this app exists to prevent. */
     ALARM_VOLUME(null, Fix.OPEN_SOUND_SETTINGS),
+
+    /** Do Not Disturb set to total silence, or to priority only with alarms switched off, keeps an alarm from making a sound. */
+    DO_NOT_DISTURB(null, Fix.OPEN_SOUND_SETTINGS),
     BATTERY_OPTIMIZATION(null, Fix.OPEN_BATTERY_SETTINGS),
     BACKGROUND_RESTRICTED(null, Fix.OPEN_APP_SETTINGS),
 
@@ -51,6 +60,7 @@ enum class Precondition(val consent: ConsentKey?, val fix: Fix?) {
         EXACT_ALARMS, NOTIFICATIONS, FULL_SCREEN_INTENT -> if (value == PreconditionValue.GRANTED) Severity.OK else Severity.PROBLEM
         ALARM_CHANNEL -> if (value == PreconditionValue.IMPORTANCE_HIGH) Severity.OK else Severity.PROBLEM
         ALARM_VOLUME -> if (value == PreconditionValue.AUDIBLE) Severity.OK else Severity.PROBLEM
+        DO_NOT_DISTURB -> if (value == PreconditionValue.DND_BLOCKS_ALARMS) Severity.PROBLEM else Severity.OK
         BATTERY_OPTIMIZATION -> if (value == PreconditionValue.EXEMPT) Severity.OK else Severity.INFO
         BACKGROUND_RESTRICTED -> if (value == PreconditionValue.NO) Severity.OK else Severity.WARNING
         STANDBY_BUCKET -> if (value == "RARE" || value == "RESTRICTED") Severity.WARNING else Severity.OK
