@@ -53,7 +53,15 @@ class AlarmVolumePolicy @Inject constructor(
         val manager = audio ?: return false
         val highest = manager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
         val current = manager.getStreamVolume(AudioManager.STREAM_ALARM)
-        if (current >= highest) return false
+        if (current >= highest) {
+            // Already as loud as it goes. If that is what an earlier ring of this run raised, the raised volume now belongs to this ring:
+            // the earlier ring's delayed clean-up then finds a record that is not its own and leaves the volume alone while this one sounds.
+            val record = settings.volumeRestore()
+            if (record != null && record.occurrenceId != row.id && record.set == current) {
+                settings.saveVolumeRestore(record.copy(occurrenceId = row.id))
+            }
+            return false
+        }
         // Written first, so that a ring that dies half-way leaves what is needed to undo it.
         settings.saveVolumeRestore(VolumeRestore(row.id, original = current, set = highest, atUtc = clock.nowMs()))
         try {
@@ -120,6 +128,14 @@ class AlarmVolumePolicy @Inject constructor(
                         repository.logEvent(EventType.VOLUME_SET_REFUSED, it, EventSource.SERVICE, EventPayload.of("phase" to "restore"))
                     }
                     return
+                }
+                val now = manager.getStreamVolume(AudioManager.STREAM_ALARM)
+                if (now != record.original) {
+                    // The platform keeps an app without its privileged audio permission above a floor of its own, so a level below it cannot be
+                    // put back. The record is cleared (nothing more can be done) but the log says what was wanted and what came out.
+                    repository.get(record.occurrenceId)?.let {
+                        repository.logEvent(EventType.VOLUME_SET_REFUSED, it, EventSource.SERVICE, EventPayload.of("phase" to "restore", "wanted" to record.original, "got" to now))
+                    }
                 }
             } else {
                 // The person has moved it since: what they chose now is theirs, so it is left as it is.

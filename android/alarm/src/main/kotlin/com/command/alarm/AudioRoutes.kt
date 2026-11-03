@@ -3,7 +3,7 @@ package com.command.alarm
 import android.content.Context
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
-import android.os.Build
+import com.command.voice.HeadsetDevices
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 
@@ -20,21 +20,10 @@ class AndroidAudioRoutes @Inject constructor(@ApplicationContext private val con
     private fun outputs(): List<AudioDeviceInfo> =
         runCatching { context.getSystemService(AudioManager::class.java)?.getDevices(AudioManager.GET_DEVICES_OUTPUTS)?.toList() }.getOrNull().orEmpty()
 
-    private fun kindOf(device: AudioDeviceInfo): String? = when (device.type) {
-        AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "wired"
-        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "bt"
-        AudioDeviceInfo.TYPE_USB_HEADSET -> "usb"
-        else -> when {
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && device.type == AudioDeviceInfo.TYPE_HEARING_AID -> "hearing"
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && device.type == AudioDeviceInfo.TYPE_BLE_HEADSET -> "ble"
-            else -> null
-        }
-    }
-
-    override fun headsetConnected(): Boolean = outputs().any { kindOf(it) != null }
+    override fun headsetConnected(): Boolean = outputs().any { HeadsetDevices.isHeadset(it) }
 
     override fun describe(): String {
-        val kinds = outputs().mapNotNull { kindOf(it) }.distinct().sorted()
+        val kinds = outputs().mapNotNull { HeadsetDevices.kindOf(it.type) }.distinct().sorted()
         return (listOf("speaker") + kinds).joinToString("+")
     }
 }

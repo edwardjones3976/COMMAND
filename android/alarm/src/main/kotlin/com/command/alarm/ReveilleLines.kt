@@ -20,13 +20,16 @@ class ReveilleLines @Inject constructor(@ApplicationContext private val context:
         val step = spoken(brief?.firstAction)
         val segments = ArrayList<Segment>()
         segments += Segment(context.getString(if (title.isEmpty()) R.string.say_start else R.string.say_start_titled))
-        if (title.isNotEmpty()) segments += Segment(context.getString(R.string.say_user_text, title), carriesUserText = true)
+        if (title.isNotEmpty()) segments += Segment(sentence(title), carriesUserText = true)
         if (step.isNotEmpty()) {
             segments += Segment(context.getString(R.string.say_first_step))
-            segments += Segment(context.getString(R.string.say_user_text, step), carriesUserText = true)
+            segments += Segment(sentence(step), carriesUserText = true)
         }
         return Line(segments)
     }
+
+    /** The person's words as a sentence: with a full stop of its own, unless they already end in a question mark or an exclamation mark. */
+    private fun sentence(text: String): String = if (text.last() in "?!") text else context.getString(R.string.say_user_text, text)
 
     /** The person's words, trimmed and without a closing full stop, because the sentence they are put in has its own. */
     private fun spoken(text: String?): String = text.orEmpty().trim().trimEnd('.').trim()

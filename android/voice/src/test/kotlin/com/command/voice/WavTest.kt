@@ -80,4 +80,16 @@ class WavTest {
         assertNull("six channels", Wav.read(wav(shortArrayOf(1, 2, 3, 4, 5, 6), channels = 6)))
         assertNull("no audio at all", Wav.read(wav(ShortArray(0))))
     }
+
+    @Test
+    fun `a chunk that claims to be almost four gigabytes ends the walk instead of wrapping round it`() {
+        val header = wav(shortArrayOf(1, 2, 3), extraChunk = ByteArray(0))
+        // Rewrite the LIST chunk's size (right after the format chunk) to a value near the top of the range.
+        val listAt = String(header, Charsets.US_ASCII).indexOf("LIST")
+        val broken = header.copyOf()
+        le32(0x7FFFFFF0).copyInto(broken, listAt + 4)
+        assertNull(Wav.read(broken))
+        le32(-8).copyInto(broken, listAt + 4)
+        assertNull(Wav.read(broken))
+    }
 }

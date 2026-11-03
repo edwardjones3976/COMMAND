@@ -2,6 +2,7 @@ package com.command.alarm
 
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.media.AudioManager
 import com.command.data.OccurrenceRepository
 import com.command.domain.alarm.RingController
 import com.command.domain.voice.Speaker
@@ -62,15 +63,16 @@ abstract class AlarmBindings {
 }
 
 /**
- * The phone's own voice for the ring. Nothing is started or held until the first line is asked for, and the service lets the engine
- * go when its ring is over.
+ * The phone's own voice for the ring. Nothing is started until a ring begins: the service starts the engine alongside the ring and lets
+ * it go when the ring is over. The player is given the audio manager so that a line meant for a headset only can be pinned to one.
  */
 @Module
 @InstallIn(SingletonComponent::class)
 object VoiceProviders {
     @Provides
     @Singleton
-    fun speaker(@ApplicationContext context: Context): Speaker = LocalTtsSpeaker(AndroidSpeechSynthesizer(context), AudioTrackPlayer())
+    fun speaker(@ApplicationContext context: Context): Speaker =
+        LocalTtsSpeaker(AndroidSpeechSynthesizer(context), AudioTrackPlayer(context.getSystemService(AudioManager::class.java)))
 }
 
 /**

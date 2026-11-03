@@ -204,6 +204,9 @@ class ReveilleService : Service() {
             row = current // restarted in the middle of this ring
         }
 
+        // The same alarm delivered twice (two reconciles can do it): the ring that is going carries on, and its line is not said again.
+        if (active?.id == row.id) return
+
         val plan = SessionPlan.of(row)
         if (plan == null || plan.isOver(clock.nowMs(), clock.elapsedRealtimeMs())) {
             // The plan ended while nothing was alive to enforce it: record the miss and do not ring at all.
@@ -223,6 +226,8 @@ class ReveilleService : Service() {
         val previous = active
         previous?.playback?.cancel()
         previous?.speech?.cancel()
+        // The displaced ring's line is stopped, in the player and in the engine, before the new ring's is asked for.
+        if (previous != null) speaker.stop()
         val ring = ActiveRing(row.id, code, title)
         active = ring
         // This ring's notification, now with its title, becomes the foreground one. An earlier ring's, if there was one,
@@ -237,9 +242,10 @@ class ReveilleService : Service() {
             endRing(ring.id)
         }
         // The tone is already going. The first line joins it when the phone's voice is ready (it never holds the ring up), and the
-        // volume is raised only if the person agreed to that and only for the first ring of a run of them.
+        // volume is raised only if the person agreed to that. A ring that takes over from another finds the volume already raised and
+        // adopts it, so that the first ring's delayed clean-up cannot lower it while this one sounds.
         ring.speech = launchExtra("speech") { say(row, brief) }
-        if (previous == null) launchExtra("raising the volume") { volume.raiseFor(row) }
+        launchExtra("raising the volume") { volume.raiseFor(row) }
     }
 
     /**
@@ -271,7 +277,7 @@ class ReveilleService : Service() {
         // The tone is turned down only once the line is about to be heard: while the engine is starting up or writing the audio, which
         // can take seconds, the alarm is as loud as it ever is.
         val result = try {
-            speaker.speak(lines.reveille(brief), SpeechUsage.ALARM) { output.duck(true) }
+            speaker.speak(lines.reveille(brief), SpeechUsage.ALARM, policy) { output.duck(true) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

@@ -1,11 +1,11 @@
 package com.command.voice
 
 import android.content.Context
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
 import com.command.domain.voice.SpeechProblem
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
@@ -13,32 +13,48 @@ import java.util.Locale
 import java.util.UUID
 
 /**
- * Speech from the engine the phone already has (Android's TextToSpeech), written to a file and read back as audio so that it can
- * be levelled and played on the alarm stream. The engine is started ahead of the first line when the caller can ([prepare]) or else
- * the first time it is asked, waited for no longer than [initTimeoutMs] (a cold Google engine took about six seconds to be ready on the
- * API 36 emulator), and let go with [shutdown]. Nothing here uses the network by itself: whether the engine does is its business, and
- * an offline voice is used when the phone has one.
+ * Speech from the engine the phone already has (Android's TextToSpeech), written to a file and read back as audio so that it can be levelled
+ * and played on the alarm stream. The engine is started ahead of the first line when the caller can ([prepare]) or else the first time it
+ * is asked, waited for no longer than [initTimeoutMs] (a cold Google engine took about six seconds to be ready on the API 36 emulator), and
+ * let go with [shutdown].
+ *
+ * The person's words go only to a voice that works on the phone: the engine's own voice when it does, otherwise an installed offline voice of
+ * the person's language ([OfflineVoices]), and when there is none nothing is said. Nothing here opens a connection. The engine handles one
+ * line at a time, so a line that is abandoned (the ring ended, or a later ring took over) is stopped in the engine before the next is handed
+ * over, and cannot hold it up.
  */
-class AndroidSpeechSynthesizer(
-    context: Context,
-    private val initTimeoutMs: Long = 12_000,
-    private val synthesisTimeoutMs: Long = 15_000,
+class AndroidSpeechSynthesizer internal constructor(
+    private val newEngine: (onReady: (Boolean) -> Unit) -> TtsEngine,
+    private val workDir: File,
+    private val initTimeoutMs: Long,
+    private val synthesisTimeoutMs: Long,
+    private val locale: () -> Locale,
 ) : SpeechSynthesizer {
 
-    private val context = context.applicationContext
-    private var engine: TextToSpeech? = null
-    private var ready: CompletableDeferred<Boolean>? = null
+    constructor(context: Context, initTimeoutMs: Long = 12_000, synthesisTimeoutMs: Long = 15_000) : this(
+        newEngine = { onReady -> AndroidTtsEngine(context.applicationContext, onReady) },
+        workDir = context.applicationContext.cacheDir,
+        initTimeoutMs = initTimeoutMs,
+        synthesisTimeoutMs = synthesisTimeoutMs,
+        locale = { Locale.getDefault() },
+    )
+
+    private class Started(val engine: TtsEngine, val ready: CompletableDeferred<Boolean>)
+
+    private var started: Started? = null
+
+    /** One line at a time goes through the engine. */
+    private val gate = Mutex()
+
+    /** The line the engine is working on, so that letting the engine go can end the wait for it. */
+    @Volatile private var inFlight: CompletableDeferred<Boolean>? = null
 
     @Synchronized
-    private fun start(): Pair<TextToSpeech, CompletableDeferred<Boolean>> {
-        val existing = engine
-        val gate = ready
-        if (existing != null && gate != null) return existing to gate
-        val signal = CompletableDeferred<Boolean>()
-        val created = TextToSpeech(context) { status -> signal.complete(status == TextToSpeech.SUCCESS) }
-        engine = created
-        ready = signal
-        return created to signal
+    private fun start(): Started {
+        started?.let { return it }
+        val ready = CompletableDeferred<Boolean>()
+        val engine = newEngine { ok -> ready.complete(ok) }
+        return Started(engine, ready).also { started = it }
     }
 
     override fun prepare() {
@@ -46,53 +62,43 @@ class AndroidSpeechSynthesizer(
     }
 
     override suspend fun synthesize(text: String): Synthesis {
-        val (tts, signal) = start()
-        val usable = withTimeoutOrNull(initTimeoutMs) { signal.await() }
+        val engine = start()
+        val usable = withTimeoutOrNull(initTimeoutMs) { engine.ready.await() }
             ?: return Synthesis.Failed(SpeechProblem.INIT_TIMEOUT)
         if (!usable) {
             shutdown() // a failed engine is not kept: the next ask tries again
             return Synthesis.Failed(SpeechProblem.NO_ENGINE)
         }
-        runCatching { tts.language = Locale.getDefault() } // an unsupported language leaves the engine's own default
+        return gate.withLock { synthesizeOne(engine.engine, text) }
+    }
+
+    private suspend fun synthesizeOne(engine: TtsEngine, text: String): Synthesis {
+        val language = locale()
+        engine.setLanguage(language)
+        if (!OfflineVoices.pin(engine, language)) return Synthesis.Failed(SpeechProblem.NO_OFFLINE_VOICE)
         val utterance = UUID.randomUUID().toString()
-        val file = File.createTempFile("line", ".wav", context.cacheDir)
+        val file = File.createTempFile("line", ".wav", workDir)
         val finished = CompletableDeferred<Boolean>()
-        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) = Unit
-
-            override fun onDone(utteranceId: String?) {
-                if (utteranceId == utterance) finished.complete(true)
+        inFlight = finished
+        try {
+            if (!engine.synthesizeToFile(text, file, utterance) { ok -> finished.complete(ok) }) {
+                return Synthesis.Failed(SpeechProblem.SYNTHESIS_FAILED)
             }
-
-            @Deprecated("Superseded by the version with an error code")
-            override fun onError(utteranceId: String?) {
-                if (utteranceId == utterance) finished.complete(false)
-            }
-
-            override fun onError(utteranceId: String?, errorCode: Int) {
-                if (utteranceId == utterance) finished.complete(false)
-            }
-        })
-        return try {
-            if (tts.synthesizeToFile(text, null, file, utterance) != TextToSpeech.SUCCESS) {
-                Synthesis.Failed(SpeechProblem.SYNTHESIS_FAILED)
-            } else if (withTimeoutOrNull(synthesisTimeoutMs) { finished.await() } != true) {
-                runCatching { tts.stop() }
-                Synthesis.Failed(SpeechProblem.SYNTHESIS_FAILED)
-            } else {
-                val audio = withContext(Dispatchers.IO) { Wav.read(file.readBytes()) }
-                if (audio == null) Synthesis.Failed(SpeechProblem.SYNTHESIS_FAILED) else Synthesis.Audio(audio)
-            }
+            if (withTimeoutOrNull(synthesisTimeoutMs) { finished.await() } != true) return Synthesis.Failed(SpeechProblem.SYNTHESIS_FAILED)
+            val audio = withContext(Dispatchers.IO) { Wav.read(file.readBytes()) }
+            return if (audio == null) Synthesis.Failed(SpeechProblem.SYNTHESIS_FAILED) else Synthesis.Audio(audio)
         } finally {
+            inFlight = null
+            // Cancelled, timed out or failed: the engine is told to stop before anything else is handed to it. (A line that finished leaves
+            // nothing to stop.)
+            if (!finished.isCompleted) runCatching { engine.stop() }
             file.delete()
         }
     }
 
-    @Synchronized
     override fun shutdown() {
-        runCatching { engine?.stop() }
-        runCatching { engine?.shutdown() }
-        engine = null
-        ready = null
+        inFlight?.complete(false) // the line that was being written is not waited for any more
+        val current = synchronized(this) { started.also { started = null } } ?: return
+        current.engine.shutdown()
     }
 }

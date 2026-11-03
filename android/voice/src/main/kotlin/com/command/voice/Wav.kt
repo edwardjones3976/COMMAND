@@ -30,8 +30,10 @@ internal object Wav {
                 dataLength = if (declared <= 0 || declared > remaining) remaining else declared
                 break
             }
-            if (declared < 0) return null
-            at = body + declared + (declared and 1) // chunks start on even offsets
+            // Chunks start on even offsets. The sum is made in Long: a size near the top of the range must end the walk, not wrap round.
+            val next = body.toLong() + (declared.toLong() and 0xFFFFFFFFL) + (declared and 1)
+            if (next > bytes.size) break
+            at = next.toInt()
         }
         val plainPcm = format == PCM || format == EXTENSIBLE
         if (dataStart < 0 || !plainPcm || bits != 16 || channels !in 1..2 || rate <= 0) return null

@@ -57,6 +57,7 @@ class AlarmVolumePolicyTest {
     @Before
     fun setUp() {
         VolumeRefusalShadow.refuse = false
+        VolumeRefusalShadow.floor = 0
         hilt.inject()
         audio = ApplicationProvider.getApplicationContext<Context>().getSystemService(AudioManager::class.java)
         assertTrue("the alarm stream has room to be raised", loudest > 5)
@@ -66,6 +67,7 @@ class AlarmVolumePolicyTest {
     @After
     fun tearDown() {
         VolumeRefusalShadow.refuse = false
+        VolumeRefusalShadow.floor = 0
     }
 
     private fun armed(): OccurrenceRow = runBlocking {
@@ -237,5 +239,59 @@ class AlarmVolumePolicyTest {
         runBlocking { policy.restoreStale() }
         assertEquals(3, volume())
         assertNull(record())
+    }
+
+    @Test
+    fun `a later ring adopts the volume an earlier one raised, so the earlier one's delayed clean-up cannot lower it`() {
+        allowed()
+        val first = armed()
+        val second = armed()
+        runBlocking { policy.raiseFor(first) }
+
+        assertFalse("already as loud as it goes", runBlocking { policy.raiseFor(second) })
+        assertEquals("but the raised volume is now the second ring's", second.id, record()!!.occurrenceId)
+
+        runBlocking { policy.restoreFor(first.id) } // the first ring's clean-up, arriving after the second ring has begun
+        assertEquals(loudest, volume())
+        assertNotNull(record())
+
+        runBlocking { policy.restoreFor(second.id) }
+        assertEquals(3, volume())
+        assertNull(record())
+    }
+
+    @Test
+    fun `a volume the person turned down during one ring is what the next ring puts back`() {
+        allowed()
+        val first = armed()
+        val second = armed()
+        runBlocking { policy.raiseFor(first) }
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 5, 0) // they turned it down a little
+
+        assertTrue(runBlocking { policy.raiseFor(second) })
+        assertEquals("their level, not the one before the first ring", 5, record()!!.original)
+
+        runBlocking { policy.restoreFor(first.id) } // the first ring's clean-up, arriving late, changes nothing
+        assertEquals(loudest, volume())
+
+        runBlocking { policy.restoreFor(second.id) }
+        assertEquals(5, volume())
+        assertNull(record())
+    }
+
+    @Test
+    fun `a restore that the platform cannot take as low as the person had it is written down with what was wanted and what came out`() {
+        allowed()
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 1, 0) // a level that only a privileged caller could have set
+        val o = armed()
+        runBlocking { policy.raiseFor(o) }
+
+        VolumeRefusalShadow.floor = 3
+        runBlocking { policy.restoreFor(o.id) }
+
+        assertEquals(3, volume())
+        assertNull("nothing more can be done, so the record is cleared", record())
+        val note = events(o, EventType.VOLUME_SET_REFUSED).single().payloadJson
+        assertTrue(note.contains("\"wanted\":\"1\"") && note.contains("\"got\":\"3\"") && note.contains("restore"))
     }
 }

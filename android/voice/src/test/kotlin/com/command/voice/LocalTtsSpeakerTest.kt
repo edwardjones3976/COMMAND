@@ -1,6 +1,7 @@
 package com.command.voice
 
 import com.command.domain.voice.Line
+import com.command.domain.voice.RoutePolicy
 import com.command.domain.voice.Segment
 import com.command.domain.voice.SpeakResult
 import com.command.domain.voice.SpeechProblem
@@ -41,13 +42,15 @@ class LocalTtsSpeakerTest {
 
     private class FakePlayer : PcmPlayer {
         val played = ArrayList<Triple<ShortArray, Int, SpeechUsage>>()
+        val routes = ArrayList<RoutePolicy>()
         var stops = 0
         var failWith: Exception? = null
         var waitForStop: CompletableDeferred<Unit>? = null
         var durationMs = 1_500L
 
-        override suspend fun play(pcm: ShortArray, sampleRate: Int, usage: SpeechUsage): Long {
+        override suspend fun play(pcm: ShortArray, sampleRate: Int, usage: SpeechUsage, route: RoutePolicy): Long {
             failWith?.let { throw it }
+            routes += route
             played += Triple(pcm, sampleRate, usage)
             waitForStop?.await()
             return durationMs
@@ -198,7 +201,7 @@ class LocalTtsSpeakerTest {
         val order = ArrayList<String>()
         val synth = FakeSynth { order += "engine"; Synthesis.Audio(tone()) }
         val player = object : PcmPlayer {
-            override suspend fun play(pcm: ShortArray, sampleRate: Int, usage: SpeechUsage): Long {
+            override suspend fun play(pcm: ShortArray, sampleRate: Int, usage: SpeechUsage, route: RoutePolicy): Long {
                 order += "play"
                 return 1_000
             }
@@ -241,5 +244,45 @@ class LocalTtsSpeakerTest {
         assertTrue("nothing was asked for yet", synth.asked.isEmpty())
         assertTrue("and nothing was played", player.played.isEmpty())
         assertEquals(SpeakResult.Spoken(1_500), speaker.speak(Line.of("Time to start."), SpeechUsage.ALARM))
+    }
+
+    @Test
+    fun `where the line may be heard is passed to the player, and the default is anywhere`() = runTest {
+        val player = FakePlayer()
+        val speaker = speaker(FakeSynth { Synthesis.Audio(tone()) }, player)
+        speaker.speak(Line.of("One"), SpeechUsage.ALARM)
+        speaker.speak(Line.of("Two"), SpeechUsage.ALARM, RoutePolicy.HEADSET_ONLY)
+        assertEquals(listOf(RoutePolicy.SPEAKER_AND_HEADSET, RoutePolicy.HEADSET_ONLY), player.routes)
+    }
+
+    @Test
+    fun `a headset that cannot be used is reported as such, and nothing else is said about the line`() = runTest {
+        val player = FakePlayer().apply { failWith = RouteUnavailableException() }
+        val result = speaker(FakeSynth { Synthesis.Audio(tone()) }, player).speak(Line.of("Time to start."), SpeechUsage.ALARM, RoutePolicy.HEADSET_ONLY)
+        assertEquals(SpeakResult.Unavailable(SpeechProblem.HEADSET_REQUIRED), result)
+    }
+
+    @Test
+    fun `a line asked for while an earlier one is still being prepared replaces it, and the earlier one never becomes audible`() = runTest {
+        val first = CompletableDeferred<Synthesis>()
+        var calls = 0
+        val synth = object : SpeechSynthesizer {
+            override suspend fun synthesize(text: String): Synthesis = if (calls++ == 0) first.await() else Synthesis.Audio(tone())
+            override fun shutdown() = Unit
+        }
+        val player = FakePlayer()
+        val speaker = LocalTtsSpeaker(synth, player, master = { it.pcm })
+        val audibleFor = ArrayList<String>()
+
+        val a = async { speaker.speak(Line.of("First"), SpeechUsage.ALARM) { audibleFor += "first" } }
+        kotlinx.coroutines.yield()
+        val b = async { speaker.speak(Line.of("Second"), SpeechUsage.ALARM) { audibleFor += "second" } }
+        kotlinx.coroutines.yield()
+        first.complete(Synthesis.Audio(tone())) // the engine finishes the old line only now
+
+        assertEquals(SpeakResult.Interrupted, a.await())
+        assertEquals(SpeakResult.Spoken(1_500), b.await())
+        assertEquals("only the later line was ever heard", listOf("second"), audibleFor)
+        assertEquals(1, player.played.size)
     }
 }

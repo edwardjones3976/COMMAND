@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -157,9 +158,12 @@ private fun ConsentCard(item: ConsentItem, zone: ZoneId, onOpenSettings: (Fix) -
                 Text(stringResource(R.string.consent_platform_note), style = MaterialTheme.typography.bodyLarge)
             } else {
                 val on = item.granted == true
+                // The title is outside the switch's row, so a screen reader would hear only "On" or "Off": the row carries the title.
+                val switchLabel = stringResource(consentTitle(key))
                 Row(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
                         .toggleable(value = on, role = Role.Switch, onValueChange = { onToggle(key, it) })
+                        .semantics { contentDescription = switchLabel }
                         .testTag(ConsentTags.switch(key)),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,

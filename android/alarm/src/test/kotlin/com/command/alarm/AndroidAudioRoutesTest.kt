@@ -4,8 +4,10 @@ import android.content.Context
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import androidx.test.core.app.ApplicationProvider
+import com.command.voice.HeadsetDevices
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -78,5 +80,23 @@ class AndroidAudioRoutesTest {
         connected(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_HDMI)
         assertFalse(routes.headsetConnected())
         assertEquals("speaker", routes.describe())
+    }
+
+    private fun device(type: Int) = AudioDeviceInfoBuilder.newBuilder().setType(type).build()
+
+    @Test
+    fun `a headset-only line is pinned to a wired headset before anything else, and Bluetooth calls are never a place to play it`() {
+        val wired = device(AudioDeviceInfo.TYPE_WIRED_HEADPHONES)
+        val usb = device(AudioDeviceInfo.TYPE_USB_HEADSET)
+        val a2dp = device(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP)
+        val sco = device(AudioDeviceInfo.TYPE_BLUETOOTH_SCO)
+        val speaker = device(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+
+        assertEquals(wired, HeadsetDevices.playbackTarget(listOf(speaker, a2dp, usb, wired)))
+        assertEquals(usb, HeadsetDevices.playbackTarget(listOf(speaker, a2dp, usb)))
+        assertEquals(a2dp, HeadsetDevices.playbackTarget(listOf(speaker, sco, a2dp)))
+        assertNull("the call channel is a headset for the log but not a target", HeadsetDevices.playbackTarget(listOf(speaker, sco)))
+        assertNull("the phone's own speaker is never a target", HeadsetDevices.playbackTarget(listOf(speaker)))
+        assertNull(HeadsetDevices.playbackTarget(emptyList()))
     }
 }

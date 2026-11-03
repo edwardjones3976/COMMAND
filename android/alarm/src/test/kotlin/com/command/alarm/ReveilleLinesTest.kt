@@ -61,4 +61,10 @@ class ReveilleLinesTest {
         assertFalse(ours.contains("pen"))
         assertEquals(listOf("Zebra crossing.", "Hold the pen."), line.segments.filter { it.carriesUserText }.map { it.text })
     }
+
+    @Test
+    fun `a title that ends in a question mark or an exclamation mark is not given a full stop as well`() {
+        assertEquals("Time to start: Ready? First step: Go!", lines.reveille(brief("Ready?", "Go!")).text)
+        assertEquals("trailing full stops after the mark are dropped", "Time to start: Done?", lines.reveille(brief("Done?..", "")).text)
+    }
 }

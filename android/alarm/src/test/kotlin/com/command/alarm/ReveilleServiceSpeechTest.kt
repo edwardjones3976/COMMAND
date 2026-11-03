@@ -71,8 +71,8 @@ class ReveilleServiceSpeechTest {
         shadowOf(context as android.app.Application).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    private fun armed(): OccurrenceRow = runBlocking {
-        val mission = testMission(title = "Write the report")
+    private fun armed(title: String = "Write the report"): OccurrenceRow = runBlocking {
+        val mission = testMission(title = title)
         db.missions().insert(mission)
         val occurrence = repo.createOccurrence(mission.id, FakeAlarmModule.T0 + 60_000, "UTC").occurrence
         repo.apply(occurrence.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
@@ -183,6 +183,7 @@ class ReveilleServiceSpeechTest {
         val o = armed()
         startService(o)
         awaitUntil(message = "spoken") { speaker.spoken.isNotEmpty() }
+        assertEquals(listOf(RoutePolicy.SPEAKER_AND_HEADSET), speaker.routes)
     }
 
     // --- the alarm volume ----------------------------------------------------------------------------------------------------------
@@ -286,6 +287,90 @@ class ReveilleServiceSpeechTest {
         awaitUntil(message = "raised and ringing") { alarmVolume().getStreamVolume(AudioManager.STREAM_ALARM) == loudest && controller.get().ringingOccurrenceId == o.id }
 
         controller.destroy() // the system took the service, and the ring with it
+        awaitUntil(message = "restored") { alarmVolume().getStreamVolume(AudioManager.STREAM_ALARM) == 3 }
+        awaitUntil(message = "record cleared") { runBlocking { settings.volumeRestore() } == null }
+    }
+
+    @Test
+    fun `the route the person allowed goes to the speaker with the line, so that playback can keep to it`() {
+        runBlocking { settings.setRoutePolicy(RoutePolicy.HEADSET_ONLY) }
+        routes.headset = true
+        val o = armed()
+        startService(o)
+        awaitUntil(message = "spoken") { speaker.spoken.isNotEmpty() }
+        assertEquals(listOf(RoutePolicy.HEADSET_ONLY), speaker.routes)
+    }
+
+    @Test
+    fun `a headset that went away while the engine was preparing is written down, and the ring carries on`() {
+        speaker.result = SpeakResult.Unavailable(SpeechProblem.HEADSET_REQUIRED)
+        val o = armed()
+        startService(o)
+        awaitUntil(message = "logged") { events(o, EventType.TTS_UNAVAILABLE).isNotEmpty() }
+        assertTrue(events(o, EventType.TTS_UNAVAILABLE).single().payloadJson.contains("HEADSET_REQUIRED"))
+        assertTrue(output.ringing)
+    }
+
+    @Test
+    fun `a phone with no voice that works offline says nothing, and the log says why`() {
+        speaker.result = SpeakResult.Unavailable(SpeechProblem.NO_OFFLINE_VOICE)
+        val o = armed()
+        startService(o)
+        awaitUntil(message = "logged") { events(o, EventType.TTS_UNAVAILABLE).isNotEmpty() }
+        assertTrue(events(o, EventType.TTS_UNAVAILABLE).single().payloadJson.contains("NO_OFFLINE_VOICE"))
+        assertTrue(output.ringing)
+    }
+
+    @Test
+    fun `a ring that takes over stops the line of the one it displaced, and says its own`() {
+        speaker.hold = true
+        val first = armed()
+        val controller = startService(first)
+        awaitUntil(message = "first line") { speaker.spoken.size == 1 && output.ducked }
+
+        val second = armed()
+        controller.withIntent(fireIntent(second)).startCommand(0, 2)
+        awaitUntil(message = "taken over") { controller.get().ringingOccurrenceId == second.id && speaker.spoken.size == 2 }
+
+        assertTrue("the displaced ring's line was stopped, in the player and the engine", speaker.stops >= 1)
+        assertEquals("down for the first line, up when it was cut off, down again for the second", listOf(true, false, true), output.ducks)
+        assertTrue(output.ducked)
+    }
+
+    @Test
+    fun `the same alarm delivered twice leaves the ring that is going alone, and its line is said once`() {
+        speaker.hold = true
+        val o = armed("Write the report")
+        val controller = startService(o)
+        awaitUntil(message = "speaking") { speaker.spoken.size == 1 }
+
+        controller.withIntent(fireIntent(o)).startCommand(0, 2)
+        // Deliveries are handled one at a time, so once a later ring has been taken over the duplicate before it has been dealt with.
+        val later = armed("Pay the invoice")
+        controller.withIntent(fireIntent(later)).startCommand(0, 3)
+        awaitUntil(message = "the later ring's line") { speaker.spoken.any { it.first.text.contains("Pay the invoice") } }
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("one line for the ring and one for the later one: the duplicate said nothing", 2, speaker.spoken.size)
+        assertEquals(later.id, controller.get().ringingOccurrenceId)
+        assertTrue("the duplicate was refused by the state machine, not run as a second ring", events(o, EventType.REJECTED_TRANSITION).isNotEmpty())
+    }
+
+    @Test
+    fun `when the ring that took over ends, the volume the first ring raised goes back`() {
+        runBlocking { consents.grant(ConsentKey.VOLUME_CONTROL) }
+        lowAlarmVolume()
+        val first = armed()
+        val controller = startService(first)
+        awaitUntil(message = "raised and ringing") { alarmVolume().getStreamVolume(AudioManager.STREAM_ALARM) == loudest && controller.get().ringingOccurrenceId == first.id }
+
+        val second = armed()
+        controller.withIntent(fireIntent(second)).startCommand(0, 2)
+        awaitUntil(message = "taken over") { controller.get().ringingOccurrenceId == second.id }
+        awaitUntil(message = "the raised volume now belongs to the second ring") { runBlocking { settings.volumeRestore() }?.occurrenceId == second.id }
+
+        session.end(second.id)
+        shadowOf(Looper.getMainLooper()).idle()
         awaitUntil(message = "restored") { alarmVolume().getStreamVolume(AudioManager.STREAM_ALARM) == 3 }
         awaitUntil(message = "record cleared") { runBlocking { settings.volumeRestore() } == null }
     }

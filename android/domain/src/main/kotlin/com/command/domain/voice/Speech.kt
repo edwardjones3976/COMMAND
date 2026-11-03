@@ -34,8 +34,17 @@ enum class SpeechProblem {
     /** The sound could not be played. */
     PLAYBACK_FAILED,
 
-    /** The person asked for speech only through a headset, and none is connected. */
+    /**
+     * The person asked for speech only through a headset, and none could be used, or the one in use went away while the line was
+     * being said. The line was not said, or was cut off the moment the headset stopped being the only way out.
+     */
     HEADSET_REQUIRED,
+
+    /**
+     * The engine has no voice that works without a network. The person's own words are never handed to a voice that asks a server, so
+     * nothing was said.
+     */
+    NO_OFFLINE_VOICE,
 
     /** Something nobody expected went wrong on the way to the speaker. The ring carried on without the line. */
     UNEXPECTED,
@@ -55,12 +64,19 @@ sealed interface SpeakResult {
 /** Says a [Line] aloud. Never blocks an alarm: a ring starts with its tone, and speech joins it when it can. */
 interface Speaker {
     /**
-     * Says [line], and reports every way it could not be said as a [SpeakResult], never as an exception (cancellation aside).
-     * [onAudible] is called once, on the caller's context, just before the first sound of the line is made and not
+     * Says [line], and reports every way it could not be said as a [SpeakResult], never as an exception (cancellation aside). With
+     * [RoutePolicy.HEADSET_ONLY] the line is played through a headset or not at all: the speaker must stay silent for it, whether the
+     * headset was missing at the start or went away on the way. A line asked for while an earlier one is still being prepared or said
+     * replaces it, and the earlier one is reported as interrupted. [onAudible] is called once, on the caller's context, just before the first sound of the line is made and not
      * at all if there is none, so that whoever is playing something else (the alarm tone) can turn it down for exactly as long as
      * the line is heard, and not while the engine is still getting ready.
      */
-    suspend fun speak(line: Line, usage: SpeechUsage, onAudible: () -> Unit = {}): SpeakResult
+    suspend fun speak(
+        line: Line,
+        usage: SpeechUsage,
+        route: RoutePolicy = RoutePolicy.SPEAKER_AND_HEADSET,
+        onAudible: () -> Unit = {},
+    ): SpeakResult
 
     /**
      * Starts whatever the speaker needs ahead of the first line, so that the line is not waiting for an engine that was only started when

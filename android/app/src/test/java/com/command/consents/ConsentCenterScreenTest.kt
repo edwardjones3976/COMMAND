@@ -1,5 +1,6 @@
 package com.command.consents
 
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -190,5 +191,11 @@ class ConsentCenterScreenTest {
         compose.onNodeWithTag(ConsentTags.switch(ConsentKey.EXACT_ALARM)).assertDoesNotExist()
         compose.onNodeWithTag(ConsentTags.switch(ConsentKey.VOLUME_CONTROL)).assertIsDisplayed()
         compose.onNodeWithTag(ConsentTags.settings(ConsentKey.VOLUME_CONTROL)).assertDoesNotExist()
+    }
+
+    @Test
+    fun `the switch is announced with what it is a switch for, not only whether it is on`() {
+        show(ConsentCenterUiState.Ready(listOf(item(ConsentKey.VOLUME_CONTROL, emptyList()))))
+        compose.onNodeWithTag(ConsentTags.switch(ConsentKey.VOLUME_CONTROL)).assertContentDescriptionEquals("Raise the alarm volume")
     }
 }
