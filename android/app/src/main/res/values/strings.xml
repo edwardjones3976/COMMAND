@@ -1,14 +1,3 @@
 <resources>
     <string name="app_name">Command</string>
-    <string name="nav_command_center">Command</string>
-    <string name="nav_streak_vault">Streak</string>
-    <string name="nav_voice_studio">Voices</string>
-    <string name="nav_calendar_sync">Calendar</string>
-    <string name="reveille_channel_name">Command Reveille Alerts</string>
-    <string name="reveille_channel_desc">High-priority mission start and Reveille attention capture alerts</string>
-    <string name="drill_sergeant_avatar_desc">Drill Sergeant Major Stone character portrait</string>
-    <string name="life_coach_avatar_desc">Personal and Life Coach Jordan Vance blended character portrait</string>
-    <string name="executive_director_avatar_desc">Executive Director Eleanor Vance character portrait</string>
-    <string name="streak_flame_desc">Active Command Streak consecutive days indicator</string>
-    <string name="voice_preview_desc">Preview selected voice pack audio</string>
 </resources>

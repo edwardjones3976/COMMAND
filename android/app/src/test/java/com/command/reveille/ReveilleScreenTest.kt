@@ -185,6 +185,16 @@ class ReveilleScreenTest {
     }
 
     @Test
+    fun `a missed alarm says it was missed, not silenced, and still offers resume`() {
+        val r = Recorder()
+        show(ReveilleUiState.Silenced("Write the report", missed = true), r)
+        compose.onNodeWithText("Alarm missed").assertIsDisplayed()
+        compose.onNodeWithText("Nothing was started. Pick it up when you are ready.").assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.RESUME).performClick()
+        assertEquals(1, r.resumed)
+    }
+
+    @Test
     fun `the direction shows one concrete step and three one-tap answers`() {
         val r = Recorder()
         show(ReveilleUiState.Direction("Write the report", "Open the document", 5), r)

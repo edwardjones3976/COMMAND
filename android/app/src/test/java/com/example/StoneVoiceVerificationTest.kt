@@ -4,7 +4,7 @@ import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
 import androidx.test.core.app.ApplicationProvider
-import com.example.data.CommandRepository
+import com.example.data.LegacyVoicePacks
 import com.example.data.VoiceModelType
 import com.example.data.VoicePackEntity
 import com.example.service.DirectorBriefs
@@ -50,7 +50,7 @@ import kotlin.random.Random
 class StoneVoiceVerificationTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
-    private val packs = CommandRepository.defaultVoicePacks().associateBy { it.id }
+    private val packs = LegacyVoicePacks.defaultVoicePacks().associateBy { it.id }
     private val stone = packs.getValue("pack_major_stone")
     private val sampleRate = 24_000
     private val ceiling = (32767 * VoiceMastering.dbToLin(VoiceMastering.PEAK_CEILING_DBFS)).toInt() + 1

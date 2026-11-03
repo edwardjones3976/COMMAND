@@ -1,0 +1,358 @@
+package com.command.editor
+
+import android.text.format.DateFormat
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.command.data.DraftProblem
+import com.command.domain.dials.Flexibility
+import com.example.R
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+
+object EditorTags {
+    const val TITLE = "editor_title"
+    const val ACTION = "editor_action"
+    const val REPEAT_ONCE = "editor_repeat_once"
+    const val REPEAT_DAILY = "editor_repeat_daily"
+    const val REPEAT_WEEKLY = "editor_repeat_weekly"
+    const val DATE = "editor_date"
+    const val TIME = "editor_time"
+    const val FLEXIBLE = "editor_flexible"
+    const val FIXED = "editor_fixed"
+    const val SAVE = "editor_save"
+    const val TEST = "editor_test"
+    const val DELETE = "editor_delete"
+    const val DELETE_CONFIRM = "editor_delete_confirm"
+    fun day(day: DayOfWeek) = "editor_day_${day.name}"
+    fun starter(minutes: Int) = "editor_starter_$minutes"
+}
+
+/** Everything the editor can ask for, so the screen can be tested without a view model. */
+class EditorActions(
+    val onBack: () -> Unit,
+    val onTitle: (String) -> Unit,
+    val onFirstAction: (String) -> Unit,
+    val onFlexibility: (Flexibility) -> Unit,
+    val onRepeat: (RepeatKind) -> Unit,
+    val onDate: (LocalDate) -> Unit,
+    val onTime: (LocalTime) -> Unit,
+    val onDay: (DayOfWeek) -> Unit,
+    val onStarterMinutes: (Int) -> Unit,
+    val onSave: () -> Unit,
+    val onTest: () -> Unit,
+    val onDelete: () -> Unit,
+)
+
+@Composable
+fun MissionEditorRoute(onDone: () -> Unit, viewModel: MissionEditorViewModel = hiltViewModel()) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+    val testStarted = stringResource(R.string.editor_test_started)
+
+    LaunchedEffect(state.finished) { if (state.finished) onDone() }
+    LaunchedEffect(state.message) {
+        if (state.message == EditorMessage.TEST_STARTED) {
+            snackbar.showSnackbar(testStarted)
+            viewModel.messageShown()
+        }
+    }
+
+    MissionEditorScreen(
+        state = state,
+        snackbar = snackbar,
+        actions = EditorActions(
+            onBack = onDone,
+            onTitle = viewModel::onTitle,
+            onFirstAction = viewModel::onFirstAction,
+            onFlexibility = viewModel::onFlexibility,
+            onRepeat = viewModel::onRepeat,
+            onDate = viewModel::onDate,
+            onTime = viewModel::onTime,
+            onDay = viewModel::onDay,
+            onStarterMinutes = viewModel::onStarterMinutes,
+            onSave = viewModel::save,
+            onTest = viewModel::testRing,
+            onDelete = viewModel::delete,
+        ),
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun MissionEditorScreen(state: EditorState, actions: EditorActions, snackbar: SnackbarHostState = remember { SnackbarHostState() }) {
+    var pickingDate by remember { mutableStateOf(false) }
+    var pickingTime by remember { mutableStateOf(false) }
+    var confirmingDelete by remember { mutableStateOf(false) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(if (state.editing) R.string.editor_title_edit else R.string.editor_title_new)) },
+                navigationIcon = {
+                    IconButton(onClick = actions.onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.editor_back))
+                    }
+                },
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
+    ) { padding ->
+        when {
+            state.loading -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            state.notFound -> Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(stringResource(R.string.editor_not_found), style = MaterialTheme.typography.titleLarge)
+                OutlinedButton(onClick = actions.onBack) { Text(stringResource(R.string.editor_back), style = MaterialTheme.typography.labelLarge) }
+            }
+            else -> Column(
+                modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).imePadding().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                OutlinedTextField(
+                    value = state.title,
+                    onValueChange = actions.onTitle,
+                    modifier = Modifier.fillMaxWidth().testTag(EditorTags.TITLE),
+                    label = { Text(stringResource(R.string.editor_field_title)) },
+                    isError = DraftProblem.TITLE_EMPTY in state.problems,
+                    supportingText = {
+                        Text(stringResource(if (DraftProblem.TITLE_EMPTY in state.problems) R.string.editor_error_title else R.string.editor_field_title_hint))
+                    },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = state.firstAction,
+                    onValueChange = actions.onFirstAction,
+                    modifier = Modifier.fillMaxWidth().testTag(EditorTags.ACTION),
+                    label = { Text(stringResource(R.string.editor_field_action)) },
+                    isError = DraftProblem.FIRST_ACTION_EMPTY in state.problems,
+                    supportingText = {
+                        Text(stringResource(if (DraftProblem.FIRST_ACTION_EMPTY in state.problems) R.string.editor_error_action else R.string.editor_field_action_hint))
+                    },
+                    maxLines = 3,
+                )
+
+                SectionTitle(stringResource(R.string.editor_section_when))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    RepeatChip(state.repeat, RepeatKind.ONCE, R.string.editor_repeat_once, EditorTags.REPEAT_ONCE, actions.onRepeat)
+                    RepeatChip(state.repeat, RepeatKind.DAILY, R.string.editor_repeat_daily, EditorTags.REPEAT_DAILY, actions.onRepeat)
+                    RepeatChip(state.repeat, RepeatKind.WEEKLY, R.string.editor_repeat_weekly, EditorTags.REPEAT_WEEKLY, actions.onRepeat)
+                }
+                if (state.repeat == RepeatKind.WEEKLY) {
+                    Text(stringResource(R.string.editor_days), style = MaterialTheme.typography.bodyLarge)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for ((day, label) in DAYS) {
+                            FilterChip(
+                                selected = day in state.days,
+                                onClick = { actions.onDay(day) },
+                                label = { Text(stringResource(label)) },
+                                modifier = Modifier.testTag(EditorTags.day(day)),
+                            )
+                        }
+                    }
+                    if (DraftProblem.NO_DAYS_SELECTED in state.problems) ErrorText(stringResource(R.string.editor_error_days))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(onClick = { pickingDate = true }, modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag(EditorTags.DATE)) {
+                        Text(
+                            stringResource(
+                                if (state.repeat == RepeatKind.ONCE) R.string.editor_date else R.string.editor_date_start,
+                                DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).format(state.date),
+                            ),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                    OutlinedButton(onClick = { pickingTime = true }, modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag(EditorTags.TIME)) {
+                        Text(
+                            stringResource(R.string.editor_time, DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).format(state.time)),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                }
+                if (DraftProblem.IN_THE_PAST in state.problems) ErrorText(stringResource(R.string.editor_error_past))
+
+                SectionTitle(stringResource(R.string.editor_section_commitment))
+                FirmnessOption(state.flexibility == Flexibility.FLEXIBLE, R.string.editor_flexible, R.string.editor_flexible_body, EditorTags.FLEXIBLE) {
+                    actions.onFlexibility(Flexibility.FLEXIBLE)
+                }
+                FirmnessOption(state.flexibility == Flexibility.RIGID, R.string.editor_fixed, R.string.editor_fixed_body, EditorTags.FIXED) {
+                    actions.onFlexibility(Flexibility.RIGID)
+                }
+
+                SectionTitle(stringResource(R.string.editor_section_starter))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (minutes in STARTER_MINUTES) {
+                        FilterChip(
+                            selected = state.starterMinutes == minutes,
+                            onClick = { actions.onStarterMinutes(minutes) },
+                            label = { Text(stringResource(R.string.editor_starter_minutes, minutes)) },
+                            modifier = Modifier.testTag(EditorTags.starter(minutes)),
+                        )
+                    }
+                }
+
+                Button(onClick = actions.onSave, enabled = !state.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(EditorTags.SAVE)) {
+                    Text(stringResource(R.string.editor_save), style = MaterialTheme.typography.labelLarge)
+                }
+                OutlinedButton(onClick = actions.onTest, enabled = !state.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(EditorTags.TEST)) {
+                    Text(stringResource(R.string.editor_test), style = MaterialTheme.typography.labelLarge)
+                }
+                if (state.editing) {
+                    TextButton(onClick = { confirmingDelete = true }, enabled = !state.busy, modifier = Modifier.fillMaxWidth().testTag(EditorTags.DELETE)) {
+                        Text(stringResource(R.string.editor_delete), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+        }
+    }
+
+    if (pickingDate) {
+        // The date picker speaks in UTC midnights; the editor holds a plain calendar date.
+        val picker = rememberDatePickerState(initialSelectedDateMillis = state.date.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli())
+        DatePickerDialog(
+            onDismissRequest = { pickingDate = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    picker.selectedDateMillis?.let { actions.onDate(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }
+                    pickingDate = false
+                }) { Text(stringResource(R.string.editor_ok)) }
+            },
+            dismissButton = { TextButton(onClick = { pickingDate = false }) { Text(stringResource(R.string.editor_cancel)) } },
+        ) { DatePicker(state = picker) }
+    }
+    if (pickingTime) {
+        val is24 = DateFormat.is24HourFormat(LocalContext.current)
+        val picker = rememberTimePickerState(initialHour = state.time.hour, initialMinute = state.time.minute, is24Hour = is24)
+        AlertDialog(
+            onDismissRequest = { pickingTime = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    actions.onTime(LocalTime.of(picker.hour, picker.minute))
+                    pickingTime = false
+                }) { Text(stringResource(R.string.editor_ok)) }
+            },
+            dismissButton = { TextButton(onClick = { pickingTime = false }) { Text(stringResource(R.string.editor_cancel)) } },
+            text = { TimePicker(state = picker) },
+        )
+    }
+    if (confirmingDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text(stringResource(R.string.editor_delete_title)) },
+            text = { Text(stringResource(R.string.editor_delete_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmingDelete = false
+                    actions.onDelete()
+                }, modifier = Modifier.testTag(EditorTags.DELETE_CONFIRM)) {
+                    Text(stringResource(R.string.editor_delete_confirm), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmingDelete = false }) { Text(stringResource(R.string.editor_cancel)) } },
+        )
+    }
+}
+
+@Composable
+private fun SectionTitle(text: String) {
+    Text(text, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.semantics { heading() })
+}
+
+@Composable
+private fun ErrorText(text: String) {
+    Text(text, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.error)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RepeatChip(current: RepeatKind, kind: RepeatKind, label: Int, tag: String, onSelect: (RepeatKind) -> Unit) {
+    FilterChip(
+        selected = current == kind,
+        onClick = { onSelect(kind) },
+        label = { Text(stringResource(label)) },
+        modifier = Modifier.testTag(tag),
+    )
+}
+
+@Composable
+private fun FirmnessOption(selected: Boolean, title: Int, body: Int, tag: String, onSelect: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).selectable(selected = selected, role = Role.RadioButton, onClick = onSelect).testTag(tag),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Column {
+            Text(stringResource(title), style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(body), style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
+private val DAYS = listOf(
+    DayOfWeek.MONDAY to R.string.editor_day_mon,
+    DayOfWeek.TUESDAY to R.string.editor_day_tue,
+    DayOfWeek.WEDNESDAY to R.string.editor_day_wed,
+    DayOfWeek.THURSDAY to R.string.editor_day_thu,
+    DayOfWeek.FRIDAY to R.string.editor_day_fri,
+    DayOfWeek.SATURDAY to R.string.editor_day_sat,
+    DayOfWeek.SUNDAY to R.string.editor_day_sun,
+)
+
+private val STARTER_MINUTES = listOf(2, 5, 10, 15)

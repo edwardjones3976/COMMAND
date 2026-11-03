@@ -51,4 +51,5 @@ object SettingKeys {
     const val ALARM_ROUTE_POLICY = "alarm_route_policy"
     const val PERMISSION_SNAPSHOT = "permission_snapshot"
     const val LAST_PULL_AT = "last_pull_at"
+    const val LEGACY_ALARMS_CANCELLED = "legacy_alarms_cancelled"
 }

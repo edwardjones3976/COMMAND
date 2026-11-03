@@ -230,8 +230,8 @@ fun HoldButton(
 private fun Silenced(state: ReveilleUiState.Silenced, actions: ReveilleActions) {
     Text(state.title, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
     Spacer(Modifier.height(16.dp))
-    Text(stringResource(R.string.reveille_silenced_title), style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
-    Text(stringResource(R.string.reveille_silenced_body), style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
+    Text(stringResource(if (state.missed) R.string.reveille_missed_title else R.string.reveille_silenced_title), style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+    Text(stringResource(if (state.missed) R.string.reveille_missed_body else R.string.reveille_silenced_body), style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
     Spacer(Modifier.height(32.dp))
     Button(onClick = actions.onResume, modifier = Modifier.fillMaxWidth().height(64.dp).testTag(ReveilleTags.RESUME)) {
         Text(stringResource(R.string.reveille_resume), style = MaterialTheme.typography.labelLarge)
