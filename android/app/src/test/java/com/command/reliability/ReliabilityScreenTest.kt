@@ -159,7 +159,7 @@ class ReliabilityScreenTest {
         compose.onNodeWithTag(ReliabilityTags.item(Precondition.CHECK_IN_CHANNEL)).assertIsDisplayed()
         compose.onNodeWithText("Follow-up question channel").assertIsDisplayed()
         compose.onNodeWithText("Set too low (off)").assertIsDisplayed()
-        compose.onNodeWithText("At this level the questions about how it is going come without a sound, or not at all.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("At this level the questions about how it is going may not pop up, may come without a sound, or may not appear at all.", substring = true).assertIsDisplayed()
         compose.onNodeWithTag(ReliabilityTags.action(Precondition.CHECK_IN_CHANNEL)).assertIsDisplayed()
     }
 

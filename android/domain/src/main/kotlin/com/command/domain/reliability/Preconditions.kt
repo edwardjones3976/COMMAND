@@ -43,8 +43,8 @@ enum class Precondition(val consent: ConsentKey?, val fix: Fix?) {
     ALARM_CHANNEL(null, Fix.OPEN_ALARM_CHANNEL_SETTINGS),
 
     /**
-     * The importance of the channel the follow-up questions come through. Switched off, the questions never appear; lowered, they come
-     * without a sound or a pop-up. Neither stops an alarm, so this is a warning and not a problem.
+     * The importance of the channel the follow-up questions come through. Switched off, the questions never appear; lowered, they may come
+     * without a pop-up or a sound. Neither stops an alarm, so this is a warning and not a problem.
      */
     CHECK_IN_CHANNEL(null, Fix.OPEN_CHECK_IN_CHANNEL_SETTINGS),
 
