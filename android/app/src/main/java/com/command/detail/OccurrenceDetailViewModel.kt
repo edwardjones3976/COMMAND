@@ -2,6 +2,7 @@ package com.command.detail
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.command.data.OccurrenceDetail
 import com.command.data.OccurrenceRepository
 import com.command.domain.history.HistoryOccurrence
 import com.command.domain.history.HistoryReason
@@ -53,12 +54,12 @@ class OccurrenceDetailViewModel @Inject constructor(
         shown = id
         _state.value = DetailUiState.Loading
         observing = viewModelScope.launch {
-            repository.observe(id).collectLatest { _state.value = load(id) }
+            repository.observeDetail(id).collectLatest { _state.value = project(it) }
         }
     }
 
-    private suspend fun load(id: String): DetailUiState {
-        val detail = repository.detail(id) ?: return DetailUiState.NotFound
+    private fun project(detail: OccurrenceDetail?): DetailUiState {
+        if (detail == null) return DetailUiState.NotFound
         val o = detail.occurrence
         val zone = try {
             ZoneId.of(o.zoneId)

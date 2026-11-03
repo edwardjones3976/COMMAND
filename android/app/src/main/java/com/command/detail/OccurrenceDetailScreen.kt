@@ -185,6 +185,7 @@ private fun storyRes(kind: StoryKind): Int = when (kind) {
     StoryKind.STILL_WORKING -> R.string.detail_story_still_working
     StoryKind.DONE -> R.string.detail_story_done
     StoryKind.SKIPPED -> R.string.detail_story_skipped
+    StoryKind.CALENDAR_CANCELLED -> R.string.detail_story_calendar_cancelled
     StoryKind.DELAYED -> R.string.detail_story_delayed
     StoryKind.MISSED -> R.string.detail_story_missed
     StoryKind.SILENCED -> R.string.detail_story_silenced

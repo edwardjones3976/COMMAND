@@ -24,10 +24,11 @@
     <string name="detail_story_still_working">You said you were still working.</string>
     <string name="detail_story_done">You said it was done.</string>
     <string name="detail_story_skipped">You skipped it.</string>
+    <string name="detail_story_calendar_cancelled">It was cancelled in your calendar.</string>
     <string name="detail_story_delayed">You delayed it.</string>
     <string name="detail_story_missed">The alarm ran out without an answer.</string>
     <string name="detail_story_silenced">You silenced the alarm.</string>
-    <string name="detail_story_not_confirmed">The questions went unanswered, so it is not confirmed.</string>
+    <string name="detail_story_not_confirmed">It was left unconfirmed.</string>
     <string name="detail_story_restart_offered">You asked for a restart and were offered a way back.</string>
     <string name="detail_story_restarted">You started over.</string>
     <string name="detail_story_moved_later">It was moved to later.</string>

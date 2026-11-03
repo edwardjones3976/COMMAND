@@ -397,7 +397,8 @@ class MissionRepository @Inject constructor(
         private const val MIN_LEAD_MS = 5_000L
         private const val TEST_DELAY_MS = 5_000L
         private const val UPCOMING_LIMIT = 200
-        private const val HISTORY_LIMIT = 500
+        /** The counts of History are made from these rows, so the bound is only against a runaway table: it takes 330 alarms a day to reach it. */
+        private const val HISTORY_LIMIT = 10_000
 
         /** The most two zones can differ (UTC-12 and UTC+14). */
         private const val ZONE_SLACK_MS = 26 * 60 * 60 * 1000L

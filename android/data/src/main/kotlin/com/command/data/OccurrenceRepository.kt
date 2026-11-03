@@ -45,6 +45,7 @@ import com.command.domain.schedule.RestWindows
 import com.command.domain.time.Clock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -157,6 +158,14 @@ class OccurrenceRepository @Inject constructor(
     }
 
     fun observe(id: String): Flow<OccurrenceRow?> = db.occurrences().observe(id)
+
+    /**
+     * [detail], followed: it is read again whenever anything it is made of is written, the row, its mission, its events, its questions or its
+     * attempts. Some of those are written without the occurrence changing (a note that the voice was unavailable, a hold released early),
+     * and a page that is open must show them.
+     */
+    fun observeDetail(id: String): Flow<OccurrenceDetail?> =
+        db.invalidationTracker.createFlow("occurrences", "missions", "events", "check_ins", "challenges").map { detail(id) }
 
     /** The title of an occurrence's mission, for notifications and screens that need to name it. */
     suspend fun missionTitle(missionId: String): String? = db.missions().get(missionId)?.title

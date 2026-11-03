@@ -13,6 +13,7 @@ import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.EventType
 import com.command.domain.occurrence.MissReason
 import com.command.domain.occurrence.OccurrenceState
+import com.command.domain.occurrence.SkipReason
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -35,8 +36,9 @@ class DetailStoryTest {
         checkIns: List<CheckInRow> = emptyList(),
         challenges: List<ChallengeRow> = emptyList(),
         missReason: MissReason? = null,
+        skipReason: SkipReason? = null,
     ) = OccurrenceDetail(
-        OccurrenceRow("o", "m", 1_000, "UTC", OccurrenceState.STARTED_SELF_REPORTED, 3, 1, ArmMode.EXACT, null, "{}", null, null, missReason),
+        OccurrenceRow("o", "m", 1_000, "UTC", OccurrenceState.STARTED_SELF_REPORTED, 3, 1, ArmMode.EXACT, null, "{}", null, skipReason, missReason),
         "Write the report", events, checkIns, challenges,
     )
 
@@ -118,8 +120,35 @@ class DetailStoryTest {
             event(EventType.ALARM_ARMED, 1, "mode" to "EXACT"),
             event(EventType.ALARM_ARMED, 2, "mode" to "INEXACT", "adjusted" to "true"),
             event(EventType.ALARM_LOST, 3, "trigger" to "OPEN"),
+            event(EventType.ALARM_ARMED, 4, "mode" to "INEXACT"), // exact alarms were not allowed to begin with: nothing was adjusted
         )
-        assertEquals(listOf(StoryKind.SET, StoryKind.SET_ROUGHLY, StoryKind.SET_AGAIN), DetailStory.story(detail(events)).map { it.kind })
+        assertEquals(
+            listOf(StoryKind.SET, StoryKind.SET_ROUGHLY, StoryKind.SET_AGAIN, StoryKind.SET_ROUGHLY),
+            DetailStory.story(detail(events)).map { it.kind },
+        )
+    }
+
+    @Test
+    fun `a skip that the calendar made is not told as the person's choice`() {
+        val events = listOf(changed(1, "SCHEDULED", "SKIPPED", "SKIP"))
+        assertEquals(listOf(StoryKind.CALENDAR_CANCELLED), DetailStory.story(detail(events, skipReason = SkipReason.CALENDAR_REMOVED)).map { it.kind })
+        assertEquals(listOf(StoryKind.CALENDAR_CANCELLED), DetailStory.story(detail(events, skipReason = SkipReason.CALENDAR_CANCELLED)).map { it.kind })
+        assertEquals(listOf(StoryKind.SKIPPED), DetailStory.story(detail(events, skipReason = SkipReason.USER)).map { it.kind })
+    }
+
+    @Test
+    fun `saying the same thing again is told, though it changes no state`() {
+        val events = listOf(
+            changed(1, "GUIDED_START", "STARTED_SELF_REPORTED", "REPORT_STARTED"),
+            changed(2, "STARTED_SELF_REPORTED", "WORKING_SELF_REPORTED", "REPORT_WORKING"),
+            event(EventType.CHECK_IN_ANSWERED, 3, "answer" to "WORKING_SELF_REPORTED"),
+            event(EventType.CHECK_IN_ANSWERED, 4, "answer" to "WORKING_SELF_REPORTED"),
+            event(EventType.CHECK_IN_ANSWERED, 5, "answer" to "SOMETHING_ELSE"),
+        )
+        assertEquals(
+            listOf(StoryKind.STARTED, StoryKind.STILL_WORKING, StoryKind.STILL_WORKING, StoryKind.STILL_WORKING),
+            DetailStory.story(detail(events)).map { it.kind },
+        )
     }
 
     @Test

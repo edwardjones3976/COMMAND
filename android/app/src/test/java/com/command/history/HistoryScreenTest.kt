@@ -42,12 +42,12 @@ class HistoryScreenTest {
         days: List<HistoryDay> = emptyList(),
         week: WindowSummary = WindowSummary(7, 0, 0),
         month: WindowSummary = WindowSummary(30, 0, 0),
-    ) = HistoryUiState.Ready(week, month, days)
+    ) = HistoryUiState.Ready(week, month, days, today)
 
     private fun show(state: HistoryUiState, opened: MutableList<String> = ArrayList()): MutableList<String> {
         compose.setContent {
             CommandTheme(darkTheme = true) {
-                HistoryScreen(state = state, onBack = {}, onOpenOccurrence = { opened += it }, today = today)
+                HistoryScreen(state = state, onBack = {}, onOpenOccurrence = { opened += it })
             }
         }
         return opened

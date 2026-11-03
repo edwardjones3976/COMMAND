@@ -10,7 +10,7 @@
 
     <string name="followup_ask_start">Have you started?</string>
     <string name="followup_ask_progress">How is it going?</string>
-    <string name="followup_ask_unconfirmed">You did not answer. Did you start?</string>
+    <string name="followup_ask_unconfirmed">Nothing is confirmed yet. Did you start?</string>
     <string name="followup_first_step">Your first step: %1$s</string>
     <string name="followup_resets_used_up">There are no more resets for this one. You can still delay it or skip it.</string>
 

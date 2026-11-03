@@ -5,6 +5,8 @@ import com.command.data.db.CommandDb
 import com.command.domain.history.HistoryReason
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
+import com.command.domain.occurrence.EventPayload
+import com.command.domain.occurrence.EventType
 import com.command.domain.occurrence.OccurrenceCommand
 import com.command.testing.android.FakeAlarmModule
 import com.command.testing.android.awaitUntil
@@ -104,5 +106,17 @@ class OccurrenceDetailViewModelTest {
             Thread.sleep(10)
         }
         assertEquals("Second", ready()!!.title)
+    }
+
+    @Test
+    fun `something recorded without the occurrence changing appears on the page while it is open`() {
+        val id = occurrence(OccurrenceCommand.Arm(ArmMode.EXACT), OccurrenceCommand.Fire)
+        vm.show(id)
+        awaitUntil(message = "ready") { ready() != null }
+        assertTrue(ready()!!.story.none { it.kind == StoryKind.VOICE_UNAVAILABLE })
+
+        runBlocking { repo.logEvent(EventType.TTS_UNAVAILABLE, repo.get(id), EventSource.SERVICE, EventPayload.of("reason" to "NO_ENGINE")) }
+
+        awaitUntil(message = "the note about the voice") { ready()?.story?.any { it.kind == StoryKind.VOICE_UNAVAILABLE } == true }
     }
 }

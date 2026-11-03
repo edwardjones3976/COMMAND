@@ -624,4 +624,11 @@ class MissionRepositoryTest {
         due("Deleted", -2 * hour, OccurrenceState.MISSED, deleted = true)
         assertEquals(listOf(kept), missions.observeHistory(7).first().map { it.occurrenceId })
     }
+
+    @Test
+    fun `history is not cut at a few hundred rows, because its counts are made from them`() = run {
+        val mission = Fixture.missionRow(title = "Often").also { f.db.missions().insert(it) }
+        for (i in 1..600) f.repo.createOccurrence(mission.id, f.t0 - i * hour, "UTC")
+        assertEquals(600, missions.observeHistory(30).first().size)
+    }
 }

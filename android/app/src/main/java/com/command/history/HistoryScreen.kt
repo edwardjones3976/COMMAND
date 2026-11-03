@@ -67,7 +67,6 @@ fun HistoryScreen(
     state: HistoryUiState,
     onBack: () -> Unit,
     onOpenOccurrence: (String) -> Unit,
-    today: LocalDate = LocalDate.now(),
 ) {
     Scaffold(
         topBar = {
@@ -102,7 +101,7 @@ fun HistoryScreen(
                 for (day in state.days) {
                     item(key = "day-${day.date}") {
                         Text(
-                            dayLabel(day.date, today),
+                            dayLabel(day.date, state.today),
                             style = MaterialTheme.typography.titleMedium,
                             modifier = Modifier.padding(top = 8.dp).semantics { heading() }.testTag(HistoryTags.day(day.date)),
                         )

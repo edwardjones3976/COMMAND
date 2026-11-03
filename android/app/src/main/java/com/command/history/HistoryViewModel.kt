@@ -34,7 +34,7 @@ sealed interface HistoryUiState {
     data object Loading : HistoryUiState
 
     /** [days] holds only the days on which something came due, newest first. The two summaries cover the last seven and thirty days. */
-    data class Ready(val week: WindowSummary, val month: WindowSummary, val days: List<HistoryDay>) : HistoryUiState
+    data class Ready(val week: WindowSummary, val month: WindowSummary, val days: List<HistoryDay>, val today: LocalDate) : HistoryUiState
 }
 
 /**
@@ -75,7 +75,7 @@ class HistoryViewModel @Inject constructor(
             .groupBy({ (_, o) -> calculator.dateOf(o) }, { (row, o) -> HistoryEntry(row.occurrenceId, row.title, row.scheduledAtUtc, o.zone, o.reason) })
             .map { (date, list) -> HistoryDay(date, list.sortedByDescending { it.atUtcMs }) }
             .sortedByDescending { it.date }
-        return HistoryUiState.Ready(calculator.summary(occurrences, WEEK_DAYS, today), calculator.summary(occurrences, MONTH_DAYS, today), days)
+        return HistoryUiState.Ready(calculator.summary(occurrences, WEEK_DAYS, today), calculator.summary(occurrences, MONTH_DAYS, today), days, today)
     }
 
     private fun zoneOf(id: String): ZoneId = try {

@@ -180,4 +180,15 @@ class HistoryViewModelTest {
         assertEquals(1, ready()!!.month.eligibleDays)
         assertEquals(1, ready()!!.month.daysWithStart)
     }
+
+    @Test
+    fun `the state carries today, so that the headings follow the clock even when nothing else changed`() {
+        occurrence("Morning", 2 * hour, started)
+        awaitUntil(message = "one entry") { ready()?.days?.size == 1 }
+        assertEquals(today, ready()!!.today)
+
+        clock.advance(24 * hour)
+        occurrence("Touch", 3 * hour, started) // makes the screen read its rows again
+        awaitUntil(message = "the next day") { ready()?.today == today.plusDays(1) }
+    }
 }

@@ -103,9 +103,9 @@ class FollowUpScreenTest {
     }
 
     @Test
-    fun `questions that went unanswered are said to have been`() {
+    fun `an unconfirmed one asks again without saying whose doing that was`() {
         show(ask.copy(unconfirmed = true))
-        compose.onNodeWithText("You did not answer. Did you start?").assertIsDisplayed()
+        compose.onNodeWithText("Nothing is confirmed yet. Did you start?").assertIsDisplayed()
     }
 
     @Test

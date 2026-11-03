@@ -3,13 +3,15 @@ package com.command.detail
 import com.command.data.OccurrenceDetail
 import com.command.data.db.CheckInRow
 import com.command.data.db.EventRow
+import com.command.data.db.OccurrenceRow
 import com.command.domain.occurrence.EventType
 import com.command.domain.occurrence.MissReason
 import com.command.domain.occurrence.OccurrenceState
+import com.command.domain.occurrence.SkipReason
 
 /** What the person is told happened, one line each. The words are string resources; [arg] fills the one that has a number in it. */
 enum class StoryKind {
-    SET, SET_AGAIN, SET_ROUGHLY, RANG, ANSWERED, DIRECTED, ASKED, QUESTION_LATE, STARTED, STILL_WORKING, DONE, SKIPPED, DELAYED, MISSED, SILENCED,
+    SET, SET_AGAIN, SET_ROUGHLY, RANG, ANSWERED, DIRECTED, ASKED, QUESTION_LATE, STARTED, STILL_WORKING, DONE, SKIPPED, CALENDAR_CANCELLED, DELAYED, MISSED, SILENCED,
     NOT_CONFIRMED, RESTART_OFFERED, RESTARTED, MOVED_LATER, BLOCKED, PHONE_WAS_OFF, PAUSED, NOTIFICATION_SWIPED, VOICE_UNAVAILABLE, TEST,
 }
 
@@ -22,7 +24,7 @@ data class TechnicalItem(val atUtcMs: Long, val title: String, val details: Stri
 object DetailStory {
 
     /** The lines of the story, in the order they happened. Events that only matter to someone debugging the app are not in it. */
-    fun story(detail: OccurrenceDetail): List<StoryItem> = detail.events.mapNotNull { storyOf(it, detail.occurrence.missReason) }
+    fun story(detail: OccurrenceDetail): List<StoryItem> = detail.events.mapNotNull { storyOf(it, detail.occurrence) }
 
     /** Every event, every follow-up question and every handshake attempt, as recorded. */
     fun technical(detail: OccurrenceDetail): List<TechnicalItem> {
@@ -34,7 +36,7 @@ object DetailStory {
         return (events + questions + attempts).sortedBy { it.atUtcMs }
     }
 
-    private fun storyOf(e: EventRow, missReason: MissReason?): StoryItem? {
+    private fun storyOf(e: EventRow, occurrence: OccurrenceRow): StoryItem? {
         val values = payload(e)
         val at = e.atUtc
         return when (e.type) {
@@ -45,9 +47,10 @@ object DetailStory {
                 OccurrenceState.STARTED_SELF_REPORTED -> StoryItem(at, StoryKind.STARTED)
                 OccurrenceState.WORKING_SELF_REPORTED -> StoryItem(at, StoryKind.STILL_WORKING)
                 OccurrenceState.COMPLETED_SELF_REPORTED -> StoryItem(at, StoryKind.DONE)
-                OccurrenceState.SKIPPED -> StoryItem(at, StoryKind.SKIPPED)
+                // A calendar that removed or cancelled it is not the person's choice, and is not told as one.
+                OccurrenceState.SKIPPED -> StoryItem(at, if (occurrence.skipReason.isCalendar()) StoryKind.CALENDAR_CANCELLED else StoryKind.SKIPPED)
                 OccurrenceState.DELAYED -> StoryItem(at, StoryKind.DELAYED)
-                OccurrenceState.MISSED -> when (missReason) {
+                OccurrenceState.MISSED -> when (occurrence.missReason) {
                     // An alarm that never rang did not run out: the phone being off is told by its own event.
                     MissReason.DOWNTIME -> null
                     MissReason.PAUSED -> StoryItem(at, StoryKind.PAUSED)
@@ -62,14 +65,20 @@ object DetailStory {
             EventType.ALARM_ARMED -> StoryItem(
                 at,
                 when {
-                    values["adjusted"] != "true" -> StoryKind.SET
-                    // The platform could not arm what was asked for: the alarm is only roughly on time.
+                    // An approximate alarm may have gone off late, whether an exact one was asked for and refused or never could be asked for.
                     values["mode"] == "INEXACT" -> StoryKind.SET_ROUGHLY
-                    else -> StoryKind.SET_AGAIN
+                    values["adjusted"] == "true" -> StoryKind.SET_AGAIN
+                    else -> StoryKind.SET
                 },
             )
             EventType.ALARM_LOST -> StoryItem(at, StoryKind.SET_AGAIN)
             EventType.CHECK_IN_ASKED -> StoryItem(at, StoryKind.ASKED)
+            // Saying the same thing again ("still working", twice) changes no state, so it is told by this event and not by a change of state.
+            EventType.CHECK_IN_ANSWERED -> when (values["answer"]) {
+                "WORKING_SELF_REPORTED" -> StoryItem(at, StoryKind.STILL_WORKING)
+                "STARTED_SELF_REPORTED" -> StoryItem(at, StoryKind.STARTED)
+                else -> null
+            }
             EventType.CHECKIN_LATE -> StoryItem(at, StoryKind.QUESTION_LATE, values["late_s"])
             EventType.RECOVERY_ACCEPTED -> if (values["choice"] == "RESCHEDULE") StoryItem(at, StoryKind.MOVED_LATER, values["minutes"]) else null
             EventType.MISSED_WHILE_OFF -> StoryItem(at, StoryKind.PHONE_WAS_OFF)
@@ -79,6 +88,8 @@ object DetailStory {
             else -> null
         }
     }
+
+    private fun SkipReason?.isCalendar() = this == SkipReason.CALENDAR_CANCELLED || this == SkipReason.CALENDAR_REMOVED
 
     private fun payload(e: EventRow): Map<String, String> =
         Regex("\"([A-Za-z0-9_.:+-]{1,64})\"\\s*:\\s*\"([A-Za-z0-9_.:+-]{0,64})\"").findAll(e.payloadJson).associate { it.groupValues[1] to it.groupValues[2] }
