@@ -11,6 +11,7 @@
 
     <string name="detail_story_set">The alarm was set.</string>
     <string name="detail_story_set_again">The alarm was set again.</string>
+    <string name="detail_story_set_roughly">The alarm could only be set approximately, so it may have gone off late.</string>
     <string name="detail_story_rang">The alarm went off.</string>
     <string name="detail_story_answered">You answered the alarm.</string>
     <string name="detail_story_directed">You were told the first step.</string>
@@ -32,6 +33,7 @@
     <string name="detail_story_moved_later">It was moved to later.</string>
     <string name="detail_story_blocked">You said something was in the way.</string>
     <string name="detail_story_phone_off">The phone was off when it was due.</string>
+    <string name="detail_story_paused">COMMAND was paused when this was due.</string>
     <string name="detail_story_swiped">The ring\'s notification was swiped away.</string>
     <string name="detail_story_voice_unavailable">The spoken line was not available on this phone.</string>
     <string name="detail_story_test">This was a test alarm.</string>

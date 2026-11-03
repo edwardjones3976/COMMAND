@@ -11,6 +11,7 @@ import com.command.domain.model.CheckInAnswer
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.EventType
+import com.command.domain.occurrence.MissReason
 import com.command.domain.occurrence.OccurrenceState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -29,8 +30,13 @@ class DetailStoryTest {
     private fun changed(at: Long, from: String, to: String, command: String) =
         event(EventType.STATE_CHANGED, at, "from" to from, "to" to to, "command" to command)
 
-    private fun detail(events: List<EventRow>, checkIns: List<CheckInRow> = emptyList(), challenges: List<ChallengeRow> = emptyList()) = OccurrenceDetail(
-        OccurrenceRow("o", "m", 1_000, "UTC", OccurrenceState.STARTED_SELF_REPORTED, 3, 1, ArmMode.EXACT, null, "{}", null, null, null),
+    private fun detail(
+        events: List<EventRow>,
+        checkIns: List<CheckInRow> = emptyList(),
+        challenges: List<ChallengeRow> = emptyList(),
+        missReason: MissReason? = null,
+    ) = OccurrenceDetail(
+        OccurrenceRow("o", "m", 1_000, "UTC", OccurrenceState.STARTED_SELF_REPORTED, 3, 1, ArmMode.EXACT, null, "{}", null, null, missReason),
         "Write the report", events, checkIns, challenges,
     )
 
@@ -91,15 +97,40 @@ class DetailStoryTest {
     }
 
     @Test
-    fun `an alarm set again says so, and what only matters to someone debugging is not in the story`() {
+    fun `an alarm that came due while the phone was off is told as that and not also as running out`() {
         val events = listOf(
-            event(EventType.ALARM_ARMED, 1, "mode" to "EXACT", "adjusted" to "true"),
-            event(EventType.REJECTED_TRANSITION, 2, "from" to "MISSED", "command" to "MISS"),
-            event(EventType.PRECONDITION, 3, "key" to "ALARM_VOLUME"),
-            event(EventType.AUDIO_ROUTE, 4, "spoke" to "true"),
-            event(EventType.ALARM_FIRED_STALE, 5),
+            changed(1, "ARMED", "MISSED", "MISS"),
+            event(EventType.MISSED_WHILE_OFF, 1, "late_s" to "900"),
         )
-        assertEquals(listOf(StoryKind.SET_AGAIN), DetailStory.story(detail(events)).map { it.kind })
+        assertEquals(listOf(StoryKind.PHONE_WAS_OFF), DetailStory.story(detail(events, missReason = MissReason.DOWNTIME)).map { it.kind })
+    }
+
+    @Test
+    fun `an alarm that came due during a pause says so, and one that rang out unanswered says that`() {
+        val events = listOf(changed(1, "SCHEDULED", "MISSED", "MISS"))
+        assertEquals(listOf(StoryKind.PAUSED), DetailStory.story(detail(events, missReason = MissReason.PAUSED)).map { it.kind })
+        assertEquals(listOf(StoryKind.MISSED), DetailStory.story(detail(events, missReason = MissReason.TIMEOUT)).map { it.kind })
+    }
+
+    @Test
+    fun `an alarm that could only be set roughly says so, and one that was lost and put back is set again`() {
+        val events = listOf(
+            event(EventType.ALARM_ARMED, 1, "mode" to "EXACT"),
+            event(EventType.ALARM_ARMED, 2, "mode" to "INEXACT", "adjusted" to "true"),
+            event(EventType.ALARM_LOST, 3, "trigger" to "OPEN"),
+        )
+        assertEquals(listOf(StoryKind.SET, StoryKind.SET_ROUGHLY, StoryKind.SET_AGAIN), DetailStory.story(detail(events)).map { it.kind })
+    }
+
+    @Test
+    fun `what only matters to someone debugging is not in the story`() {
+        val events = listOf(
+            event(EventType.REJECTED_TRANSITION, 1, "from" to "MISSED", "command" to "MISS"),
+            event(EventType.PRECONDITION, 2, "key" to "ALARM_VOLUME"),
+            event(EventType.AUDIO_ROUTE, 3, "spoke" to "true"),
+            event(EventType.ALARM_FIRED_STALE, 4),
+        )
+        assertEquals(emptyList<StoryKind>(), DetailStory.story(detail(events)).map { it.kind })
     }
 
     @Test

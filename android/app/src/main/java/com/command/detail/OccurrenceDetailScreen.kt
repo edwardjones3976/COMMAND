@@ -175,6 +175,7 @@ private fun storyText(line: StoryItem): String = when (line.kind) {
 private fun storyRes(kind: StoryKind): Int = when (kind) {
     StoryKind.SET -> R.string.detail_story_set
     StoryKind.SET_AGAIN -> R.string.detail_story_set_again
+    StoryKind.SET_ROUGHLY -> R.string.detail_story_set_roughly
     StoryKind.RANG -> R.string.detail_story_rang
     StoryKind.ANSWERED -> R.string.detail_story_answered
     StoryKind.DIRECTED -> R.string.detail_story_directed
@@ -193,6 +194,7 @@ private fun storyRes(kind: StoryKind): Int = when (kind) {
     StoryKind.MOVED_LATER -> R.string.detail_story_moved_later
     StoryKind.BLOCKED -> R.string.detail_story_blocked
     StoryKind.PHONE_WAS_OFF -> R.string.detail_story_phone_off
+    StoryKind.PAUSED -> R.string.detail_story_paused
     StoryKind.NOTIFICATION_SWIPED -> R.string.detail_story_swiped
     StoryKind.VOICE_UNAVAILABLE -> R.string.detail_story_voice_unavailable
     StoryKind.TEST -> R.string.detail_story_test
