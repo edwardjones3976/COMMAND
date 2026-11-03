@@ -56,6 +56,8 @@
     <string name="reliability_channel_level_missing">missing</string>
     <string name="reliability_channel_body">At this level an alarm cannot pop up over what you are doing. Set it back to high.</string>
     <string name="reliability_channel_action">Open channel settings</string>
+    <string name="reliability_checkin_channel_title">Follow-up question channel</string>
+    <string name="reliability_checkin_channel_body">At this level the questions about how it is going come without a sound, or not at all. Set it back to high.</string>
 
     <!-- Alarm volume -->
     <string name="reliability_volume_title">Alarm volume</string>

@@ -81,6 +81,17 @@ class PreconditionProbeTest {
     }
 
     @Test
+    fun `the question channel is read the same way, and silencing it is a warning, not something that stops an alarm`() {
+        assertEquals("HIGH", read(Precondition.CHECK_IN_CHANNEL))
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.deleteNotificationChannel(AlarmContract.CHANNEL_CHECK_IN)
+        manager.createNotificationChannel(NotificationChannel(AlarmContract.CHANNEL_CHECK_IN, "Questions", NotificationManager.IMPORTANCE_NONE))
+        assertEquals("NONE", read(Precondition.CHECK_IN_CHANNEL))
+        assertEquals(Severity.WARNING, Precondition.CHECK_IN_CHANNEL.severity(read(Precondition.CHECK_IN_CHANNEL)))
+        assertEquals("the ring's own channel is another one and is untouched", "HIGH", read(Precondition.ALARM_CHANNEL))
+    }
+
+    @Test
     fun `a silent alarm stream is reported as muted, and reading it changes nothing`() {
         val audio = context.getSystemService(AudioManager::class.java)
         audio.setStreamVolume(AudioManager.STREAM_ALARM, 5, 0)

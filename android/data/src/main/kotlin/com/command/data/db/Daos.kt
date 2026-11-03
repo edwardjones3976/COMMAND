@@ -168,6 +168,13 @@ interface OccurrenceDao {
            ORDER BY o.scheduled_at_utc DESC LIMIT :limit""",
     )
     fun observeRecent(fromUtc: Long, limit: Int): Flow<List<ScheduleRow>>
+
+    /** Everything due in [fromUtc, toUtc) of missions that still exist, newest first: what History is made of. */
+    @Query(
+        SCHEDULE_SELECT + """ WHERE m.deleted_at IS NULL AND o.scheduled_at_utc >= :fromUtc AND o.scheduled_at_utc < :toUtc
+           ORDER BY o.scheduled_at_utc DESC LIMIT :limit""",
+    )
+    fun observeBetween(fromUtc: Long, toUtc: Long, limit: Int): Flow<List<ScheduleRow>>
 }
 
 @Dao

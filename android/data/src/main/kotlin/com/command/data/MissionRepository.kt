@@ -104,6 +104,18 @@ class MissionRepository @Inject constructor(
         db.occurrences().observeRecent(clock.nowMs() - RECENT_MS, RECENT_LIMIT),
     ) { upcoming, recent -> ScheduleSnapshot(upcoming, recent) }
 
+    /**
+     * What came due in the last [days] local days, today included, newest first, of missions that still exist: what History is made of.
+     * The days are the person's own, in the clock's zone, and what is still to come later today is left out until it is due.
+     */
+    fun observeHistory(days: Int): Flow<List<ScheduleRow>> {
+        require(days >= 1)
+        val zone = clock.zone()
+        val today = java.time.Instant.ofEpochMilli(clock.nowMs()).atZone(zone).toLocalDate()
+        val from = today.minusDays((days - 1).toLong()).atStartOfDay(zone).toInstant().toEpochMilli()
+        return db.occurrences().observeBetween(from, clock.nowMs() + 1, HISTORY_LIMIT)
+    }
+
     suspend fun get(id: String): MissionRow? = db.missions().get(id)?.takeIf { it.deletedAt == null }
 
     /** Whether the person has a mission of their own that is switched on; the hidden mission behind a test alarm is not one. */
@@ -382,6 +394,7 @@ class MissionRepository @Inject constructor(
         private const val MIN_LEAD_MS = 5_000L
         private const val TEST_DELAY_MS = 5_000L
         private const val UPCOMING_LIMIT = 200
+        private const val HISTORY_LIMIT = 500
         private const val RECENT_LIMIT = 50
         private const val DEFAULT_TEST_TITLE = "Test alarm"
         private const val DEFAULT_TEST_ACTION = "This is a test. Say you are starting."

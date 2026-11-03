@@ -17,13 +17,16 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.command.consents.ConsentCenterRoute
+import com.command.detail.OccurrenceDetailRoute
 import com.command.editor.MissionEditorRoute
 import com.command.followup.FollowUpRoute
+import com.command.history.HistoryRoute
 import com.command.onboarding.FirstMissionRoute
 import com.command.onboarding.PermissionsRoute
 import com.command.onboarding.WelcomeScreen
 import com.command.reliability.ReliabilityRoute
 import com.command.schedule.ScheduleRoute
+import com.command.settings.SettingsRoute
 
 object Routes {
     const val WELCOME = "welcome"
@@ -32,7 +35,10 @@ object Routes {
     const val SCHEDULE = "schedule"
     const val RELIABILITY = "reliability"
     const val CONSENTS = "consents"
+    const val HISTORY = "history"
+    const val SETTINGS = "settings"
     const val ARG_ID = "id"
+    private const val DETAIL = "detail"
     private const val EDITOR = "mission"
     private const val FOLLOW_UP = "followup"
 
@@ -40,6 +46,11 @@ object Routes {
     const val FOLLOW_UP_PATTERN = "$FOLLOW_UP/{$ARG_ID}"
 
     fun followUp(occurrenceId: String): String = "$FOLLOW_UP/$occurrenceId"
+
+    /** What is recorded about one occurrence. */
+    const val DETAIL_PATTERN = "$DETAIL/{$ARG_ID}"
+
+    fun detail(occurrenceId: String): String = "$DETAIL/$occurrenceId"
 
     /** The editor for a new mission, or for the mission with this id. */
     const val EDITOR_PATTERN = "$EDITOR?$ARG_ID={$ARG_ID}"
@@ -103,7 +114,26 @@ private fun CommandNavHost(
                 onOpenOccurrence = { occurrenceId -> navController.navigate(Routes.followUp(occurrenceId)) },
                 onOpenReliability = { navController.navigate(Routes.RELIABILITY) },
                 onOpenConsents = { navController.navigate(Routes.CONSENTS) },
+                onOpenHistory = { navController.navigate(Routes.HISTORY) },
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
             )
+        }
+        composable(Routes.HISTORY) {
+            HistoryRoute(onBack = { navController.popBackStack() }, onOpenOccurrence = { navController.navigate(Routes.detail(it)) })
+        }
+        composable(Routes.SETTINGS) {
+            SettingsRoute(
+                onBack = { navController.popBackStack() },
+                onOpenHistory = { navController.navigate(Routes.HISTORY) },
+                onOpenReliability = { navController.navigate(Routes.RELIABILITY) },
+                onOpenConsents = { navController.navigate(Routes.CONSENTS) },
+            )
+        }
+        composable(
+            Routes.DETAIL_PATTERN,
+            arguments = listOf(navArgument(Routes.ARG_ID) { type = NavType.StringType }),
+        ) { entry ->
+            OccurrenceDetailRoute(occurrenceId = entry.arguments?.getString(Routes.ARG_ID).orEmpty(), onBack = { navController.popBackStack() })
         }
         composable(Routes.RELIABILITY) { ReliabilityRoute(onBack = { navController.popBackStack() }) }
         composable(Routes.CONSENTS) { ConsentCenterRoute(onBack = { navController.popBackStack() }) }

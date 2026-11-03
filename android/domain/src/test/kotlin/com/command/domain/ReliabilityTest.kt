@@ -19,7 +19,7 @@ class ReliabilityTest {
 
     private fun healthy() = mapOf(
         Precondition.EXACT_ALARMS to "granted", Precondition.NOTIFICATIONS to "granted", Precondition.FULL_SCREEN_INTENT to "granted",
-        Precondition.ALARM_CHANNEL to "HIGH", Precondition.ALARM_VOLUME to "audible", Precondition.DO_NOT_DISTURB to "free",
+        Precondition.ALARM_CHANNEL to "HIGH", Precondition.CHECK_IN_CHANNEL to "HIGH", Precondition.ALARM_VOLUME to "audible", Precondition.DO_NOT_DISTURB to "free",
         Precondition.BATTERY_OPTIMIZATION to "exempt",
         Precondition.BACKGROUND_RESTRICTED to "no", Precondition.STANDBY_BUCKET to "ACTIVE",
     )

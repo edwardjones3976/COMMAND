@@ -55,6 +55,10 @@ class PreconditionsTest {
         assertEquals(Severity.OK, Precondition.ALARM_VOLUME.severity(PreconditionValue.AUDIBLE))
         assertEquals(Severity.OK, Precondition.ALARM_CHANNEL.severity("HIGH"))
         assertEquals(Severity.PROBLEM, Precondition.ALARM_CHANNEL.severity("LOW"))
+        assertEquals(Severity.OK, Precondition.CHECK_IN_CHANNEL.severity("HIGH"))
+        for (lowered in listOf("DEFAULT", "LOW", "MIN", "NONE", "MISSING")) {
+            assertEquals("a quiet or switched-off question channel is a warning, not something that stops an alarm", Severity.WARNING, Precondition.CHECK_IN_CHANNEL.severity(lowered))
+        }
         assertEquals(Severity.WARNING, Precondition.BACKGROUND_RESTRICTED.severity(PreconditionValue.YES))
         assertEquals(Severity.WARNING, Precondition.STANDBY_BUCKET.severity("RESTRICTED"))
         assertEquals(Severity.WARNING, Precondition.STANDBY_BUCKET.severity("RARE"))

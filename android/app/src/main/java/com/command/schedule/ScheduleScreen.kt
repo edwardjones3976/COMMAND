@@ -59,6 +59,8 @@ object ScheduleTags {
     const val ATTENTION_ACTION = "schedule_banner_attention_action"
     const val LINK_RELIABILITY = "schedule_link_reliability"
     const val LINK_CONSENTS = "schedule_link_consents"
+    const val LINK_HISTORY = "schedule_link_history"
+    const val LINK_SETTINGS = "schedule_link_settings"
     fun row(occurrenceId: String) = "schedule_row_$occurrenceId"
 }
 
@@ -69,6 +71,8 @@ fun ScheduleRoute(
     onOpenOccurrence: (String) -> Unit,
     onOpenReliability: () -> Unit,
     onOpenConsents: () -> Unit,
+    onOpenHistory: () -> Unit,
+    onOpenSettings: () -> Unit,
     viewModel: ScheduleViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -86,6 +90,8 @@ fun ScheduleRoute(
         onOpenOccurrence = onOpenOccurrence,
         onOpenReliability = onOpenReliability,
         onOpenConsents = onOpenConsents,
+        onOpenHistory = onOpenHistory,
+        onOpenSettings = onOpenSettings,
     )
 }
 
@@ -99,6 +105,8 @@ fun ScheduleScreen(
     onOpenReliability: () -> Unit,
     onOpenConsents: () -> Unit,
     onOpenOccurrence: (String) -> Unit = {},
+    onOpenHistory: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     zone: ZoneId = ZoneId.systemDefault(),
     today: LocalDate = LocalDate.now(zone),
 ) {
@@ -135,6 +143,12 @@ fun ScheduleScreen(
                         }
                         TextButton(onClick = onOpenConsents, modifier = Modifier.heightIn(min = 48.dp).testTag(ScheduleTags.LINK_CONSENTS)) {
                             Text(stringResource(R.string.schedule_link_consents), style = MaterialTheme.typography.labelLarge)
+                        }
+                        TextButton(onClick = onOpenHistory, modifier = Modifier.heightIn(min = 48.dp).testTag(ScheduleTags.LINK_HISTORY)) {
+                            Text(stringResource(R.string.schedule_link_history), style = MaterialTheme.typography.labelLarge)
+                        }
+                        TextButton(onClick = onOpenSettings, modifier = Modifier.heightIn(min = 48.dp).testTag(ScheduleTags.LINK_SETTINGS)) {
+                            Text(stringResource(R.string.schedule_link_settings), style = MaterialTheme.typography.labelLarge)
                         }
                     }
                 }

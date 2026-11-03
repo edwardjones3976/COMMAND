@@ -148,6 +148,13 @@ class OccurrenceRepository @Inject constructor(
 
     suspend fun get(id: String): OccurrenceRow? = db.occurrences().get(id)
 
+    /** Everything recorded about one occurrence, or null if there is none with that id (or its mission is gone from the database). */
+    suspend fun detail(id: String): OccurrenceDetail? {
+        val occurrence = db.occurrences().get(id) ?: return null
+        val mission = db.missions().get(occurrence.missionId) ?: return null
+        return OccurrenceDetail(occurrence, mission.title, db.events().forOccurrence(id), db.checkIns().forOccurrence(id), db.challenges().forOccurrence(id))
+    }
+
     fun observe(id: String): Flow<OccurrenceRow?> = db.occurrences().observe(id)
 
     /** The title of an occurrence's mission, for notifications and screens that need to name it. */

@@ -495,4 +495,21 @@ class OccurrenceRepositoryTest {
         }
         assertTrue("and so did the first", onMain.isCompleted)
     }
+
+    @Test
+    fun `the detail of an occurrence has its events, its questions and its attempts, and an unknown one has none`() = run {
+        val o = scheduled()
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+        apply(o, OccurrenceCommand.Acknowledge()); apply(o, OccurrenceCommand.StartGuidance)
+        apply(o, OccurrenceCommand.CheckInDue(0))
+        apply(o, OccurrenceCommand.ReportStarted)
+
+        val d = f.repo.detail(o.id)!!
+        assertEquals("Write the report", d.title)
+        assertEquals(OccurrenceState.STARTED_SELF_REPORTED, d.occurrence.state)
+        assertTrue(d.events.any { it.type == EventType.ALARM_ARMED })
+        assertTrue(d.events.any { it.type == EventType.CHECK_IN_ASKED })
+        assertEquals(CheckInAnswer.STARTED, d.checkIns.single().answer)
+        assertNull(f.repo.detail("no-such-occurrence"))
+    }
 }

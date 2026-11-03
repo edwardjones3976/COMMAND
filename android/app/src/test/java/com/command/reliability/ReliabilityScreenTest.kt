@@ -154,6 +154,16 @@ class ReliabilityScreenTest {
     }
 
     @Test
+    fun `the question channel switched off is a warning that says what it costs, with a button to its own page`() {
+        show(ready(report(Precondition.CHECK_IN_CHANNEL to "NONE")))
+        compose.onNodeWithTag(ReliabilityTags.item(Precondition.CHECK_IN_CHANNEL)).assertIsDisplayed()
+        compose.onNodeWithText("Follow-up question channel").assertIsDisplayed()
+        compose.onNodeWithText("Set too low (off)").assertIsDisplayed()
+        compose.onNodeWithText("At this level the questions about how it is going come without a sound, or not at all.", substring = true).assertIsDisplayed()
+        compose.onNodeWithTag(ReliabilityTags.action(Precondition.CHECK_IN_CHANNEL)).assertIsDisplayed()
+    }
+
+    @Test
     fun `recent alarms say how each one went, and a test alarm is marked`() {
         show(
             ready(

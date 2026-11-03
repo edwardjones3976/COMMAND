@@ -42,6 +42,12 @@ enum class Precondition(val consent: ConsentKey?, val fix: Fix?) {
     /** The importance of the ring's notification channel; below high it cannot take over the screen. */
     ALARM_CHANNEL(null, Fix.OPEN_ALARM_CHANNEL_SETTINGS),
 
+    /**
+     * The importance of the channel the follow-up questions come through. Switched off, the questions never appear; lowered, they come
+     * without a sound or a pop-up. Neither stops an alarm, so this is a warning and not a problem.
+     */
+    CHECK_IN_CHANNEL(null, Fix.OPEN_CHECK_IN_CHANNEL_SETTINGS),
+
     /** The alarm stream is muted or at zero: an alarm that makes no sound is the failure this app exists to prevent. */
     ALARM_VOLUME(null, Fix.OPEN_SOUND_SETTINGS),
 
@@ -59,6 +65,7 @@ enum class Precondition(val consent: ConsentKey?, val fix: Fix?) {
     fun severity(value: String): Severity = when (this) {
         EXACT_ALARMS, NOTIFICATIONS, FULL_SCREEN_INTENT -> if (value == PreconditionValue.GRANTED) Severity.OK else Severity.PROBLEM
         ALARM_CHANNEL -> if (value == PreconditionValue.IMPORTANCE_HIGH) Severity.OK else Severity.PROBLEM
+        CHECK_IN_CHANNEL -> if (value == PreconditionValue.IMPORTANCE_HIGH) Severity.OK else Severity.WARNING
         ALARM_VOLUME -> if (value == PreconditionValue.AUDIBLE) Severity.OK else Severity.PROBLEM
         DO_NOT_DISTURB -> if (value == PreconditionValue.DND_BLOCKS_ALARMS) Severity.PROBLEM else Severity.OK
         BATTERY_OPTIMIZATION -> if (value == PreconditionValue.EXEMPT) Severity.OK else Severity.INFO
