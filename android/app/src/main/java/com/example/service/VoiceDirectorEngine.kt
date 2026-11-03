@@ -339,9 +339,11 @@ class VoiceDirectorEngine(
             geminiBackoffUntil = System.currentTimeMillis() + GEMINI_BACKOFF_MS
             return null
         }
-        val sampleRate = Regex("rate=(\\d+)").find(audioPart.mimeType)?.groupValues?.get(1)?.toIntOrNull()
-            ?: GEMINI_DEFAULT_SAMPLE_RATE
-        return RenderedLine(bytesToPcm16(audioPart.inlineData, 0, audioPart.inlineData.size), sampleRate, "gemini")
+        val (pcm, sampleRate) = decodeGeminiAudio(audioPart.inlineData, audioPart.mimeType) ?: run {
+            Log.w(TAG, "Gemini TTS returned audio in an unsupported format (${audioPart.mimeType})")
+            return null
+        }
+        return RenderedLine(pcm, sampleRate, "gemini")
     }
 
     internal fun buildTtsPrompt(director: DirectorVoice, voicePack: VoicePackEntity, line: String): String {
@@ -433,13 +435,11 @@ class VoiceDirectorEngine(
             engine.voices
                 ?.filter { it.locale.language == locale.language && !it.isNetworkConnectionRequired }
                 ?.maxByOrNull { voice ->
-                    val name = voice.name.lowercase()
                     var score = voice.quality
                     if (voice.locale.country == locale.country) score += 50
-                    val looksFemale = name.contains("female") || name.contains("woman")
-                    val looksMale = !looksFemale && (name.contains("male") || name.contains("man"))
-                    if (director.isFemale && looksFemale) score += 100
-                    if (!director.isFemale && looksMale) score += 100
+                    // A known gender outweighs quality (at most 500), so Stone never gets a female voice
+                    // when a male one can be identified.
+                    voiceIsFemale(voice.name)?.let { score += if (it == director.isFemale) 1_000 else -1_000 }
                     score
                 }
                 ?.let { engine.voice = it }
@@ -772,6 +772,9 @@ class VoiceDirectorEngine(
         internal fun boostDbFor(boostPercent: Int): Float =
             ((boostPercent - 100) / 10f).coerceIn(0f, VoiceMastering.MAX_BOOST_DB)
 
+        /** Acronyms the drill copy uses that must stay spelled out after all-caps text is softened. */
+        private val KEEP_UPPERCASE = setOf("USMC", "MCRD", "NCO", "PT", "MOS", "XO")
+
         /** Converts shouted all-caps text to sentence case so TTS doesn't spell words out as acronyms. */
         internal fun softenAllCaps(text: String): String {
             val letters = text.filter { it.isLetter() }
@@ -779,6 +782,36 @@ class VoiceDirectorEngine(
             return Regex("(^|[.!?]\\s+)(\\p{L})")
                 .replace(text.lowercase()) { it.groupValues[1] + it.groupValues[2].uppercase() }
                 .replace(Regex("\\bi\\b"), "I")
+                .replace(Regex("\\b\\p{L}+\\b")) { word ->
+                    word.value.uppercase().takeIf { it in KEEP_UPPERCASE } ?: word.value
+                }
+        }
+
+        // Google's engine names voices by code (en-us-x-iol-local) rather than by gender.
+        private val GOOGLE_FEMALE_VOICE_CODES = setOf("iob", "iog", "sfg", "tpc", "tpf")
+        private val GOOGLE_MALE_VOICE_CODES = setOf("iol", "iom", "tpd")
+
+        /** True for a female voice, false for male, null when the name doesn't say. */
+        internal fun voiceIsFemale(voiceName: String): Boolean? {
+            val name = voiceName.lowercase()
+            if (Regex("\\b(female|woman)\\b").containsMatchIn(name)) return true
+            if (Regex("\\b(male|man)\\b").containsMatchIn(name)) return false
+            return when (Regex("^[a-z]{2,3}-[a-z]{2}-x-([a-z]{3})").find(name)?.groupValues?.get(1)) {
+                in GOOGLE_FEMALE_VOICE_CODES -> true
+                in GOOGLE_MALE_VOICE_CODES -> false
+                else -> null
+            }
+        }
+
+        /**
+         * Gemini TTS audio: preview models return raw 16-bit PCM (rate in the MIME type), newer ones a
+         * complete WAV. Detecting the RIFF header keeps the WAV header from being played as sound.
+         */
+        internal fun decodeGeminiAudio(bytes: ByteArray, mimeType: String): Pair<ShortArray, Int>? {
+            if (bytes.size >= 12 && String(bytes, 0, 4) == "RIFF") return parseWav(bytes)
+            val rate = Regex("rate=(\\d+)").find(mimeType)?.groupValues?.get(1)?.toIntOrNull()
+                ?: GEMINI_DEFAULT_SAMPLE_RATE
+            return bytesToPcm16(bytes, 0, bytes.size) to rate
         }
 
         /** Reads a 16-bit PCM WAV by walking its chunks (headers are not always 44 bytes). Downmixes to mono. */

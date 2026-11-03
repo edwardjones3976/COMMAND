@@ -40,8 +40,8 @@ import kotlin.random.Random
 /**
  * End-to-end checks of GySgt. Marcus Stone's voice: which Gemini voice and brief he gets, what text is
  * spoken, what Gemini is told, and that the disk cache, the system-TTS fallback and A/B comparison all
- * reach mastering. Tests named `finding - ...` pin down current behavior that differs from what the
- * voice fix described, so each finding has a passing reproduction.
+ * reach mastering, plus the fixes for the gaps this verification found (acronyms, backup-voice gender,
+ * WAV replies from newer Gemini models, and inter-sample peaks).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36], shadows = [CapturingAudioTrack::class])
@@ -122,12 +122,13 @@ class StoneVoiceVerificationTest {
     }
 
     @Test
-    fun `finding - all-caps acronyms lose their capitals`() {
-        // Softening lowercases every letter, so the unit name is read as a word ("Usmc") instead of U-S-M-C.
+    fun `all-caps acronyms stay spelled out after softening`() {
         assertEquals(
-            "Usmc mcrd san diego, fall in! Move!",
+            "USMC MCRD san diego, fall in! Move!",
             VoiceDirectorEngine.softenAllCaps("USMC MCRD SAN DIEGO, FALL IN! MOVE!")
         )
+        // Only whole words are kept: "PT" inside a longer word is not an acronym.
+        assertEquals("Prompt PT now! Move!", VoiceDirectorEngine.softenAllCaps("PROMPT PT NOW! MOVE!"))
     }
 
     // ---------------------------------------------------------------------------------------
@@ -151,10 +152,13 @@ class StoneVoiceVerificationTest {
         val square = ShortArray(sampleRate) { if ((it / 40) % 2 == 0) 32_767 else -32_767 }
         // A quarter-sample-rate sine sampled at 45 degrees: samples sit at 0.707 while the waveform peaks at 1.0.
         val interSample = ShortArray(sampleRate) { (sin(PI / 2 * it + PI / 4) * 32_767).toInt().toShort() }
-        listOf(square, interSample).forEach { input ->
+        listOf(square, interSample, speechLike(30_000.0)).forEach { input ->
             val out = VoiceMastering.master(input, sampleRate, boostDb = VoiceMastering.MAX_BOOST_DB)
             assertTrue(out.pcm.maxOf { abs(it.toInt()) } <= ceiling)
             assertTrue(out.peakDbfs <= VoiceMastering.PEAK_CEILING_DBFS + 0.05f)
+            // The waveform between samples (what a DAC reconstructs) must also respect the ceiling.
+            val truePeakDb = 20 * kotlin.math.log10(truePeak4x(out.pcm))
+            assertTrue("true peak $truePeakDb dBTP is over the ceiling", truePeakDb <= VoiceMastering.PEAK_CEILING_DBFS)
         }
     }
 
@@ -184,15 +188,19 @@ class StoneVoiceVerificationTest {
     }
 
     @Test
-    fun `finding - a WAV reply from a newer TTS model would be played header and all`() {
-        // renderWithGemini passes the inline bytes straight to bytesToPcm16. That is right for
-        // gemini-3.1-flash-tts-preview's raw PCM, but gemini-3.8-flash-tts returns a WAV by default.
+    fun `gemini audio decodes the same whether it arrives as raw pcm or as a WAV`() {
+        // gemini-3.1-flash-tts-preview returns raw PCM; gemini-3.8-flash-tts returns a WAV by default.
         val pcm = ShortArray(240) { (sin(2 * PI * it / 24) * 8_000).toInt().toShort() }
-        val wavBytes = wav(pcm, 24_000)
-        val asGeminiDecodesIt = VoiceDirectorEngine.bytesToPcm16(wavBytes, 0, wavBytes.size)
-        assertEquals(pcm.size + 22, asGeminiDecodesIt.size)
-        assertEquals(0x4952, asGeminiDecodesIt[0].toInt()) // "RI" of "RIFF", played as a sample
-        assertTrue(VoiceDirectorEngine.parseWav(wavBytes)!!.first.contentEquals(pcm))
+        val raw = VoiceDirectorEngine.decodeGeminiAudio(pcmBytes(pcm), "audio/L16;codec=pcm;rate=24000")!!
+        assertTrue(raw.first.contentEquals(pcm))
+        assertEquals(24_000, raw.second)
+
+        val listChunk = "LIST".toByteArray() + intLe(4) + "info".toByteArray()
+        val fromWav = VoiceDirectorEngine.decodeGeminiAudio(wav(pcm, 24_000, extraChunk = listChunk), "audio/wav")!!
+        assertTrue("WAV header must not be played as samples", fromWav.first.contentEquals(pcm))
+        assertEquals(24_000, fromWav.second)
+
+        assertEquals(16_000, VoiceDirectorEngine.decodeGeminiAudio(pcmBytes(pcm), "audio/pcm;rate=16000")!!.second)
     }
 
     @Test
@@ -219,21 +227,25 @@ class StoneVoiceVerificationTest {
     }
 
     @Test
-    fun `finding - stone's backup voice can be female when voice names don't say male or female`() {
-        // Google's engine names voices like en-us-x-xxx-local, with no gender in the name. The picker then ranks
-        // on quality alone, so Stone and a female director end up with the same voice.
-        ShadowTextToSpeech.addVoice(Voice("en-us-x-aaa-local", Locale.US, Voice.QUALITY_VERY_HIGH, Voice.LATENCY_NORMAL, false, emptySet()))
-        ShadowTextToSpeech.addVoice(Voice("en-us-x-bbb-local", Locale.US, Voice.QUALITY_HIGH, Voice.LATENCY_NORMAL, false, emptySet()))
+    fun `stone's backup voice is male even when a female voice has higher quality`() {
+        // Google's engine names voices by code; tpf is a female en-US voice and iol a male one.
+        ShadowTextToSpeech.addVoice(Voice("en-us-x-tpf-local", Locale.US, Voice.QUALITY_VERY_HIGH, Voice.LATENCY_NORMAL, false, emptySet()))
+        ShadowTextToSpeech.addVoice(Voice("en-us-x-iol-local", Locale.US, Voice.QUALITY_HIGH, Voice.LATENCY_NORMAL, false, emptySet()))
         val engine = newEngine()
-        val eleanor = packs.getValue("pack_eleanor_vance")
 
         configureSystemVoice(engine, stone)
-        val stoneVoice = shadowTts().currentVoice.name
-        configureSystemVoice(engine, eleanor)
-        val eleanorVoice = shadowTts().currentVoice.name
+        assertEquals("en-us-x-iol-local", shadowTts().currentVoice.name)
+        configureSystemVoice(engine, packs.getValue("pack_eleanor_vance"))
+        assertEquals("en-us-x-tpf-local", shadowTts().currentVoice.name)
+    }
 
-        assertEquals("en-us-x-aaa-local", stoneVoice)
-        assertEquals(stoneVoice, eleanorVoice)
+    @Test
+    fun `voice gender is read from whole words or known voice codes, never from inside a word`() {
+        assertEquals(false, VoiceDirectorEngine.voiceIsFemale("en-us-male-2"))
+        assertEquals(true, VoiceDirectorEngine.voiceIsFemale("en-US-Female-Studio"))
+        assertEquals(false, VoiceDirectorEngine.voiceIsFemale("en-us-x-iom-network"))
+        assertEquals(null, VoiceDirectorEngine.voiceIsFemale("de-de-german-1")) // "man" inside "german"
+        assertEquals(null, VoiceDirectorEngine.voiceIsFemale("en-us-x-zzz-local"))
     }
 
     // ---------------------------------------------------------------------------------------
@@ -396,6 +408,25 @@ class StoneVoiceVerificationTest {
             val breath = (rnd.nextDouble() - 0.5) * 0.05
             ((voice + breath) * env * amplitude).coerceIn(-32767.0, 32767.0).toInt().toShort()
         }
+    }
+
+    /** Peak of the waveform reconstructed at 4x the sample rate (windowed-sinc interpolation), as a fraction of full scale. */
+    private fun truePeak4x(pcm: ShortArray): Double {
+        val taps = 16
+        var peak = pcm.maxOf { abs(it.toInt()) } / 32768.0
+        for (i in taps until pcm.size - taps) {
+            for (phase in 1..3) {
+                val frac = phase / 4.0
+                var acc = 0.0
+                for (k in -taps + 1..taps) {
+                    val t = k - frac
+                    val window = 0.5 + 0.5 * kotlin.math.cos(PI * t / taps)
+                    acc += pcm[i + k] / 32768.0 * (sin(PI * t) / (PI * t)) * window
+                }
+                peak = maxOf(peak, abs(acc))
+            }
+        }
+        return peak
     }
 
     private fun sha256(text: String): String =

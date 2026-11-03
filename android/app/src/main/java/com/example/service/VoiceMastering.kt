@@ -29,10 +29,13 @@ object VoiceMastering {
     /** Hard ceiling for any sample after mastering. */
     const val PEAK_CEILING_DBFS = -1f
 
+    /** The limiter's 2x peak estimate can miss a little inter-sample overshoot; this keeps true peaks under the ceiling. */
+    private const val TRUE_PEAK_MARGIN_DB = 0.1f
+
     private const val HIGH_PASS_HZ = 80.0
     private const val MAX_NORMALIZE_GAIN_DB = 30f
 
-    /** Upper bound for the boost slider (150% maps to about +3.5 dB; allow headroom for custom packs). */
+    /** Upper bound for the boost slider (150% maps to +5 dB; allow headroom for custom packs). */
     const val MAX_BOOST_DB = 8f
     private const val EDGE_FADE_MS = 5
 
@@ -61,7 +64,7 @@ object VoiceMastering {
         val wantedDb = if (level > -90f) (targetDb - level).coerceIn(-40f, MAX_NORMALIZE_GAIN_DB) else 0f
         val gain = dbToLin(wantedDb)
         for (i in x.indices) x[i] *= gain
-        limit(x, sr, dbToLin(PEAK_CEILING_DBFS))
+        limit(x, sr, dbToLin(PEAK_CEILING_DBFS - TRUE_PEAK_MARGIN_DB))
 
         val fade = (sr * EDGE_FADE_MS / 1000).coerceAtMost(x.size / 2)
         val out = ShortArray(x.size) { i ->
@@ -126,10 +129,11 @@ object VoiceMastering {
      * Smooth peak limiter. The line is fully rendered, so it can look ahead: gain starts easing down
      * ~2 ms before a peak (backward pass) and recovers over ~80 ms after it (forward pass). Every
      * sample's gain is at or below what that sample needs, so nothing exceeds [ceiling], and the
-     * gain never steps, so there is no clipping distortion or clicking.
+     * gain never steps, so there is no clipping distortion or clicking. Peaks are judged including
+     * the waveform between samples, so the reconstructed (true) peak also stays under the ceiling.
      */
     private fun limit(x: FloatArray, sampleRate: Int, ceiling: Float) {
-        val needed = FloatArray(x.size) { val a = abs(x[it]); if (a > ceiling) ceiling / a else 1f }
+        val needed = FloatArray(x.size) { val a = peakAround(x, it); if (a > ceiling) ceiling / a else 1f }
         if (needed.all { it >= 1f }) return
         val attack = 1f / (sampleRate * 0.002f).coerceAtLeast(1f)
         for (i in x.size - 2 downTo 0) {
@@ -141,6 +145,16 @@ object VoiceMastering {
             g = minOf(needed[i], g + (1f - g) * release)
             x[i] *= g
         }
+    }
+
+    /**
+     * Largest of sample [i] and the half-sample points on either side, estimated with a 4-point
+     * cubic (Catmull-Rom) through the neighbours. Roughly a 2x-oversampled peak meter.
+     */
+    private fun peakAround(x: FloatArray, i: Int): Float {
+        fun at(j: Int) = x[j.coerceIn(0, x.size - 1)]
+        fun midpoint(a: Int) = (-at(a - 1) + 9f * at(a) + 9f * at(a + 1) - at(a + 2)) / 16f
+        return maxOf(abs(x[i]), abs(midpoint(i - 1)), abs(midpoint(i)))
     }
 
     /** 2nd-order Butterworth high-pass (RBJ cookbook) to remove rumble and DC. */
