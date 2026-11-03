@@ -10,6 +10,7 @@ import com.command.testing.android.awaitUntil
 import com.command.testing.android.testMission
 import android.content.Intent
 import android.net.Uri
+import android.os.Looper
 import android.os.PowerManager
 import androidx.test.core.app.ApplicationProvider
 import com.command.data.OccurrenceRepository
@@ -321,5 +322,25 @@ class ReceiversTest {
         } finally {
             Thread.setDefaultUncaughtExceptionHandler(previous)
         }
+    }
+
+    /** Lets everything that is queued run for a fixed time, with the main looper pumped as `awaitUntil` does: for what must not happen. */
+    private fun settle(ms: Long) {
+        val end = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < end) {
+            shadowOf(Looper.getMainLooper()).idle()
+            Thread.sleep(5)
+        }
+    }
+
+    @Test
+    fun `an answer that was applied takes the question away once, in the repository's turn, and the receiver does not do it again`() {
+        val o = guided()
+        poster.cancelled.clear()
+        CheckInAnswerReceiver().onReceive(context, answer(o, "STARTED"))
+        awaitUntil(message = "started") { stateOf(o) == OccurrenceState.STARTED_SELF_REPORTED }
+        awaitUntil(message = "question removed") { o.id in poster.cancelled }
+        settle(400) // anything the receiver does once the repository has finished
+        assertEquals("a second cancel could remove the next question", 1, poster.cancelled.count { it == o.id })
     }
 }

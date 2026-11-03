@@ -63,7 +63,7 @@ sealed class OccurrenceCommand(val label: String) {
     companion object {
         const val MAX_DELAY_MINUTES = 24 * 60
 
-        /** "Tomorrow": the same local time on the next calendar day (not 24 hours later: on a day the clocks change that is an hour off). */
+        /** "Tomorrow, at this time": the same local time as now on the next calendar day (not 24 hours later: on a day the clocks change that is an hour off). */
         const val TOMORROW_MINUTES = 24 * 60
     }
 }

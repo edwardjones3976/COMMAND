@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
+import com.command.data.ApplyResult
 import com.command.domain.model.CheckInAnswer
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.EventPayload
@@ -98,8 +99,10 @@ class CheckInAnswerReceiver : BroadcastReceiver() {
             else -> return
         }
         runAsync(context) { entry ->
-            entry.repository().apply(id, command, EventSource.USER)
-            entry.checkInPoster().cancel(id)
+            // An answer that was applied took the question out of the shade itself, in the repository's turn for the occurrence, and doing it
+            // again out here could remove the next question, which a follow-up alarm may have posted in between. One that was refused (its
+            // notification outlived the occurrence) left the question behind, and that is the one to take away.
+            if (entry.repository().apply(id, command, EventSource.USER) !is ApplyResult.Applied) entry.checkInPoster().cancel(id)
         }
     }
 }

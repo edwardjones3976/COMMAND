@@ -33,7 +33,7 @@
     <string name="followup_recovery_in_30">In 30 minutes</string>
     <string name="followup_recovery_in_60">In an hour</string>
     <string name="followup_recovery_in_other">Later</string>
-    <string name="followup_recovery_tomorrow">Tomorrow, at the same time</string>
+    <string name="followup_recovery_tomorrow">Tomorrow, at this time</string>
     <string name="followup_recovery_not_now">Not now</string>
 
     <string name="followup_done_title">Marked done</string>
