@@ -30,32 +30,34 @@ class LegacyAlarmCanceller @Inject constructor(
     @ApplicationContext private val context: Context,
     private val db: CommandDb,
 ) {
-    /** Returns how many old alarms it cancelled, or null if it had already run. */
+    /**
+     * Returns how many old alarms it cancelled, or null if it had already finished. It only counts as finished once it could
+     * look: no old database at all, or one that was read. An old database that is there but cannot be read is tried again at
+     * the next start (the calendar wake-up is cancelled every time, which is harmless), and never stops the app from starting.
+     */
     suspend fun cancelIfNeeded(): Int? {
         if (db.settings().get(SettingKeys.LEGACY_ALARMS_CANCELLED) == "true") return null
-        val cancelled = withContext(Dispatchers.IO) { cancelAll() }
-        db.settings().put(SettingRow(SettingKeys.LEGACY_ALARMS_CANCELLED, "true"))
+        val (cancelled, couldLook) = withContext(Dispatchers.IO) { cancelAll() }
+        if (couldLook) db.settings().put(SettingRow(SettingKeys.LEGACY_ALARMS_CANCELLED, "true"))
         return cancelled
     }
 
-    private fun cancelAll(): Int {
+    private fun cancelAll(): Pair<Int, Boolean> {
         var cancelled = 0
+        val ids = legacyMissionIds()
         val alarms = context.getSystemService(AlarmManager::class.java)
         if (alarms != null) {
-            for (id in legacyMissionIds()) {
+            for (id in ids.orEmpty()) {
                 if (cancel(alarms, id.toInt(), MISSION_RECEIVER, action = null)) cancelled++
             }
             if (cancel(alarms, CALENDAR_REQUEST_CODE, CALENDAR_RECEIVER, CALENDAR_ACTION)) cancelled++
         }
         deleteChannel()
-        return cancelled
+        return cancelled to (ids != null)
     }
 
-    /**
-     * The old row ids, which were the request codes. A database that cannot be read yields none: the old alarms then
-     * fire into nothing, which is harmless, and this must never stop the app from starting.
-     */
-    private fun legacyMissionIds(): List<Long> {
+    /** The old row ids, which were the request codes: empty if there is no old database, null if there is one that cannot be read. */
+    private fun legacyMissionIds(): List<Long>? {
         val file = context.getDatabasePath(LegacyImporter.LEGACY_DB_NAME)
         if (!file.isFile) return emptyList()
         return try {
@@ -68,7 +70,7 @@ class LegacyAlarmCanceller @Inject constructor(
                 }
             }
         } catch (e: RuntimeException) {
-            emptyList()
+            null
         }
     }
 

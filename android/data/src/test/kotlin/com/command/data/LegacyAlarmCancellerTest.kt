@@ -105,16 +105,23 @@ class LegacyAlarmCancellerTest {
     }
 
     @Test
-    fun `an old database that cannot be read never stops the app, and is left exactly as it was`() = runBlocking {
+    fun `an old database that cannot be read never stops the app, is left as it was, and is looked at again next time`() = runBlocking {
         val file: File = context.getDatabasePath(LegacyImporter.LEGACY_DB_NAME)
         file.parentFile!!.mkdirs()
         file.writeBytes(ByteArray(2048) { (it % 251).toByte() })
         val before = file.readBytes()
         legacyCalendarAlarm()
 
-        assertEquals(1, canceller.cancelIfNeeded())
+        assertEquals("the calendar wake-up needs no database", 1, canceller.cancelIfNeeded())
 
         assertTrue("the user's old file is untouched", before.contentEquals(file.readBytes()))
+        assertNull("it could not look, so it is not finished", f.db.settings().get(SettingKeys.LEGACY_ALARMS_CANCELLED))
+
+        // The file becomes readable (say, restored); the next start finishes the job.
+        legacyDbWithMissions(7)
+        legacyMissionAlarm(7)
+        assertEquals(1, canceller.cancelIfNeeded())
+        assertTrue(shadowOf(alarms).scheduledAlarms.isEmpty())
         assertEquals("true", f.db.settings().get(SettingKeys.LEGACY_ALARMS_CANCELLED))
     }
 

@@ -24,6 +24,7 @@ import com.command.domain.schedule.RRuleParser
 import com.command.domain.schedule.StartRule
 import com.command.domain.time.Clock
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.DateTimeException
@@ -63,6 +64,9 @@ data class TestRingSpec(
     val profileId: String? = null,
 )
 
+/** What the schedule shows: what is still to come, soonest first, and what happened recently, newest first. */
+data class ScheduleSnapshot(val upcoming: List<ScheduleRow>, val recent: List<ScheduleRow>)
+
 enum class DraftProblem { TITLE_EMPTY, FIRST_ACTION_EMPTY, IN_THE_PAST, NO_DAYS_SELECTED }
 
 sealed interface SaveResult {
@@ -91,9 +95,11 @@ class MissionRepository @Inject constructor(
 
     // --- reads --------------------------------------------------------------------------------------------------
 
-    /** Occurrences from a day ago on, with their mission's title, for the schedule screen. */
-    fun observeSchedule(): Flow<List<ScheduleRow>> =
-        db.occurrences().observeSchedule(clock.nowMs() - RECENT_MS, LIST_LIMIT)
+    /** Each list has its own bound, so a long upcoming list can never push the rest off the screen. */
+    fun observeSchedule(): Flow<ScheduleSnapshot> = combine(
+        db.occurrences().observeUpcoming(UPCOMING_LIMIT),
+        db.occurrences().observeRecent(clock.nowMs() - RECENT_MS, RECENT_LIMIT),
+    ) { upcoming, recent -> ScheduleSnapshot(upcoming, recent) }
 
     suspend fun get(id: String): MissionRow? = db.missions().get(id)?.takeIf { it.deletedAt == null }
 
@@ -126,10 +132,19 @@ class MissionRepository @Inject constructor(
         val now = clock.nowMs()
         val existing = draft.id?.let { db.missions().get(it) }?.takeIf { it.deletedAt == null }
         val row = rowOf(draft, existing, zone)
-        db.withTransaction { if (existing == null) db.missions().insert(row) else db.missions().update(row) }
-
         val wanted = instantsOf(row, zone, now)
-        if (existing != null) discardFuture(row.id, keep = wanted.toSet(), now, EventSource.USER, includeDelayed = false)
+        // What to leave alone: occurrences at times the new rule still gives, including one that is only just overdue (an
+        // alarm the system has not delivered yet must not be lost by renaming its mission).
+        val keep = instantsOf(row, zone, now, lookBackMs = GRACE_MS).toSet()
+        val removed = db.withTransaction {
+            if (existing == null) db.missions().insert(row) else db.missions().update(row)
+            if (existing == null) {
+                emptyList()
+            } else {
+                occurrences.removeUnfiredRows(unfiredIds(row.id, keep, now, futureOnly = false, includeDelayed = false), EventSource.USER)
+            }
+        }
+        occurrences.cancelAlarms(removed)
         createAndArm(row, zone, wanted, EventSource.USER)
         SaveResult.Saved(row.id, wanted.size)
     }
@@ -137,8 +152,12 @@ class MissionRepository @Inject constructor(
     /** Hides the mission and discards its coming occurrences. What already rang stays in history. */
     suspend fun delete(missionId: String) = writes.withLock {
         val now = clock.nowMs()
-        db.missions().softDelete(missionId, now)
-        discardFuture(missionId, keep = emptySet(), now, EventSource.USER, includeDelayed = true)
+        // Hiding the mission and removing everything that has not rung commit together, so no alarm can outlive its mission.
+        val removed = db.withTransaction {
+            db.missions().softDelete(missionId, now)
+            occurrences.removeUnfiredRows(unfiredIds(missionId, emptySet(), now, futureOnly = false, includeDelayed = true), EventSource.USER)
+        }
+        occurrences.cancelAlarms(removed)
     }
 
     /**
@@ -149,6 +168,9 @@ class MissionRepository @Inject constructor(
     suspend fun testRing(spec: TestRingSpec = TestRingSpec()): String = writes.withLock {
         val now = clock.nowMs()
         val at = now + TEST_DELAY_MS
+        // The hidden mission carries what the test says, so only one test ring may be outstanding: a second replaces the first.
+        val outstanding = unfiredIds(TEST_MISSION_ID, emptySet(), now, futureOnly = false, includeDelayed = true)
+        if (outstanding.isNotEmpty()) occurrences.discardUnfired(outstanding, EventSource.USER)
         val row = MissionRow(
             id = TEST_MISSION_ID,
             title = spec.title.trim().ifEmpty { DEFAULT_TEST_TITLE },
@@ -177,13 +199,18 @@ class MissionRepository @Inject constructor(
         val zone = clock.zone()
         for (mission in db.missions().enabled()) {
             val z = zoneOf(mission, zone)
-            createAndArm(mission, z, instantsOf(mission, z, now), EventSource.SYSTEM)
+            val wanted = instantsOf(mission, z, now)
+            discardFuture(mission.id, keep = wanted.toSet(), now, EventSource.SYSTEM)
+            createAndArm(mission, z, wanted, EventSource.SYSTEM)
         }
         for (occ in db.occurrences().inStates(listOf(OccurrenceState.SCHEDULED, OccurrenceState.ARMED))) {
             if (occ.scheduledAtUtc < now - GRACE_MS) {
                 occurrences.apply(occ.id, OccurrenceCommand.Miss(MissReason.DOWNTIME), EventSource.SYSTEM)
             } else if (occ.state == OccurrenceState.ARMED) {
                 occurrences.rearm(occ.id)
+            } else {
+                // Created but never armed (the app stopped in between) and only just due: arm it now, so it rings at once.
+                occurrences.apply(occ.id, OccurrenceCommand.Arm(armModeNow()), EventSource.SYSTEM)
             }
         }
     }
@@ -240,14 +267,24 @@ class MissionRepository @Inject constructor(
 
     private fun ruleOf(m: MissionRow): RRule? = m.rrule?.let { (RRuleParser.parse(it) as? RRuleParse.Ok)?.rule }
 
-    /** The instants a mission starts at from [now]: one week of a repeating one, or a one-off however far away. */
-    private fun instantsOf(m: MissionRow, zone: ZoneId, now: Long): List<Long> = when (m.startKind) {
-        StartKind.ONE_OFF -> listOfNotNull(m.startAtUtc?.takeIf { it > now })
+    /**
+     * The instants a mission starts at from [now] (or from [lookBackMs] before it): a one-off however far away, a week of a
+     * repeating one, and, when that week is empty, the next occurrence however far away, so that a mission that starts next
+     * month still has a row on the schedule to open, edit or delete.
+     */
+    private fun instantsOf(m: MissionRow, zone: ZoneId, now: Long, lookBackMs: Long = 0): List<Long> = when (m.startKind) {
+        StartKind.ONE_OFF -> listOfNotNull(m.startAtUtc?.takeIf { it > now - lookBackMs })
         StartKind.RRULE -> {
             // A rule that cannot be read yields nothing rather than a guess.
             val start = startOf(m)
             val rule = ruleOf(m)
-            if (start == null || rule == null) emptyList() else generator.generate(StartRule.Recurring(start, rule), zone, now, now + HORIZON_MS)
+            if (start == null || rule == null) {
+                emptyList()
+            } else {
+                val recurring = StartRule.Recurring(start, rule)
+                generator.generate(recurring, zone, now - lookBackMs, now + HORIZON_MS)
+                    .ifEmpty { generator.generate(recurring, zone, now + HORIZON_MS, now + FAR_MS, limit = 1) }
+            }
         }
     }
 
@@ -261,14 +298,22 @@ class MissionRepository @Inject constructor(
         }
     }
 
-    /** Discards the mission's coming occurrences that have not fired, except those at the [keep] instants. */
-    private suspend fun discardFuture(missionId: String, keep: Set<Long>, now: Long, source: EventSource, includeDelayed: Boolean) {
-        val doomed = db.occurrences().forMission(missionId).filter {
+    /**
+     * The ids of the mission's occurrences that have not started to ring, except those at the [keep] instants. A delayed
+     * child is something the person asked for by delaying: an edit leaves it, a deletion removes it ([includeDelayed]).
+     * An alarm the system delivers late can still be armed after its time, so a change that makes it obsolete passes
+     * `futureOnly = false`; the periodic refresh passes true and leaves an overdue one to the grace rule.
+     */
+    private suspend fun unfiredIds(missionId: String, keep: Set<Long>, now: Long, futureOnly: Boolean, includeDelayed: Boolean): List<String> =
+        db.occurrences().forMission(missionId).filter {
             (it.state == OccurrenceState.SCHEDULED || it.state == OccurrenceState.ARMED) &&
-                it.scheduledAtUtc >= now && it.scheduledAtUtc !in keep &&
-                // A delayed child is something the person asked for by delaying; an edit leaves it, a deletion removes it.
+                (!futureOnly || it.scheduledAtUtc >= now) && it.scheduledAtUtc !in keep &&
                 (includeDelayed || it.parentOccurrenceId == null)
         }.map { it.id }
+
+    /** Discards the mission's coming unfired occurrences except those at the [keep] instants. */
+    private suspend fun discardFuture(missionId: String, keep: Set<Long>, now: Long, source: EventSource) {
+        val doomed = unfiredIds(missionId, keep, now, futureOnly = true, includeDelayed = false)
         if (doomed.isNotEmpty()) occurrences.discardUnfired(doomed, source)
     }
 
@@ -281,11 +326,13 @@ class MissionRepository @Inject constructor(
         const val MAX_STARTER_MINUTES = 60
         private const val DAY_MS = 24 * 60 * 60 * 1000L
         private const val HORIZON_MS = 7 * DAY_MS
+        private const val FAR_MS = 400 * DAY_MS
         private const val RECENT_MS = DAY_MS
         private const val GRACE_MS = 10 * 60 * 1000L
         private const val MIN_LEAD_MS = 5_000L
         private const val TEST_DELAY_MS = 5_000L
-        private const val LIST_LIMIT = 200
+        private const val UPCOMING_LIMIT = 200
+        private const val RECENT_LIMIT = 50
         private const val DEFAULT_TEST_TITLE = "Test alarm"
         private const val DEFAULT_TEST_ACTION = "This is a test. Say you are starting."
     }

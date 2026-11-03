@@ -44,6 +44,11 @@ interface MissionDao {
     suspend fun softDelete(id: String, now: Long)
 }
 
+private const val SCHEDULE_SELECT = """SELECT o.id AS occurrenceId, o.mission_id AS missionId, m.title AS title, m.flexibility AS flexibility,
+           o.scheduled_at_utc AS scheduledAtUtc, o.zone_id AS zoneId, o.state AS state, o.arm_mode AS armMode,
+           o.skip_reason AS skipReason, o.miss_reason AS missReason
+           FROM occurrences o JOIN missions m ON m.id = o.mission_id"""
+
 /** One line of the schedule: an occurrence with the facts about its mission that a list needs. */
 data class ScheduleRow(
     val occurrenceId: String,
@@ -123,19 +128,19 @@ interface OccurrenceDao {
     @Query("SELECT COUNT(*) FROM occurrences")
     suspend fun count(): Int
 
-    /**
-     * What the schedule screen lists: everything from [fromUtc] on (including the recent past, for what was just missed),
-     * of missions that still exist.
-     */
+    /** What is still to come (or ringing), soonest first, of missions that still exist. */
     @Query(
-        """SELECT o.id AS occurrenceId, o.mission_id AS missionId, m.title AS title, m.flexibility AS flexibility,
-           o.scheduled_at_utc AS scheduledAtUtc, o.zone_id AS zoneId, o.state AS state, o.arm_mode AS armMode,
-           o.skip_reason AS skipReason, o.miss_reason AS missReason
-           FROM occurrences o JOIN missions m ON m.id = o.mission_id
-           WHERE m.deleted_at IS NULL AND o.scheduled_at_utc >= :fromUtc
+        SCHEDULE_SELECT + """ WHERE m.deleted_at IS NULL AND o.state IN ('SCHEDULED', 'ARMED', 'FIRING')
            ORDER BY o.scheduled_at_utc LIMIT :limit""",
     )
-    fun observeSchedule(fromUtc: Long, limit: Int): Flow<List<ScheduleRow>>
+    fun observeUpcoming(limit: Int): Flow<List<ScheduleRow>>
+
+    /** What has happened since [fromUtc] (so the recent past shows what was just missed), newest first. */
+    @Query(
+        SCHEDULE_SELECT + """ WHERE m.deleted_at IS NULL AND o.state NOT IN ('SCHEDULED', 'ARMED', 'FIRING') AND o.scheduled_at_utc >= :fromUtc
+           ORDER BY o.scheduled_at_utc DESC LIMIT :limit""",
+    )
+    fun observeRecent(fromUtc: Long, limit: Int): Flow<List<ScheduleRow>>
 }
 
 @Dao

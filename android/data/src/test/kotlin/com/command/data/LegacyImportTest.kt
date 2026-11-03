@@ -9,6 +9,9 @@ import com.command.domain.model.MissionSource
 import com.command.domain.model.StartKind
 import com.command.domain.occurrence.EventType
 import com.command.domain.occurrence.OccurrenceState
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -238,5 +241,16 @@ class LegacyImportTest {
         val payload = Codec.decodePayload(event.payloadJson)
         assertEquals("3", payload["imported"])
         assertFalse(event.payloadJson.contains("Gym"))
+    }
+
+    @Test
+    fun `two starts that overlap import once, and the marker is part of the same commit`() = run {
+        legacy = LegacyDb.create(context, wal = false).also { it.insertUserMissions() }
+
+        val reports = coroutineScope { listOf(async { importer.importIfNeeded() }, async { importer.importIfNeeded() }).awaitAll() }
+
+        assertEquals("exactly one of them imported", 1, reports.count { it != null })
+        assertEquals("3 user missions (one past, one finished, calendar one dropped) are imported exactly once", 3, f.db.missions().count())
+        assertEquals("true", f.db.settings().get(com.command.domain.model.SettingKeys.LEGACY_IMPORT_DONE))
     }
 }

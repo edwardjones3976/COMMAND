@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import com.command.data.MissionRepository
 import com.command.data.db.ScheduleRow
 import com.command.domain.alarm.AlarmScheduler
-import com.command.domain.occurrence.OccurrenceState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
@@ -49,9 +48,8 @@ class ScheduleViewModel @Inject constructor(
     val state: StateFlow<ScheduleUiState> = combine(
         everyMinute.flatMapLatest { missions.observeSchedule() },
         exactAvailable,
-    ) { rows, exact ->
-        val (upcoming, recent) = rows.partition { it.state in UPCOMING }
-        ScheduleUiState.Ready(upcoming, recent.sortedByDescending { it.scheduledAtUtc }, exact)
+    ) { schedule, exact ->
+        ScheduleUiState.Ready(schedule.upcoming, schedule.recent, exact)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ScheduleUiState.Loading)
 
     /** Android lets the user change the exact-alarm permission outside the app, so the screen asks again when it returns. */
@@ -61,6 +59,5 @@ class ScheduleViewModel @Inject constructor(
 
     private companion object {
         const val REFRESH_MS = 60_000L
-        val UPCOMING = setOf(OccurrenceState.SCHEDULED, OccurrenceState.ARMED, OccurrenceState.FIRING)
     }
 }

@@ -44,6 +44,9 @@ data class EditorState(
     val time: LocalTime,
     val days: Set<DayOfWeek> = emptySet(),
     val starterMinutes: Int = 5,
+    /** Kept from the stored mission: the editor does not show them, and a save must not reset them. */
+    val category: String = "General",
+    val profileId: String? = null,
     val problems: Set<DraftProblem> = emptySet(),
     val busy: Boolean = false,
     val finished: Boolean = false,
@@ -92,6 +95,7 @@ class MissionEditorViewModel @Inject constructor(
         return base.copy(
             loading = false, editing = true, title = draft.title, firstAction = draft.firstAction, flexibility = draft.flexibility,
             repeat = repeat, date = date, time = time, days = days, starterMinutes = draft.starterMinutes,
+            category = draft.category, profileId = draft.profileId,
         )
     }
 
@@ -136,7 +140,7 @@ class MissionEditorViewModel @Inject constructor(
         val s = _state.value
         if (s.busy || s.loading) return
         viewModelScope.launch {
-            missions.testRing(TestRingSpec(s.title, s.firstAction, s.flexibility, s.starterMinutes))
+            missions.testRing(TestRingSpec(s.title, s.firstAction, s.flexibility, s.starterMinutes, s.profileId))
             _state.update { it.copy(message = EditorMessage.TEST_STARTED) }
         }
     }
@@ -163,6 +167,8 @@ class MissionEditorViewModel @Inject constructor(
             RepeatKind.DAILY -> ScheduleDraft.Repeating(date, time, RRule(Frequency.DAILY))
             RepeatKind.WEEKLY -> ScheduleDraft.Repeating(date, time, RRule(Frequency.WEEKLY, byDay = days))
         },
+        category = category,
         starterMinutes = starterMinutes,
+        profileId = profileId,
     )
 }

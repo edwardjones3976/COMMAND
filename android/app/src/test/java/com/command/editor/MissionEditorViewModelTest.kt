@@ -191,4 +191,39 @@ class MissionEditorViewModelTest {
         vm.messageShown()
         assertNull(vm.state.value.message)
     }
+
+    @Test
+    fun `a title-only edit keeps the category and the profile the editor does not show`() {
+        val id = runBlocking {
+            val draft = MissionDraft(
+                title = "Standup", firstAction = "Open the notes", flexibility = Flexibility.FLEXIBLE,
+                schedule = ScheduleDraft.Once(LocalDateTime.of(2026, 11, 2, 11, 0)), category = "Work", profileId = "builtin_command",
+            )
+            (missions.save(draft) as SaveResult.Saved).missionId
+        }
+        val vm = ready(id)
+        vm.onTitle("Daily standup")
+        vm.save()
+        vm.await("finished") { it.finished }
+
+        val stored = runBlocking { db.missions().get(id)!! }
+        assertEquals("Daily standup", stored.title)
+        assertEquals("Work", stored.category)
+        assertEquals("builtin_command", stored.profileId)
+    }
+
+    @Test
+    fun `the test ring uses the mission's own profile, so the preview rings the way the mission will`() {
+        val id = runBlocking {
+            val draft = MissionDraft(
+                title = "Standup", firstAction = "Open the notes", flexibility = Flexibility.RIGID,
+                schedule = ScheduleDraft.Once(LocalDateTime.of(2026, 11, 2, 11, 0)), profileId = "builtin_reveille_max",
+            )
+            (missions.save(draft) as SaveResult.Saved).missionId
+        }
+        val vm = ready(id)
+        vm.testRing()
+        vm.await("message") { it.message == EditorMessage.TEST_STARTED }
+        assertEquals("builtin_reveille_max", runBlocking { db.missions().get(MissionRepository.TEST_MISSION_ID)!!.profileId })
+    }
 }

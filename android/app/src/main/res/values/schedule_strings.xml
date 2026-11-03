@@ -10,7 +10,7 @@
     <string name="schedule_row_description">%1$s, %2$s, %3$s</string>
 
     <string name="schedule_banner_notifications_title">Notifications are off</string>
-    <string name="schedule_banner_notifications_body">Without them an alarm cannot appear over the lock screen. The sound still plays.</string>
+    <string name="schedule_banner_notifications_body">Without them an alarm cannot appear over the lock screen. The sound normally still plays, but not if Android refuses to run the alarm in the background.</string>
     <string name="schedule_banner_notifications_action">Open settings</string>
     <string name="schedule_banner_exact_title">Alarms may be late</string>
     <string name="schedule_banner_exact_body">Android is not letting COMMAND set exact alarms, so a ring can arrive minutes late.</string>

@@ -352,6 +352,17 @@ class OccurrenceRepository @Inject constructor(
      * has rung is left alone. Returns how many were removed.
      */
     suspend fun discardUnfired(occurrenceIds: Collection<String>, source: EventSource): Int {
+        val removed = removeUnfiredRows(occurrenceIds, source)
+        cancelAlarms(removed)
+        return removed.size
+    }
+
+    /**
+     * The database half of [discardUnfired]. It can run inside a caller's transaction, so that a mission change and the
+     * removal of its plan commit together or not at all; the caller then cancels the platform alarms with [cancelAlarms]
+     * once that transaction has committed. Returns the rows it removed.
+     */
+    suspend fun removeUnfiredRows(occurrenceIds: Collection<String>, source: EventSource): List<OccurrenceRow> {
         val removed = ArrayList<OccurrenceRow>()
         db.withTransaction {
             for (id in occurrenceIds) {
@@ -362,8 +373,12 @@ class OccurrenceRepository @Inject constructor(
                 removed += occ
             }
         }
-        for (occ in removed) scheduler.cancel(AlarmRequest(occ.id, occ.requestCode, AlarmKind.FIRE, occ.scheduledAtUtc))
-        return removed.size
+        return removed
+    }
+
+    /** Takes the platform alarms of removed (never rung) occurrences down. Idempotent. */
+    fun cancelAlarms(rows: List<OccurrenceRow>) {
+        for (occ in rows) scheduler.cancel(AlarmRequest(occ.id, occ.requestCode, AlarmKind.FIRE, occ.scheduledAtUtc))
     }
 
     /** Puts the platform alarm of an armed occurrence back (idempotent) and records the precision actually obtained. */

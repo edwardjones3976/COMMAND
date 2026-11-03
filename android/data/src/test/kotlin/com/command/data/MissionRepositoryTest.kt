@@ -243,7 +243,7 @@ class MissionRepositoryTest {
         val left = occurrencesOf(id)
         assertEquals("only the one that rang remains, as history", listOf(first.id), left.map { it.id })
         assertTrue("the others have no alarm left", all.drop(1).all { f.scheduler.armed[fireIdentity(it.id)] == null })
-        assertTrue("and it does not show on the schedule", missions.observeSchedule().first().isEmpty())
+        assertTrue("and it does not show on the schedule", missions.observeSchedule().first().upcoming.isEmpty())
         assertFalse(f.db.missions().get(id)!!.enabled)
     }
 
@@ -266,7 +266,7 @@ class MissionRepositoryTest {
         assertEquals(MissionRepository.TEST_CATEGORY, mission.category)
 
         assertTrue(f.db.events().ofType(EventType.TEST_RING).any { it.occurrenceId == occurrenceId })
-        assertTrue("it is not on the schedule", missions.observeSchedule().first().isEmpty())
+        assertTrue("it is not on the schedule", missions.observeSchedule().first().let { it.upcoming.isEmpty() && it.recent.isEmpty() })
         assertNull("nor in the list of missions", missions.get(mission.id))
     }
 
@@ -285,7 +285,7 @@ class MissionRepositoryTest {
     @Test
     fun `the schedule lists what is coming and what happened in the last day, newest information first`() = run {
         val id = saved(draft(schedule = ScheduleDraft.Once(at(2 * hour))))
-        val rows: List<ScheduleRow> = missions.observeSchedule().first()
+        val rows: List<ScheduleRow> = missions.observeSchedule().first().upcoming
         assertEquals(1, rows.size)
         assertEquals("Write the report", rows.single().title)
         assertEquals(id, rows.single().missionId)
@@ -343,5 +343,91 @@ class MissionRepositoryTest {
 
         assertEquals(OccurrenceState.ARMED, f.db.occurrences().get(occurrence.id)!!.state)
         assertNotNull("it is armed for its original time, which is already past, so it rings at once", f.scheduler.armed[fireIdentity(occurrence.id)])
+    }
+
+    // --- review fixes ------------------------------------------------------------------------------------------------
+
+    @Test
+    fun `an alarm the system has not delivered yet is cancelled when its mission is deleted`() = run {
+        val id = saved(draft())
+        val occurrence = occurrencesOf(id).single()
+        f.clock.advance(2 * hour + 60_000) // its time has passed by a minute, but it is still armed and has not rung
+
+        missions.delete(id)
+
+        assertNull("the row is gone", f.db.occurrences().get(occurrence.id))
+        assertNull("and so is the platform alarm, which could otherwise still deliver a deleted mission", f.scheduler.armed[fireIdentity(occurrence.id)])
+    }
+
+    @Test
+    fun `renaming a repeating mission whose alarm is only just overdue does not lose that alarm`() = run {
+        val id = saved(draft(schedule = daily(LocalTime.of(10, 0))))
+        val first = occurrencesOf(id).first()
+        f.clock.advance(hour + 3 * 60_000) // 10:03: the 10:00 alarm is three minutes late and not yet delivered
+
+        missions.save(draft(title = "Renamed", schedule = daily(LocalTime.of(10, 0)), id = id))
+
+        assertEquals(OccurrenceState.ARMED, f.db.occurrences().get(first.id)!!.state)
+        assertNotNull(f.scheduler.armed[fireIdentity(first.id)])
+    }
+
+    @Test
+    fun `a repeating mission that starts after the first week still has a row to open, edit or delete`() = run {
+        val far = ScheduleDraft.Repeating(LocalDate.of(2026, 11, 22), LocalTime.of(10, 0), RRule(Frequency.DAILY))
+        val id = saved(draft(schedule = far))
+
+        val rows = occurrencesOf(id)
+        assertEquals("just the next one, however far away", 1, rows.size)
+        assertEquals(OccurrenceState.ARMED, rows.single().state)
+        assertEquals(id, missions.observeSchedule().first().upcoming.single().missionId)
+
+        missions.delete(id)
+        assertTrue(occurrencesOf(id).isEmpty())
+    }
+
+    @Test
+    fun `an occurrence created but never armed, and only just due, is armed when the app next opens`() = run {
+        val mission = Fixture.missionRow(startAt = f.t0 + 2 * hour)
+        f.db.missions().insert(mission)
+        val occurrence = f.repo.createOccurrence(mission.id, f.t0 + 2 * hour, "UTC").occurrence // the app stopped before arming it
+        f.clock.advance(2 * hour + 5 * 60_000)
+
+        missions.refreshWindow()
+
+        assertEquals(OccurrenceState.ARMED, f.db.occurrences().get(occurrence.id)!!.state)
+        assertNotNull("so it rings now instead of never", f.scheduler.armed[fireIdentity(occurrence.id)])
+    }
+
+    @Test
+    fun `a time zone change replaces a daily mission's schedule instead of adding a second one`() = run {
+        val id = saved(draft(schedule = daily(LocalTime.of(10, 0))))
+        assertEquals(7, occurrencesOf(id).size)
+
+        f.clock.zone = java.time.ZoneId.of("America/New_York")
+        missions.refreshWindow()
+
+        val local = occurrencesOf(id).map { Instant.ofEpochMilli(it.scheduledAtUtc).atZone(f.clock.zone).toLocalTime() }
+        assertEquals("seven days, every one at 10:00 where the phone now is, and nothing left over", List(7) { LocalTime.of(10, 0) }, local)
+    }
+
+    @Test
+    fun `a second test ring replaces the first, so the hidden mission's text always matches what rings`() = run {
+        val first = missions.testRing(TestRingSpec("First"))
+        f.clock.advance(1_000)
+        val second = missions.testRing(TestRingSpec("Second"))
+
+        assertNull("the first test alarm is gone", f.db.occurrences().get(first))
+        assertNull(f.scheduler.armed[fireIdentity(first)])
+        assertEquals(OccurrenceState.ARMED, f.db.occurrences().get(second)!!.state)
+        assertEquals("Second", f.db.missions().get(MissionRepository.TEST_MISSION_ID)!!.title)
+    }
+
+    @Test
+    fun `the schedule keeps every upcoming row however many there are, and bounds history separately`() = run {
+        repeat(30) { i -> saved(draft(title = "Mission $i", schedule = daily(LocalTime.of(10, 0)))) } // 210 upcoming rows
+        val snapshot = missions.observeSchedule().first()
+        assertEquals("the list is capped, soonest first, not cut off at an arbitrary place", 200, snapshot.upcoming.size)
+        assertEquals(snapshot.upcoming.sortedBy { it.scheduledAtUtc }.map { it.occurrenceId }, snapshot.upcoming.map { it.occurrenceId })
+        assertTrue(snapshot.recent.isEmpty())
     }
 }
