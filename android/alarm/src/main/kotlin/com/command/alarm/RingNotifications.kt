@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -97,8 +98,26 @@ object RingNotifications {
             .setFullScreenIntent(open, true)
             .setDeleteIntent(dismissed)
             .apply { if (timeoutMs != null) setTimeoutAfter(timeoutMs) }
+            .apply { if (fallback) alertWithoutChannels(context) }
             .build()
             .also { n -> if (fallback) n.flags = n.flags or Notification.FLAG_INSISTENT }
+    }
+
+    /** Before Android 8 there are no channels, so the fallback ring sound and vibration belong to the notification itself. */
+    @Suppress("DEPRECATION")
+    private fun NotificationCompat.Builder.alertWithoutChannels(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) return
+        setSound("android.resource://${context.packageName}/${R.raw.reveille_tone}".toUri(), AudioManager.STREAM_ALARM)
+        setVibrate(VIBRATION)
+    }
+
+    /** The notification of a service start that has nothing to ring for; it exists only to answer the foreground-start contract. */
+    fun starting(context: Context): Notification {
+        ensureChannels(context)
+        return NotificationCompat.Builder(context, AlarmContract.CHANNEL_STATUS)
+            .setSmallIcon(R.drawable.ic_stat_command)
+            .setContentTitle(context.getString(R.string.ring_title_generic))
+            .build()
     }
 
     /** A quiet note that an alarm went unanswered, with Open as the way to pick it up again. */

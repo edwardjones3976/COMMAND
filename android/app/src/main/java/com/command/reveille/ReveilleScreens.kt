@@ -1,8 +1,6 @@
 package com.command.reveille
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.tween
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,7 +28,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -85,6 +87,8 @@ fun ReveilleContent(
     onFrictionConfirm: (FrictionEvidence) -> Unit,
     onFrictionDismiss: () -> Unit,
 ) {
+    // Back does nothing while the alarm rings: Safety silence is the one way out of this screen that is recorded as such.
+    BackHandler(enabled = state is ReveilleUiState.Firing) { }
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when (state) {
             is ReveilleUiState.Firing -> Firing(state, actions)
@@ -172,7 +176,7 @@ fun HoldButton(
     now: () -> Long = System::currentTimeMillis,
     onStarted: () -> Unit = {},
 ) {
-    val progress = remember { Animatable(0f) }
+    var progress by remember { mutableFloatStateOf(0f) }
     val description = stringResource(R.string.reveille_hold_description, seconds)
     val confirmLabel = stringResource(R.string.reveille_hold_confirm_action)
 
@@ -194,13 +198,21 @@ fun HoldButton(
                         onStarted()
                         coroutineScope {
                             val timer = launch {
-                                progress.animateTo(1f, tween(seconds * 1000, easing = LinearEasing))
+                                // The hold is timed on the frame clock, which the system animation settings do not scale:
+                                // with animations turned off (or sped up) a quick tap must still not count as a hold.
+                                val holdNanos = seconds * 1_000_000_000L
+                                val origin = withFrameNanos { it }
+                                var elapsed = 0L
+                                while (elapsed < holdNanos) {
+                                    elapsed = withFrameNanos { it } - origin
+                                    progress = (elapsed.toFloat() / holdNanos).coerceAtMost(1f)
+                                }
                                 onCompleted(started, now())
                             }
                             tryAwaitRelease()
                             if (timer.isActive) {
                                 timer.cancel()
-                                progress.snapTo(0f)
+                                progress = 0f
                                 onReleasedEarly(started, now())
                             }
                         }
@@ -209,7 +221,7 @@ fun HoldButton(
             },
         contentAlignment = Alignment.Center,
     ) {
-        CircularProgressIndicator(progress = { progress.value }, modifier = Modifier.fillMaxSize(), strokeWidth = 14.dp)
+        CircularProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxSize(), strokeWidth = 14.dp)
         Text(stringResource(R.string.reveille_hold_hint), style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
     }
 }

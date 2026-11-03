@@ -30,6 +30,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -39,6 +40,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowPowerManager
 import java.time.Duration
 import javax.inject.Inject
 
@@ -55,6 +57,7 @@ class ReveilleServiceTest {
     @Inject lateinit var output: FakeRingOutput
     @Inject lateinit var scheduler: FakeAlarmScheduler
     @Inject lateinit var resolver: RingModeResolver
+    @Inject lateinit var session: RingSession
 
     private lateinit var context: Context
 
@@ -91,6 +94,19 @@ class ReveilleServiceTest {
         Robolectric.buildService(ReveilleService::class.java, intent).create().startCommand(0, 1)
 
     private fun eventTypes(o: OccurrenceRow) = runBlocking { db.events().forOccurrence(o.id).map { it.type } }
+
+    private fun notifications() = shadowOf(context.getSystemService(NotificationManager::class.java))
+
+    /** Moves both clocks forward, letting the ring loop run as the time passes. */
+    private fun step(ms: Long) {
+        var left = ms
+        while (left > 0) {
+            val chunk = minOf(5_000L, left)
+            clock.advance(chunk)
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(chunk))
+            left -= chunk
+        }
+    }
 
     @Test
     fun `it becomes a foreground service before it touches the database`() {
@@ -133,6 +149,7 @@ class ReveilleServiceTest {
         awaitUntil(message = "service stop") { shadowOf(service).isStoppedBySelf }
         assertFalse(output.ringing)
         assertEquals(MissReason.TIMEOUT, runBlocking { repo.get(o.id)!!.missReason })
+        assertNotNull("a quiet note lets the user pick the missed ring up again", notifications().getNotification(o.id, AlarmContract.ID_MISSED))
     }
 
     @Test
@@ -166,17 +183,131 @@ class ReveilleServiceTest {
         awaitUntil(message = "miss") { stateOf(o) == OccurrenceState.MISSED }
         awaitUntil(message = "stop") { shadowOf(service).isStoppedBySelf }
         assertFalse("it is not left ringing", output.ringing)
+        assertNotNull("and the user is told it was missed", notifications().getNotification(o.id, AlarmContract.ID_MISSED))
     }
 
     @Test
-    fun `a stop request silences the sound and ends the service`() {
+    fun `ending a ring silences the sound and ends the service`() {
         val o = armed()
         val controller = startService(fireIntent(o))
-        awaitUntil(message = "ringing") { output.ringing }
-        val stop = Intent(context, ReveilleService::class.java).setAction(AlarmContract.ACTION_STOP).putExtra(AlarmContract.EXTRA_OCCURRENCE_ID, o.id)
-        controller.get().onStartCommand(stop, 0, 2)
+        awaitUntil(message = "ringing") { controller.get().ringingOccurrenceId == o.id }
+        session.end(o.id)
+        shadowOf(Looper.getMainLooper()).idle()
         assertFalse(output.ringing)
         assertTrue(shadowOf(controller.get()).isStoppedBySelf)
+    }
+
+    @Test
+    fun `a silence in the very first moments, before the alarm has been checked, still silences it`() {
+        val o = armed()
+        val controller = startService(fireIntent(o))
+        assertTrue("the sound started ahead of the checks", output.ringing)
+        session.end(o.id) // the database has not answered yet
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse("silenced at once", output.ringing)
+        awaitUntil(message = "service stop") { shadowOf(controller.get()).isStoppedBySelf }
+        assertFalse("and the late check does not start it again", output.ringing)
+        assertTrue(controller.get().ringingOccurrenceId == null)
+    }
+
+    @Test
+    fun `ending the ring of a different occurrence leaves this one sounding`() {
+        val o = armed()
+        val controller = startService(fireIntent(o))
+        awaitUntil(message = "ringing") { controller.get().ringingOccurrenceId == o.id }
+        session.end("some-other-occurrence")
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(output.ringing)
+        assertFalse(shadowOf(controller.get()).isStoppedBySelf)
+    }
+
+    @Test
+    fun `ending a ring when no service is running starts nothing and throws nothing`() {
+        session.end("nothing-is-ringing")
+        shadowOf(Looper.getMainLooper()).idle()
+        assertNull(shadowOf(context as android.app.Application).nextStartedService)
+    }
+
+    @Test
+    fun `a stale alarm that arrives while another ring is sounding leaves that ring alone`() {
+        val first = armed()
+        val controller = startService(fireIntent(first))
+        awaitUntil(message = "first ring") { stateOf(first) == OccurrenceState.FIRING }
+        val stale = scheduledOnly()
+        controller.get().onStartCommand(fireIntent(stale), 0, 2)
+        awaitUntil(message = "stale noted") { EventType.ALARM_FIRED_STALE in eventTypes(stale) }
+        assertTrue("the first ring still sounds", output.ringing)
+        assertFalse(shadowOf(controller.get()).isStoppedBySelf)
+        assertEquals(OccurrenceState.FIRING, stateOf(first))
+        assertEquals("the stale alarm did not turn into a ring", OccurrenceState.SCHEDULED, stateOf(stale))
+    }
+
+    @Test
+    fun `a second valid alarm takes over the sound and leaves the first occurrence as it was`() {
+        val first = armed()
+        val controller = startService(fireIntent(first))
+        awaitUntil(message = "first ring") { stateOf(first) == OccurrenceState.FIRING }
+        val second = armed()
+        controller.get().onStartCommand(fireIntent(second), 0, 2)
+        awaitUntil(message = "second ring") { stateOf(second) == OccurrenceState.FIRING }
+        awaitUntil(message = "takeover") { shadowOf(controller.get()).lastForegroundNotificationId == second.requestCode }
+        assertTrue(output.ringing)
+        assertEquals("the first stays unanswered until its own plan ends", OccurrenceState.FIRING, stateOf(first))
+
+        // Ending the second ring ends the sound; it does not touch the first occurrence.
+        session.end(second.id)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(output.ringing)
+        assertEquals(OccurrenceState.FIRING, stateOf(first))
+    }
+
+    @Test
+    fun `the same alarm delivered twice rings once`() {
+        val o = armed()
+        val controller = startService(fireIntent(o))
+        awaitUntil(message = "ring") { stateOf(o) == OccurrenceState.FIRING }
+        controller.get().onStartCommand(fireIntent(o), 0, 2)
+        awaitUntil(message = "second delivery handled") { EventType.REJECTED_TRANSITION in eventTypes(o) }
+        assertEquals(1, eventTypes(o).count { it == EventType.ALARM_FIRED })
+        assertTrue(output.ringing)
+        assertFalse(shadowOf(controller.get()).isStoppedBySelf)
+    }
+
+    @Test
+    fun `setting the phone clock back during a ring does not stretch it`() {
+        val o = armed("builtin_command") // two rings of two minutes with a minute between them
+        val service = startService(fireIntent(o)).get()
+        awaitUntil(message = "ringing") { service.ringingOccurrenceId == o.id }
+        step(60_000)
+        clock.nowMs -= 60 * 60_000L // an hour back: the wall clock only, the monotonic one carries on
+        var waited = 0L
+        awaitUntil(message = "miss at the end of the plan, not an hour late") {
+            if (waited < 400_000) {
+                step(5_000)
+                waited += 5_000
+            }
+            stateOf(o) == OccurrenceState.MISSED
+        }
+        assertTrue("the ring ended with its five minute plan, not an hour late (waited $waited ms more)", waited <= 245_000)
+        awaitUntil(message = "service stop") { shadowOf(service).isStoppedBySelf }
+    }
+
+    @Test
+    fun `the service takes over the CPU hold from the alarm receiver and lets the receiver one go`() {
+        val o = armed()
+        ReveilleAlarmReceiver().onReceive(
+            context,
+            Intent(context, ReveilleAlarmReceiver::class.java).setAction(AlarmContract.ACTION_FIRE)
+                .setData(Uri.parse("command://occurrence/${o.id}"))
+                .putExtra(AlarmContract.EXTRA_OCCURRENCE_ID, o.id)
+                .putExtra(AlarmContract.EXTRA_REQUEST_CODE, o.requestCode),
+        )
+        val receiverLock = ShadowPowerManager.getLatestWakeLock()
+        assertTrue(receiverLock.isHeld)
+        startService(fireIntent(o))
+        val serviceLock = ShadowPowerManager.getLatestWakeLock()
+        assertTrue("the service holds the CPU itself", serviceLock.isHeld)
+        assertFalse("so the receiver one is let go", receiverLock.isHeld)
     }
 
     @Test
@@ -194,7 +325,7 @@ class ReveilleServiceTest {
         assertTrue(EventType.RING_DEGRADED in eventTypes(o))
         assertEquals("the same backstop bounds this path", 1, scheduler.armed.keys.count { it.startsWith("command://cycle-end/") })
 
-        val notification: Notification = shadowOf(context.getSystemService(NotificationManager::class.java)).getNotification(o.requestCode)
+        val notification: Notification = notifications().getNotification(o.id, AlarmContract.ID_FALLBACK)
         assertNotNull(notification)
         assertTrue(notification.flags and Notification.FLAG_INSISTENT != 0)
         assertEquals(AlarmContract.CHANNEL_FALLBACK, notification.channelId)
@@ -210,7 +341,29 @@ class ReveilleServiceTest {
         assertEquals("the occurrence is still fired and bounded", OccurrenceState.FIRING, stateOf(o))
         assertTrue(EventType.RING_DEGRADED in eventTypes(o))
         assertEquals(1, scheduler.armed.keys.count { it.startsWith("command://cycle-end/") })
-        assertTrue(shadowOf(context.getSystemService(NotificationManager::class.java)).allNotifications.isEmpty())
+        assertTrue(notifications().allNotifications.isEmpty())
+        val degraded = runBlocking { db.events().forOccurrence(o.id) }.single { it.type == EventType.RING_DEGRADED }
+        assertTrue("the trail says nobody could be told", degraded.payloadJson.contains("\"notified\":\"false\""))
+    }
+
+    @Test
+    fun `answering a degraded ring takes its notification down`() {
+        val o = armed()
+        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+        assertNotNull(notifications().getNotification(o.id, AlarmContract.ID_FALLBACK))
+        AndroidRingController(context, session).stop(o.id, o.requestCode)
+        assertNull("its sound is the notification, so it must go with the ring", notifications().getNotification(o.id, AlarmContract.ID_FALLBACK))
+    }
+
+    @Test
+    fun `degrading a ring whose plan has run out records the miss and makes no sound`() {
+        val o = armed()
+        runBlocking { repo.apply(o.id, OccurrenceCommand.Fire, EventSource.SERVICE) }
+        clock.advance(10 * 60_000)
+        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+        assertEquals(OccurrenceState.MISSED, stateOf(o))
+        assertNull("no alarm notification", notifications().getNotification(o.id, AlarmContract.ID_FALLBACK))
+        assertNotNull("only the quiet missed note", notifications().getNotification(o.id, AlarmContract.ID_MISSED))
     }
 
     @Test

@@ -1,5 +1,10 @@
 package com.command.reveille
 
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -15,6 +20,7 @@ import com.command.domain.dials.LockPolicy
 import com.command.domain.dials.SkipReasonCode
 import com.command.ui.theme.CommandTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -147,6 +153,22 @@ class ReveilleScreenTest {
     fun `the early-release hint names the seconds`() {
         show(firing.copy(earlyRelease = true), Recorder())
         compose.onNodeWithText("Released early. Hold the full 3 seconds.").assertIsDisplayed()
+    }
+
+    @Test
+    fun `Back does nothing while the alarm rings and is free again afterwards`() {
+        var dispatcher: OnBackPressedDispatcher? = null
+        var state by mutableStateOf<ReveilleUiState>(firing)
+        val r = Recorder()
+        compose.setContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            CommandTheme(darkTheme = true) {
+                ReveilleContent(state, null, SkipReasonCode.values().toList(), r.actions(), {}, {})
+            }
+        }
+        compose.runOnIdle { assertTrue("Back is consumed while it rings", dispatcher!!.hasEnabledCallbacks()) }
+        state = ReveilleUiState.Direction("Write the report", "Open the document", 5)
+        compose.runOnIdle { assertFalse("and free once it is answered", dispatcher!!.hasEnabledCallbacks()) }
     }
 
     // --- silenced, direction, closed ----------------------------------------------------------------------------

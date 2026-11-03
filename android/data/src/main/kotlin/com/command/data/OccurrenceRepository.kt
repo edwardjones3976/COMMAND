@@ -396,7 +396,7 @@ class OccurrenceRepository @Inject constructor(
                     }
                 }
                 Effect.DisarmAlarm -> scheduler.cancel(request(AlarmKind.FIRE))
-                Effect.StopRinging -> ringController.stop(occ.id)
+                Effect.StopRinging -> ringController.stop(occ.id, occ.requestCode)
                 is Effect.ArmCycleEnd -> scheduler.arm(request(AlarmKind.CYCLE_END, at = p.nowMs + e.totalMs))
                 Effect.CancelCycleEnd -> scheduler.cancel(request(AlarmKind.CYCLE_END))
                 is Effect.ScheduleCheckIn -> scheduler.arm(request(AlarmKind.CHECK_IN, at = e.atUtcMs, index = e.index))

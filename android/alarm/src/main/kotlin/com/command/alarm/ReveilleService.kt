@@ -11,15 +11,15 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import com.command.data.ApplyResult
 import com.command.data.OccurrenceRepository
 import com.command.data.SessionPlan
-import com.command.domain.alarm.RingController
+import com.command.data.db.OccurrenceRow
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.EventPayload
 import com.command.domain.occurrence.EventType
-import com.command.domain.occurrence.MissReason
 import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.time.Clock
@@ -27,17 +27,26 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
- * Rings one occurrence. Started by the alarm receiver with `startForegroundService`, so the first thing it does, before any
+ * Rings occurrences. Started by the alarm receiver with `startForegroundService`, so the first thing it does, before any
  * database work, is call `startForeground`. Then it fires the occurrence (the state machine decides whether that is legal),
  * and plays the alarm sound in the cycles the user's alert intensity prescribes, stopping at the end of the plan whatever
  * else happens. Restarted after the process died mid-ring, it works out from the stored plan whether there is any ring left.
+ *
+ * Several alarms can arrive close together. Deliveries are handled one at a time, in order, and each is checked against the
+ * database before it touches a ring that is already going: a stale or repeated alarm leaves the current ring alone, and a
+ * valid later one takes over the sound (the earlier occurrence stays as it is until it is answered or its own plan ends).
+ * The database steps are never cancelled half-way, so a consumed alarm always ends up recorded.
  */
 @AndroidEntryPoint
 class ReveilleService : Service() {
@@ -46,29 +55,48 @@ class ReveilleService : Service() {
     @Inject lateinit var clock: Clock
     @Inject lateinit var output: RingOutput
     @Inject lateinit var resolver: RingModeResolver
+    @Inject lateinit var session: RingSession
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var ringJob: Job? = null
-    private var currentId: String? = null
+
+    /** One delivery at a time, in the order they arrived. */
+    private val deliveries = Mutex()
+
+    // Everything below is touched on the main thread only.
+    private var pending = 0
+    private var lastStartId = 0
+    private var active: ActiveRing? = null
+
+    /** Occurrences accepted but not yet checked against the database; the sound may already be playing for them. */
+    private val inFlight = ArrayList<String>()
+
+    /** Occurrences whose ring was ended while they were still in flight, so the check must not start it. */
+    private val endedEarly = HashSet<String>()
+
+    /** The occurrence that is sounding right now, if any. For tests. */
+    internal val ringingOccurrenceId: String? get() = active?.id
     private var wakeLock: PowerManager.WakeLock? = null
     private var focus: AudioFocusRequest? = null
+
+    private class ActiveRing(val id: String, val code: Int, val title: String?) {
+        var playback: Job? = null
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        session.attach(this)
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            AlarmContract.ACTION_STOP -> {
-                // A stop names the occurrence whose ring ended. If a different one is ringing now, it is left alone.
-                val target = intent.getStringExtra(AlarmContract.EXTRA_OCCURRENCE_ID)
-                if (target == null || currentId == null || target == currentId) stopRinging()
-                return START_NOT_STICKY
-            }
-            else -> ring(intent)
-        }
+        lastStartId = startId
+        ring(intent)
         return START_REDELIVER_INTENT
     }
 
     override fun onDestroy() {
+        session.detach(this)
         output.stop()
         scope.cancel()
         releaseHolds()
@@ -80,100 +108,170 @@ class ReveilleService : Service() {
         val code = AlarmContract.requestCode(intent)
         if (id == null || code == 0) {
             // Started with nothing to ring for. A foreground start must still be answered with startForeground.
-            runCatching { ServiceCompat.startForeground(this, FALLBACK_ID, RingNotifications.ring(this, "none", FALLBACK_ID, null), FGS_TYPE) }
-            stopRinging()
+            runCatching { ServiceCompat.startForeground(this, FALLBACK_ID, RingNotifications.starting(this), FGS_TYPE) }
+            settle()
             return
         }
-        // First: become a foreground service (a deadline of a few seconds). Everything else comes after.
+        val ringing = active
         try {
-            ServiceCompat.startForeground(this, code, RingNotifications.ring(this, id, code, null), FGS_TYPE)
+            // First: become a foreground service (a deadline of a few seconds). Everything else comes after. If something is
+            // ringing already, its notification stays the foreground one until this delivery has proved itself.
+            val notification = if (ringing == null) {
+                RingNotifications.ring(this, id, code, null)
+            } else {
+                RingNotifications.ring(this, ringing.id, ringing.code, ringing.title)
+            }
+            ServiceCompat.startForeground(this, ringing?.code ?: code, notification, FGS_TYPE)
         } catch (e: Exception) {
             // Not allowed to run as a foreground service right now. Ring from a full-screen notification instead.
-            scope.launch {
-                resolver.degrade(id, code, reasonOf(e))
-                stopRinging()
-            }
+            queue(null) { resolver.degrade(id, code, reasonOf(e)) }
             return
         }
-        currentId = id
-        holdWakeLock()
-        // Sound first: opening the database after a cold start takes a second or more, and an alarm should not wait for it.
-        // If the database then says this alarm is stale or its plan is over, the sound is stopped again within a moment.
-        output.start()
-        ringJob?.cancel()
-        ringJob = scope.launch { begin(id, code) }
+        if (ringing == null) {
+            // Sound first: opening the database after a cold start takes a second or more, and an alarm should not wait for
+            // it. If the database then says this alarm is stale or its plan is over, the sound is stopped again.
+            holdWakeLock()
+            output.start()
+        }
+        queue(id) { deliver(id, code) }
     }
 
-    private suspend fun begin(id: String, code: Int) {
-        val fire = repository.apply(id, OccurrenceCommand.Fire, EventSource.SERVICE)
-        val row = when (fire) {
-            is ApplyResult.Applied -> fire.occurrence
-            else -> {
-                val current = repository.get(id)
-                if (current?.state == OccurrenceState.FIRING) {
-                    current // restarted in the middle of a ring
-                } else {
-                    // A stale alarm: the occurrence is not armed any more. A sub-second flash of the notification is accepted.
-                    current?.let { repository.logEvent(EventType.ALARM_FIRED_STALE, it, EventSource.SERVICE, EventPayload.EMPTY) }
-                    stopRinging()
-                    return
+    /**
+     * Runs [work] after the deliveries before it, and lets the service go once there is nothing left to do. [occurrenceId]
+     * is the occurrence being checked, so that an end requested before the check finishes is not lost.
+     */
+    private fun queue(occurrenceId: String?, work: suspend () -> Unit) {
+        pending++
+        if (occurrenceId != null) inFlight += occurrenceId
+        scope.launch {
+            try {
+                deliveries.withLock { work() }
+            } finally {
+                if (occurrenceId != null) {
+                    inFlight.remove(occurrenceId)
+                    if (occurrenceId !in inFlight) endedEarly -= occurrenceId
                 }
+                pending--
+                settle()
             }
         }
+    }
+
+    /** Stops the service when nothing rings and no delivery is waiting to be looked at. */
+    private fun settle() {
+        if (active == null && pending == 0) shutDown()
+    }
+
+    private suspend fun deliver(id: String, code: Int) {
+        // The database work is never cancelled half-way: an alarm that has been consumed must end up recorded.
+        val fire = withContext(NonCancellable) { repository.apply(id, OccurrenceCommand.Fire, EventSource.SERVICE) }
+        val row: OccurrenceRow
+        if (fire is ApplyResult.Applied) {
+            row = fire.occurrence
+        } else {
+            val current = withContext(NonCancellable) { repository.get(id) }
+            if (current == null || current.state != OccurrenceState.FIRING) {
+                // A stale alarm: the occurrence is not armed any more. Whatever else is ringing is left alone.
+                current?.let { repository.logEvent(EventType.ALARM_FIRED_STALE, it, EventSource.SERVICE, EventPayload.EMPTY) }
+                if (active?.code != code) runCatching { NotificationManagerCompat.from(this).cancel(code) }
+                return
+            }
+            row = current // restarted in the middle of this ring
+        }
+
+        if (id in endedEarly) return // silenced or answered in the first moments: there is nothing left to sound
 
         val plan = SessionPlan.of(row)
-        val now = clock.nowMs()
-        if (plan == null || plan.endUtc <= now) {
+        if (plan == null || plan.endUtc <= clock.nowMs()) {
             // The plan ended while nothing was alive to enforce it: record the miss and do not ring at all.
-            repository.apply(id, OccurrenceCommand.Miss(MissReason.TIMEOUT), EventSource.SERVICE)
-            stopRinging()
+            timeOutRing(this, repository, row.id, code, EventSource.SERVICE)
             return
         }
-
-        val title = repository.missionTitle(row.missionId)
-        RingNotifications.post(this, null, code, RingNotifications.ring(this, id, code, title))
-        requestFocus()
-        runCycles(plan)
-        // Out of ring time and still unanswered: that is a miss. (The cycle-end alarm would do the same.)
-        repository.apply(id, OccurrenceCommand.Miss(MissReason.TIMEOUT), EventSource.SERVICE)
-        stopRinging()
+        takeOver(row, code, plan)
     }
 
-    /** Sound during each ring cycle, silence in the gaps, ending exactly when the plan does. */
+    /** Makes [row] the ring that is sounding. An earlier ring's sound loop ends; its occurrence is left as it is. */
+    private suspend fun takeOver(row: OccurrenceRow, code: Int, plan: SessionPlan) {
+        val title = repository.missionTitle(row.missionId)
+        active?.playback?.cancel()
+        val ring = ActiveRing(row.id, code, title)
+        active = ring
+        // This ring's notification, now with its title, becomes the foreground one. An earlier ring's, if there was one,
+        // stays an ordinary notification until that occurrence is handled.
+        runCatching { ServiceCompat.startForeground(this, code, RingNotifications.ring(this, row.id, code, title), FGS_TYPE) }
+        holdWakeLock()
+        requestFocus()
+        ring.playback = scope.launch {
+            runCycles(plan)
+            // Out of ring time and still unanswered: that is a miss. (The cycle-end alarm would do the same.)
+            timeOutRing(this@ReveilleService, repository, ring.id, ring.code, EventSource.SERVICE)
+            endRing(ring.id)
+        }
+    }
+
+    /**
+     * Sound during each ring cycle, silence in the gaps, ending exactly when the plan does. Where we are in the plan comes
+     * from one reading of the wall clock; every wait after that is measured on the monotonic clock, so setting the phone's
+     * clock back cannot stretch the ring and setting it forward cannot cut it short.
+     */
     private suspend fun runCycles(plan: SessionPlan) {
+        val sinceStart = (clock.nowMs() - plan.startUtc).coerceAtLeast(0)
+        val origin = clock.elapsedRealtimeMs() - sinceStart
+        fun position() = clock.elapsedRealtimeMs() - origin
         for (window in plan.cycleWindows) {
-            val startAt = plan.startUtc + window.first
-            val endAt = plan.startUtc + window.last + 1
-            val now = clock.nowMs()
-            if (endAt <= now) continue
-            if (startAt > now) {
+            val end = window.last + 1
+            if (end <= position()) continue
+            if (window.first > position()) {
                 output.stop()
-                delay(startAt - now)
+                delay(window.first - position())
             }
             output.start()
-            delay((endAt - clock.nowMs()).coerceAtLeast(0))
+            delay((end - position()).coerceAtLeast(0))
         }
         output.stop()
     }
 
-    private fun stopRinging() {
-        ringJob?.cancel()
-        ringJob = null
-        currentId = null
+    /**
+     * A state change has ended the ring of [occurrenceId] (answered, silenced, missed, skipped). Ends the sound if that is
+     * the one ringing; a different occurrence's ring is left alone. Called on the main thread.
+     */
+    internal fun endRing(occurrenceId: String) {
+        val ring = active
+        if (ring != null && ring.id == occurrenceId) {
+            ring.playback?.cancel()
+            active = null
+            output.stop()
+            settle()
+        } else if (occurrenceId in inFlight) {
+            // Ended before its alarm had even been checked (a silence in the first moments, while the database is still
+            // opening). Remember it, and stop the sound that was started ahead of the checks if nothing else is ringing.
+            endedEarly += occurrenceId
+            if (active == null) output.stop()
+        }
+    }
+
+    private fun shutDown() {
+        active?.playback?.cancel()
+        active = null
         output.stop()
         releaseHolds()
         runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
-        stopSelf()
+        // Only stops the service if no newer start has arrived since: a delivery that raced this must not be cut off.
+        stopSelf(lastStartId)
     }
 
     private fun holdWakeLock() {
-        if (wakeLock?.isHeld == true) return
-        wakeLock = getSystemService(PowerManager::class.java)
-            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "command:ring")
-            ?.apply { acquire(MAX_RING_MS + 5_000) } // bounded: never longer than the longest possible plan
+        if (wakeLock?.isHeld != true) {
+            wakeLock = getSystemService(PowerManager::class.java)
+                ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "command:ring")
+                ?.apply { acquire(MAX_RING_MS + 5_000) } // bounded: never longer than the longest possible plan
+        }
+        // The service holds the CPU now, so the receiver's short hold has done its job.
+        ReceiverWakeLock.release()
     }
 
     private fun requestFocus() {
+        if (focus != null) return
         val audio = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -185,6 +283,7 @@ class ReveilleService : Service() {
     private fun releaseHolds() {
         runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
         wakeLock = null
+        ReceiverWakeLock.release()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             focus?.let { f -> runCatching { (getSystemService(Context.AUDIO_SERVICE) as AudioManager).abandonAudioFocusRequest(f) } }
         }
@@ -202,18 +301,5 @@ class ReveilleService : Service() {
 
         const val MAX_RING_MS = 10 * 60_000L
         private const val FALLBACK_ID = 1
-    }
-}
-
-/** Sends the stop request to the service when a state change has ended a ring. */
-class AndroidRingController @Inject constructor(
-    @dagger.hilt.android.qualifiers.ApplicationContext private val context: Context,
-) : RingController {
-    override fun stop(occurrenceId: String) {
-        val intent = Intent(context, ReveilleService::class.java)
-            .setAction(AlarmContract.ACTION_STOP)
-            .putExtra(AlarmContract.EXTRA_OCCURRENCE_ID, occurrenceId)
-        // A plain start of a service that is already foreground is allowed from the background; if it is not running, ignore.
-        runCatching { context.startService(intent) }
     }
 }

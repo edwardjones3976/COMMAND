@@ -128,7 +128,7 @@ class NotificationIdsTest {
 
     @Test
     fun `notification ids other than the ring are fixed and distinct from request codes`() {
-        assertEquals(setOf(2, 3), setOf(AlarmContract.ID_CHECK_IN, AlarmContract.ID_MISSED))
+        assertEquals(setOf(2, 3, 4), setOf(AlarmContract.ID_CHECK_IN, AlarmContract.ID_MISSED, AlarmContract.ID_FALLBACK))
         // Request codes start at 1 and count up, so a ring id could equal 2 or 3, but those ids are posted with a tag (the
         // occurrence id), which keeps them in a separate namespace from untagged ring notifications.
         assertTrue(AlarmContract.ID_CHECK_IN != AlarmContract.ID_MISSED)

@@ -1,5 +1,6 @@
 package com.command.reveille
 
+import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import com.command.data.OccurrenceRepository
 import com.command.data.db.CommandDb
@@ -33,6 +34,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import javax.inject.Inject
 
@@ -64,6 +66,15 @@ class ReveilleViewModelTest {
         repo.get(o.id)!!
     }
 
+    private fun ringingTitled(title: String): OccurrenceRow = runBlocking {
+        val mission = testMission(title = title, profileId = "builtin_steady")
+        db.missions().insert(mission)
+        val o = repo.createOccurrence(mission.id, FakeAlarmModule.T0 + 60_000, "UTC").occurrence
+        repo.apply(o.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+        repo.apply(o.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+        repo.get(o.id)!!
+    }
+
     private fun stateOf(o: OccurrenceRow) = runBlocking { repo.get(o.id)!!.state }
     private fun challenges(o: OccurrenceRow) = runBlocking { db.challenges().forOccurrence(o.id) }
 
@@ -83,6 +94,44 @@ class ReveilleViewModelTest {
     fun `an unknown occurrence is reported as not found`() {
         vm.show("does-not-exist")
         awaitUi("not found") { it == ReveilleUiState.NotFound }
+    }
+
+    @Test
+    fun `showing another occurrence stops watching the first, so it cannot draw over the new one`() {
+        val first = ringingTitled("First")
+        val second = ringingTitled("Second")
+        vm.show(first.id)
+        awaitUi("first") { (it as? ReveilleUiState.Firing)?.title == "First" }
+        vm.show(second.id)
+        awaitUi("second") { (it as? ReveilleUiState.Firing)?.title == "Second" }
+
+        // Something happens to the first one; the screen must keep showing the second.
+        runBlocking { repo.apply(first.id, OccurrenceCommand.SafetySilence, EventSource.USER) }
+        awaitUntil(message = "first silenced") { stateOf(first) == OccurrenceState.SAFETY_SILENCED }
+        repeat(20) {
+            shadowOf(Looper.getMainLooper()).idle()
+            Thread.sleep(5)
+        }
+        assertEquals("Second", (vm.state.value as ReveilleUiState.Firing).title)
+
+        // And what the user does goes to the second occurrence, not the first.
+        vm.silence()
+        awaitUntil(message = "second silenced") { stateOf(second) == OccurrenceState.SAFETY_SILENCED }
+    }
+
+    @Test
+    fun `an occurrence a dead process left acknowledged is moved on to the direction when it is reopened`() {
+        val o = ringing()
+        // The acknowledgement committed, then the process died before the guidance did.
+        runBlocking { repo.apply(o.id, OccurrenceCommand.Acknowledge(), EventSource.USER) }
+        assertEquals(OccurrenceState.ACKNOWLEDGED, stateOf(o))
+
+        vm.show(o.id)
+        awaitUi("direction") { it is ReveilleUiState.Direction }
+        awaitUntil(message = "guidance started") { stateOf(o) == OccurrenceState.GUIDED_START }
+        vm.started()
+        awaitUi("closed") { it is ReveilleUiState.Closed }
+        assertEquals("the button works: starting is accepted", OccurrenceState.STARTED_SELF_REPORTED, stateOf(o))
     }
 
     @Test

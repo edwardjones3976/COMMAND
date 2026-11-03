@@ -58,7 +58,10 @@ class FakeWorkEnqueuer : WorkEnqueuer {
 class FakeRingController : RingController {
     val stopped: MutableList<String> = ArrayList()
 
-    override fun stop(occurrenceId: String) {
+    val stoppedCodes: MutableList<Int> = ArrayList()
+
+    override fun stop(occurrenceId: String, requestCode: Int) {
         stopped += occurrenceId
+        stoppedCodes += requestCode
     }
 }

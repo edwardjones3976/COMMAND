@@ -3,15 +3,11 @@ package com.command.alarm
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.PowerManager
-import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import com.command.data.ApplyResult
 import com.command.domain.model.EventSource
-import com.command.domain.occurrence.EventType
-import com.command.domain.occurrence.MissReason
-import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.EventPayload
+import com.command.domain.occurrence.EventType
+import com.command.domain.occurrence.OccurrenceCommand
 
 /**
  * The alarm fired. This does no database work: it keeps the CPU awake for a moment and starts the foreground service at
@@ -23,9 +19,7 @@ class ReveilleAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = AlarmContract.occurrenceId(intent) ?: return
         val code = AlarmContract.requestCode(intent)
-        context.getSystemService(PowerManager::class.java)
-            ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "command:alarm-receiver")
-            ?.acquire(WAKE_LOCK_MS)
+        ReceiverWakeLock.acquire(context, WAKE_LOCK_MS)
 
         val serviceIntent = Intent(context, ReveilleService::class.java)
             .setAction(AlarmContract.ACTION_FIRE)
@@ -49,13 +43,7 @@ class CycleEndReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = AlarmContract.occurrenceId(intent) ?: return
         val code = AlarmContract.requestCode(intent)
-        runAsync(context) { entry ->
-            val result = entry.repository().apply(id, OccurrenceCommand.Miss(MissReason.TIMEOUT), EventSource.RECEIVER)
-            runCatching { NotificationManagerCompat.from(context).cancel(code) }
-            if (result is ApplyResult.Applied) {
-                RingNotifications.post(context, id, AlarmContract.ID_MISSED, RingNotifications.missed(context, id, code))
-            }
-        }
+        runAsync(context) { entry -> timeOutRing(context, entry.repository(), id, code, EventSource.RECEIVER) }
     }
 }
 
@@ -63,15 +51,17 @@ class CycleEndReceiver : BroadcastReceiver() {
 class SilenceReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = AlarmContract.occurrenceId(intent) ?: return
+        val code = AlarmContract.requestCode(intent)
         val dismissed = intent.action == AlarmContract.ACTION_DISMISSED
         runAsync(context) { entry ->
+            // Silence first and never wait for the database: opening it after a cold start takes seconds. The state change
+            // below asks for the same stop again once it commits, which is harmless.
+            entry.ringController().stop(id, code)
             val repository = entry.repository()
             if (dismissed) {
                 repository.get(id)?.let { repository.logEvent(EventType.NOTIFICATION_DISMISSED, it, EventSource.USER, EventPayload.EMPTY) }
             }
             repository.apply(id, OccurrenceCommand.SafetySilence, EventSource.USER)
-            // The state change asks the service to stop the sound. Tell it directly as well: silence must never wait.
-            entry.ringController().stop(id)
         }
     }
 }

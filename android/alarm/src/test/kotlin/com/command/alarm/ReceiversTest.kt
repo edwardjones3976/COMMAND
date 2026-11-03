@@ -116,7 +116,8 @@ class ReceiversTest {
         CycleEndReceiver().onReceive(context, intent(o, AlarmContract.ACTION_CYCLE_END, "command://cycle-end/${o.id}", CycleEndReceiver::class.java))
         awaitUntil(message = "miss") { stateOf(o) == OccurrenceState.MISSED }
         assertEquals(MissReason.TIMEOUT, runBlocking { repo.get(o.id)!!.missReason })
-        assertTrue("the service is told to stop the sound", o.id in ringer.stopped)
+        // The stop is requested right after the commit, so wait for it rather than assuming it came first.
+        awaitUntil(message = "stop request") { o.id in ringer.stopped }
         val manager = shadowOf(context.getSystemService(NotificationManager::class.java))
         awaitUntil(message = "missed note") { manager.allNotifications.isNotEmpty() }
         val notifications = manager.allNotifications
@@ -140,7 +141,8 @@ class ReceiversTest {
         val o = occurrence(OccurrenceCommand.Arm(ArmMode.EXACT), OccurrenceCommand.Fire)
         SilenceReceiver().onReceive(context, intent(o, AlarmContract.ACTION_SILENCE, "command://silence/${o.id}", SilenceReceiver::class.java))
         awaitUntil(message = "silence") { stateOf(o) == OccurrenceState.SAFETY_SILENCED }
-        assertTrue(o.id in ringer.stopped)
+        awaitUntil(message = "stop request") { o.id in ringer.stopped }
+        assertTrue("the stop names the ring notification too", o.requestCode in ringer.stoppedCodes)
         assertTrue("a silence is not a dismissal", EventType.NOTIFICATION_DISMISSED !in eventTypes(o))
     }
 

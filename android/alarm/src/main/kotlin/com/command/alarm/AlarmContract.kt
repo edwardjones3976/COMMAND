@@ -18,8 +18,6 @@ object AlarmContract {
     /** From the notification being swiped away: on Android 14+ that is possible even for a foreground service. */
     const val ACTION_DISMISSED = "com.command.action.DISMISSED"
 
-    /** To the service: stop the sound now. Sent after the database has committed a state that ends the ring. */
-    const val ACTION_STOP = "com.command.action.STOP"
     const val ACTION_OPEN = "com.command.action.OPEN_REVEILLE"
 
     const val CHANNEL_ALARM = "reveille_alarm"
@@ -30,9 +28,14 @@ object AlarmContract {
     /** The lock-screen activity lives in :app, so it is addressed by name. */
     const val ACTIVITY_CLASS = "com.command.ReveilleActivity"
 
-    /** Notification ids other than the ring itself, which uses the occurrence's request code. */
+    /**
+     * Notification ids other than the ring itself, which uses the occurrence's request code. The check-in, missed and
+     * fallback-ring notifications are tagged with their occurrence's id, so one id each is enough and any of them can be
+     * found again knowing only the occurrence.
+     */
     const val ID_CHECK_IN = 2
     const val ID_MISSED = 3
+    const val ID_FALLBACK = 4
 
     fun occurrenceId(intent: Intent?): String? =
         intent?.getStringExtra(EXTRA_OCCURRENCE_ID) ?: intent?.data?.takeIf { it.scheme == "command" }?.lastPathSegment

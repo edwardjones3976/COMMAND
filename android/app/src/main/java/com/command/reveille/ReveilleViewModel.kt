@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -65,17 +66,31 @@ class ReveilleViewModel @Inject constructor(
     val friction: StateFlow<FrictionPrompt?> = _friction.asStateFlow()
 
     private var occurrenceId: String? = null
+    private var observing: Job? = null
     private var holdAttempts = 0
     private var earlyRelease = false
     var accessibilityTouchExploration = false
 
     fun show(id: String) {
         if (occurrenceId == id) return
+        // Another occurrence replaces the one on screen: stop watching the old one, so it can never draw over the new one,
+        // and forget anything that belonged to it.
+        observing?.cancel()
         occurrenceId = id
         holdAttempts = 0
         earlyRelease = false
-        viewModelScope.launch {
-            repository.observe(id).collectLatest { row -> _state.value = project(row) }
+        _friction.value = null
+        _state.value = ReveilleUiState.Loading
+        observing = viewModelScope.launch {
+            repository.observe(id).collectLatest { row ->
+                if (row?.state == OccurrenceState.ACKNOWLEDGED) {
+                    // The process died between acknowledging and starting the guidance (the two commit together now, but an
+                    // older row or another path can still leave this): finish the step instead of showing a screen whose
+                    // button the state machine would refuse.
+                    repository.apply(row.id, OccurrenceCommand.StartGuidance, EventSource.USER)
+                }
+                _state.value = project(row)
+            }
         }
     }
 
@@ -120,9 +135,12 @@ class ReveilleViewModel @Inject constructor(
         holdAttempts += 1
         viewModelScope.launch {
             val record = ChallengeRecord(0, HandshakeMode.HOLD, holdAttempts, outcome, startedAtMs, endedAtMs)
-            val result = repository.apply(id, OccurrenceCommand.Acknowledge(accessibleAlternative = outcome == ChallengeOutcome.ACCESSIBLE_ALT), EventSource.USER, ApplyExtras(challenges = listOf(record)))
-            // Acknowledging is not starting: the next step is the direction, which is where starting is reported.
-            if (result is ApplyResult.Applied) repository.apply(id, OccurrenceCommand.StartGuidance, EventSource.USER)
+            // Acknowledging is not starting: the next step is the direction, which is where starting is reported. Both
+            // changes commit together, so a process that dies in between cannot leave a screen with a refused button.
+            repository.inTransaction(EventSource.USER) { tx ->
+                val result = tx.apply(id, OccurrenceCommand.Acknowledge(accessibleAlternative = outcome == ChallengeOutcome.ACCESSIBLE_ALT), EventSource.USER, ApplyExtras(challenges = listOf(record)))
+                if (result is ApplyResult.Applied) tx.apply(id, OccurrenceCommand.StartGuidance, EventSource.USER)
+            }
         }
     }
 

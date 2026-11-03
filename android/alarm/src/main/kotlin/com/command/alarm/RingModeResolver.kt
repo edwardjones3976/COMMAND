@@ -18,8 +18,12 @@ import javax.inject.Singleton
  * The fallback ring. When the foreground service cannot be started (the platform refuses, or the start fails), the alarm
  * still has to reach the user: the occurrence is fired through the state machine as usual, which arms the same cycle-end
  * backstop, and a full-screen notification on the fallback channel carries the sound and vibration. The notification
- * times itself out when the ring plan ends, and the backstop records the miss, so this path is bounded exactly like the
- * service's.
+ * times itself out when the ring plan ends, the state change that answers the ring takes it down, and the backstop records
+ * the miss, so this path is bounded exactly like the service's.
+ *
+ * Known limit: the sound belongs to the notification, so if the user has not allowed notifications this path is silent.
+ * The event it records says so (`notified=false`), and the reliability screen of a later milestone warns about the
+ * combination before it can happen.
  */
 @Singleton
 class RingModeResolver @Inject constructor(
@@ -32,15 +36,18 @@ class RingModeResolver @Inject constructor(
         val row = (fired as? ApplyResult.Applied)?.occurrence
             ?: repository.get(occurrenceId)?.takeIf { it.state == OccurrenceState.FIRING }
             ?: return // stale: nothing to ring for
-        repository.logEvent(EventType.RING_DEGRADED, row, EventSource.RECEIVER, EventPayload.of("reason" to reason))
 
-        val remaining = SessionPlan.of(row)?.let { (it.endUtc - clock.nowMs()).coerceAtLeast(MIN_TIMEOUT_MS) } ?: MIN_TIMEOUT_MS
+        val remaining = SessionPlan.of(row)?.let { it.endUtc - clock.nowMs() } ?: 0L
+        if (remaining <= 0) {
+            // None of the plan is left (it ran out while nothing could ring): record the miss and make no sound.
+            repository.logEvent(EventType.RING_DEGRADED, row, EventSource.RECEIVER, EventPayload.of("reason" to reason, "notified" to false))
+            timeOutRing(context, repository, row.id, requestCode, EventSource.RECEIVER)
+            return
+        }
+
         val title = repository.missionTitle(row.missionId)
         val notification = RingNotifications.ring(context, occurrenceId, requestCode, title, fallback = true, timeoutMs = remaining)
-        RingNotifications.post(context, null, requestCode, notification)
-    }
-
-    private companion object {
-        const val MIN_TIMEOUT_MS = 1_000L
+        val posted = RingNotifications.post(context, occurrenceId, AlarmContract.ID_FALLBACK, notification)
+        repository.logEvent(EventType.RING_DEGRADED, row, EventSource.RECEIVER, EventPayload.of("reason" to reason, "notified" to posted))
     }
 }
