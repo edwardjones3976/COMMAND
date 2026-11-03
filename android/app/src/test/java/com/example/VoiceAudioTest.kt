@@ -93,6 +93,17 @@ class VoiceAudioTest {
     }
 
     @Test
+    fun `speech level is finite for a quiet buffer whose loudest frame is under the speech floor`() {
+        // Issue #14: loudest frame power 5e-7 (about -63 dBFS) left no frames at the -60 dBFS floor, so the mean was NaN.
+        val quiet = FloatArray(sampleRate) { (sin(2 * PI * 200.0 * it / sampleRate) * 0.001).toFloat() }
+        assertEquals(-96f, VoiceMastering.speechRmsDbfs(quiet, sampleRate), 0f)
+
+        val out = VoiceMastering.master(ShortArray(sampleRate) { (quiet[it] * 32767).toInt().toShort() }, sampleRate)
+        assertTrue(out.speechRmsDbfs.isFinite())
+        assertTrue(out.peakDbfs.isFinite())
+    }
+
+    @Test
     fun `boost slider matches its label and makes lines louder without clipping`() {
         assertEquals(0f, VoiceDirectorEngine.boostDbFor(100), 0.001f)
         assertEquals(5f, VoiceDirectorEngine.boostDbFor(150), 0.001f)

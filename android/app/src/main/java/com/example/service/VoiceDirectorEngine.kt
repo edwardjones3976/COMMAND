@@ -92,11 +92,45 @@ data class VoicePlaybackState(
     val activeDspBadge: String = "STUDIO VOICE"
 )
 
-private class RenderedLine(val pcm: ShortArray, val sampleRate: Int, val source: String)
+internal class RenderedLine(val pcm: ShortArray, val sampleRate: Int, val source: String)
+
+/** One Gemini speech reply: the audio bytes and their MIME type (e.g. "audio/L16;rate=24000" or "audio/wav"). */
+class GeminiAudio(val bytes: ByteArray, val mimeType: String)
+
+/** Where Gemini speech comes from. Production uses Firebase AI Logic; tests substitute a fake. */
+fun interface GeminiSpeechSource {
+    /** Returns the first audio part of the reply, or null when the reply has none. May throw on failure. */
+    suspend fun synthesize(voiceName: String, prompt: String): GeminiAudio?
+}
+
+/** Gemini TTS through Firebase AI Logic, one model per voice. */
+class FirebaseGeminiSpeechSource : GeminiSpeechSource {
+    private val models = ConcurrentHashMap<String, GenerativeModel>()
+
+    @OptIn(PublicPreviewAPI::class) // Speech output is a preview API in firebase-ai
+    private fun model(voiceName: String): GenerativeModel = models.getOrPut(voiceName) {
+        Firebase.ai.generativeModel(
+            modelName = GEMINI_TTS_MODEL,
+            generationConfig = generationConfig {
+                responseModalities = listOf(ResponseModality.AUDIO)
+                speechConfig = SpeechConfig(voice = Voice(voiceName))
+            }
+        )
+    }
+
+    override suspend fun synthesize(voiceName: String, prompt: String): GeminiAudio? =
+        model(voiceName).generateContent(prompt)
+            .candidates.firstOrNull()?.content?.parts
+            ?.filterIsInstance<InlineDataPart>()
+            ?.firstOrNull { it.mimeType.startsWith("audio") }
+            ?.let { GeminiAudio(it.inlineData, it.mimeType) }
+}
 
 class VoiceDirectorEngine(
     private val context: Context,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val gemini: GeminiSpeechSource = FirebaseGeminiSpeechSource(),
+    private val nowMs: () -> Long = System::currentTimeMillis
 ) : TextToSpeech.OnInitListener {
 
     private var tts: TextToSpeech? = null
@@ -106,8 +140,8 @@ class VoiceDirectorEngine(
     @Volatile private var activeAudioTrack: AudioTrack? = null
 
     private val pendingUtterances = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
-    private val geminiModels = ConcurrentHashMap<String, GenerativeModel>()
-    @Volatile private var geminiBackoffUntil = 0L
+    /** Per Gemini voice: after a failure that voice uses system TTS until this time, so one voice's failure doesn't silence others. */
+    private val geminiBackoffUntil = ConcurrentHashMap<String, Long>()
     private val lineCounter = AtomicInteger()
 
     private val voiceCacheDir by lazy { File(context.cacheDir, "director_voice").apply { mkdirs() } }
@@ -285,7 +319,7 @@ class VoiceDirectorEngine(
         }
     }
 
-    private suspend fun renderLine(
+    internal suspend fun renderLine(
         voicePack: VoicePackEntity,
         director: DirectorVoice,
         line: String
@@ -307,43 +341,33 @@ class VoiceDirectorEngine(
     // Gemini TTS
     // ---------------------------------------------------------------------------------------
 
-    @OptIn(PublicPreviewAPI::class) // Speech output is a preview API in firebase-ai
-    private fun geminiTtsModel(voiceName: String): GenerativeModel = geminiModels.getOrPut(voiceName) {
-        Firebase.ai.generativeModel(
-            modelName = GEMINI_TTS_MODEL,
-            generationConfig = generationConfig {
-                responseModalities = listOf(ResponseModality.AUDIO)
-                speechConfig = SpeechConfig(voice = Voice(voiceName))
-            }
-        )
-    }
-
-    private suspend fun renderWithGemini(director: DirectorVoice, prompt: String): RenderedLine? {
-        if (System.currentTimeMillis() < geminiBackoffUntil) return null
-        val audioPart = try {
-            withTimeoutOrNull(GEMINI_TIMEOUT_MS) {
-                geminiTtsModel(director.geminiVoice).generateContent(prompt)
-                    .candidates.firstOrNull()?.content?.parts
-                    ?.filterIsInstance<InlineDataPart>()
-                    ?.firstOrNull { it.mimeType.startsWith("audio") }
-            }
+    /**
+     * One Gemini attempt, limited to [GEMINI_TIMEOUT_MS]. A timeout cancels the request, so a late reply is
+     * never played or cached. A failure, timeout, empty or undecodable reply backs off that voice for
+     * [GEMINI_BACKOFF_MS] so each line doesn't wait on a broken service.
+     */
+    internal suspend fun renderWithGemini(director: DirectorVoice, prompt: String): RenderedLine? {
+        val voice = director.geminiVoice
+        if (nowMs() < (geminiBackoffUntil[voice] ?: 0L)) return null
+        val audio = try {
+            withTimeoutOrNull(GEMINI_TIMEOUT_MS) { gemini.synthesize(voice, prompt) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w(TAG, "Gemini TTS failed; using system TTS for ${GEMINI_BACKOFF_MS / 1000}s", e)
-            geminiBackoffUntil = System.currentTimeMillis() + GEMINI_BACKOFF_MS
-            return null
+            return backOffGemini(voice, "Gemini TTS failed", e)
         }
-        if (audioPart == null || audioPart.inlineData.size < 2) {
-            Log.w(TAG, "Gemini TTS returned no audio (timeout or empty response)")
-            geminiBackoffUntil = System.currentTimeMillis() + GEMINI_BACKOFF_MS
-            return null
+        if (audio == null || audio.bytes.size < 2) {
+            return backOffGemini(voice, "Gemini TTS returned no audio (timeout or empty response)")
         }
-        val (pcm, sampleRate) = decodeGeminiAudio(audioPart.inlineData, audioPart.mimeType) ?: run {
-            Log.w(TAG, "Gemini TTS returned audio in an unsupported format (${audioPart.mimeType})")
-            return null
-        }
+        val (pcm, sampleRate) = decodeGeminiAudio(audio.bytes, audio.mimeType)
+            ?: return backOffGemini(voice, "Gemini TTS returned audio in an unsupported format (${audio.mimeType})")
         return RenderedLine(pcm, sampleRate, "gemini")
+    }
+
+    private fun backOffGemini(voice: String, reason: String, error: Exception? = null): RenderedLine? {
+        Log.w(TAG, "$reason; $voice uses system TTS for ${GEMINI_BACKOFF_MS / 1000}s", error)
+        geminiBackoffUntil[voice] = nowMs() + GEMINI_BACKOFF_MS
+        return null
     }
 
     internal fun buildTtsPrompt(director: DirectorVoice, voicePack: VoicePackEntity, line: String): String {
