@@ -31,6 +31,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.time.LocalDate
+import java.time.ZoneId
 import javax.inject.Inject
 
 /** What History is made of: the person's own days, newest first, and an honest count of the days on which they started. */
@@ -70,11 +71,11 @@ class HistoryViewModelTest {
     private val started = guided + OccurrenceCommand.ReportStarted
 
     /** An occurrence of a new mission that came due [agoMs] before now, taken through [commands]. */
-    private fun occurrence(title: String, agoMs: Long, commands: Array<OccurrenceCommand>, deleted: Boolean = false): String = runBlocking {
+    private fun occurrence(title: String, agoMs: Long, commands: Array<OccurrenceCommand>, deleted: Boolean = false, zone: String = "UTC"): String = runBlocking {
         val at = FakeAlarmModule.T0 - agoMs
         val mission = testMission(title).copy(startAtUtc = at, deletedAt = if (deleted) FakeAlarmModule.T0 else null)
         db.missions().insert(mission)
-        val o = repo.createOccurrence(mission.id, at, "UTC").occurrence
+        val o = repo.createOccurrence(mission.id, at, zone).occurrence
         for (c in commands) repo.apply(o.id, c, EventSource.SYSTEM)
         o.id
     }
@@ -136,5 +137,29 @@ class HistoryViewModelTest {
 
         awaitUntil(message = "the kept one") { ready()?.days?.isNotEmpty() == true }
         assertEquals(listOf(kept), ready()!!.days.flatMap { it.entries }.map { it.occurrenceId })
+    }
+
+    @Test
+    fun `an occurrence of a mission pinned to a zone that is ahead of the phone is in neither the list nor the counts until the phone reaches its day`() {
+        // The phone is in Los Angeles at 04:00 on 2 November. A mission pinned to Auckland rang at 00:30 there, which is already the 3rd.
+        collector.cancel()
+        clock.zone = ZoneId.of("America/Los_Angeles")
+        clock.nowMs = FakeAlarmModule.T0 + 3 * hour
+        vm = HistoryViewModel(missions, clock)
+        collector = CoroutineScope(Dispatchers.Main.immediate).launch { vm.state.collect { } }
+
+        val ahead = occurrence("Pinned", -5 * hour / 2, started, zone = "Pacific/Auckland")
+        val here = occurrence("Here", 2 * hour, started)
+
+        awaitUntil(message = "the one on the phone's own day") { ready()?.days?.flatMap { it.entries }?.any { it.occurrenceId == here } == true }
+        assertEquals("only the one that is on the phone's day is listed", listOf(here), ready()!!.days.flatMap { it.entries }.map { it.occurrenceId })
+        assertEquals("and only that one is counted", 1, ready()!!.month.eligibleDays)
+
+        // A day later the phone is on the 3rd as well: the pinned one is inside, in the list and in the counts.
+        clock.advance(24 * hour)
+        occurrence("Touch", 3 * hour, started) // any change makes the screen read its rows again
+        awaitUntil(message = "the pinned one") { ready()?.days?.flatMap { it.entries }?.any { it.occurrenceId == ahead } == true }
+        assertEquals(listOf(LocalDate.of(2026, 11, 3)), ready()!!.days.filter { d -> d.entries.any { it.occurrenceId == ahead } }.map { it.date })
+        assertEquals(2, ready()!!.month.eligibleDays)
     }
 }

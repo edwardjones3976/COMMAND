@@ -7,7 +7,9 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.room.InvalidationTracker
 import com.command.data.AppSettings
+import com.command.data.db.CommandDb
 import com.command.domain.voice.RoutePolicy
 import com.command.testing.android.awaitUntil
 import com.command.ui.theme.CommandTheme
@@ -33,6 +35,7 @@ class SettingsViewModelTest {
     @get:Rule val hilt = HiltAndroidRule(this)
 
     @Inject lateinit var settings: AppSettings
+    @Inject lateinit var db: CommandDb
 
     @Before
     fun setUp() {
@@ -40,6 +43,15 @@ class SettingsViewModelTest {
     }
 
     private fun ready(vm: SettingsViewModel): SettingsUiState.Ready? = vm.state.value as? SettingsUiState.Ready
+
+    /** Waits [ms] while keeping the main looper moving, which the view model's coroutines need to run. */
+    private fun settle(ms: Long) {
+        val end = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < end) {
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            Thread.sleep(5)
+        }
+    }
 
     @Test
     fun `the line is heard on the speaker and a headset until the person says otherwise`() {
@@ -49,13 +61,13 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `choosing headset only is shown at once and is written down`() {
+    fun `choosing headset only is written down, and then shown`() {
         val vm = SettingsViewModel(settings)
         awaitUntil(message = "ready") { ready(vm) != null }
 
         vm.chooseRoutePolicy(RoutePolicy.HEADSET_ONLY)
-        assertEquals("what was chosen is what is shown", RoutePolicy.HEADSET_ONLY, ready(vm)!!.routePolicy)
-        awaitUntil(message = "written") { runBlocking { settings.routePolicy() } == RoutePolicy.HEADSET_ONLY }
+        awaitUntil(message = "written and shown") { ready(vm)?.routePolicy == RoutePolicy.HEADSET_ONLY }
+        assertEquals("what is shown is what is stored", RoutePolicy.HEADSET_ONLY, runBlocking { settings.routePolicy() })
 
         val reopened = SettingsViewModel(settings)
         awaitUntil(message = "ready again") { ready(reopened) != null }
@@ -66,8 +78,21 @@ class SettingsViewModelTest {
     fun `choosing what is already chosen writes nothing`() {
         val vm = SettingsViewModel(settings)
         awaitUntil(message = "ready") { ready(vm) != null }
+        // The database seeds the default route when it is created, so a write is told from the seed by watching the settings table.
+        var writes = 0
+        db.invalidationTracker.addObserver(object : InvalidationTracker.Observer("settings") {
+            override fun onInvalidated(tables: Set<String>) { writes++ }
+        })
+        settle(100)
+        writes = 0
+
         vm.chooseRoutePolicy(RoutePolicy.SPEAKER_AND_HEADSET)
+        settle(300) // a write would have been seen by now; the main looper must be pumped for it to arrive
         assertEquals(RoutePolicy.SPEAKER_AND_HEADSET, ready(vm)!!.routePolicy)
+        assertEquals("choosing what is chosen is not a write", 0, writes)
+
+        vm.chooseRoutePolicy(RoutePolicy.HEADSET_ONLY)
+        awaitUntil(message = "the same watch sees a real write") { writes > 0 }
     }
 }
 

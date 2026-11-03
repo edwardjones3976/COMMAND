@@ -5,6 +5,7 @@ import com.command.data.db.SettingRow
 import com.command.domain.model.SettingKeys
 import com.command.domain.voice.RoutePolicy
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,10 +28,14 @@ class AppSettings @Inject constructor(private val db: CommandDb) {
     suspend fun markNotificationsAsked() = db.settings().put(SettingRow(SettingKeys.NOTIFICATIONS_ASKED, TRUE))
 
     /** Where speech may come out; the tone and the vibration ring whatever it says. The default speaks on the speaker too. */
-    suspend fun routePolicy(): RoutePolicy =
-        db.settings().get(SettingKeys.ALARM_ROUTE_POLICY)?.trim('"')
-            ?.let { name -> RoutePolicy.values().firstOrNull { it.name == name } }
-            ?: RoutePolicy.SPEAKER_AND_HEADSET
+    suspend fun routePolicy(): RoutePolicy = routePolicyOf(db.settings().get(SettingKeys.ALARM_ROUTE_POLICY))
+
+    /** The same, followed: it emits again when the setting is written, so a screen shows what the phone will do and nothing else. */
+    fun observeRoutePolicy(): Flow<RoutePolicy> =
+        db.settings().observe(SettingKeys.ALARM_ROUTE_POLICY).map(::routePolicyOf).distinctUntilChanged()
+
+    private fun routePolicyOf(stored: String?): RoutePolicy =
+        stored?.trim('"')?.let { name -> RoutePolicy.values().firstOrNull { it.name == name } } ?: RoutePolicy.SPEAKER_AND_HEADSET
 
     suspend fun setRoutePolicy(policy: RoutePolicy) = db.settings().put(SettingRow(SettingKeys.ALARM_ROUTE_POLICY, "\"${policy.name}\""))
 

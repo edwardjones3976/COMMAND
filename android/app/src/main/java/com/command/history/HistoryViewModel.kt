@@ -19,7 +19,6 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import java.time.DateTimeException
-import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -65,13 +64,18 @@ class HistoryViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryUiState.Loading)
 
     private fun build(rows: List<ScheduleRow>): HistoryUiState.Ready {
-        val occurrences = rows.map { HistoryOccurrence(it.scheduledAtUtc, zoneOf(it.zoneId), it.state, it.skipReason, it.missReason) }
-        val entries = rows.zip(occurrences) { row, o -> HistoryEntry(row.occurrenceId, row.title, row.scheduledAtUtc, o.zone, o.reason) }
-        val days = entries
-            .groupBy { Instant.ofEpochMilli(it.atUtcMs).atZone(it.zone).toLocalDate() }
+        // One reading of today and one rule for what the window holds: the list and the counts are made from the same occurrences, so they
+        // cannot disagree. The query only bounds what is fetched, by instants, which is not the same as by days in each one's own zone.
+        val today = calculator.currentDay()
+        val kept = rows
+            .map { it to HistoryOccurrence(it.scheduledAtUtc, zoneOf(it.zoneId), it.state, it.skipReason, it.missReason) }
+            .filter { (_, o) -> calculator.isWithin(o, MONTH_DAYS, today) }
+        val occurrences = kept.map { it.second }
+        val days = kept
+            .groupBy({ (_, o) -> calculator.dateOf(o) }, { (row, o) -> HistoryEntry(row.occurrenceId, row.title, row.scheduledAtUtc, o.zone, o.reason) })
             .map { (date, list) -> HistoryDay(date, list.sortedByDescending { it.atUtcMs }) }
             .sortedByDescending { it.date }
-        return HistoryUiState.Ready(calculator.summary(occurrences, WEEK_DAYS), calculator.summary(occurrences, MONTH_DAYS), days)
+        return HistoryUiState.Ready(calculator.summary(occurrences, WEEK_DAYS, today), calculator.summary(occurrences, MONTH_DAYS, today), days)
     }
 
     private fun zoneOf(id: String): ZoneId = try {
