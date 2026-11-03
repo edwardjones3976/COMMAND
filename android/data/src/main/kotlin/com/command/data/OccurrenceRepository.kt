@@ -103,7 +103,24 @@ class OccurrenceRepository @Inject constructor(
     private val roller: WindowRoller,
     private val ringController: RingController,
 ) {
-    private class Pending(val occurrence: OccurrenceRow, val effect: Effect, val nowMs: Long)
+    internal class Pending(val occurrence: OccurrenceRow, val effect: Effect, val nowMs: Long)
+
+    /** Commands applied through this scope share one transaction; their platform effects run after it commits. */
+    class Tx internal constructor(private val repo: OccurrenceRepository, private val pending: MutableList<Pending>) {
+        suspend fun apply(id: String, command: OccurrenceCommand, source: EventSource, extras: ApplyExtras = ApplyExtras.NONE): ApplyResult =
+            repo.applyInTx(id, command, source, extras, pending)
+    }
+
+    /**
+     * Runs [block] in one transaction so several occurrences (and whatever else the caller writes through the same
+     * database) change together or not at all. Alarms, work and notifications are only touched after the commit.
+     */
+    suspend fun <T> inTransaction(source: EventSource, block: suspend (Tx) -> T): T {
+        val pending = ArrayList<Pending>()
+        val result = db.withTransaction { block(Tx(this, pending)) }
+        runEffects(pending, source)
+        return result
+    }
 
     // --- reads -------------------------------------------------------------------------------------------------
 
@@ -354,6 +371,7 @@ class OccurrenceRepository @Inject constructor(
                 Effect.CancelCycleEnd -> scheduler.cancel(request(AlarmKind.CYCLE_END))
                 is Effect.ScheduleCheckIn -> scheduler.arm(request(AlarmKind.CHECK_IN, at = e.atUtcMs, index = e.index))
                 is Effect.PostCheckIn -> poster.post(occ.id, occ.requestCode, e.index)
+                // Index == count is the final-timeout alarm, so the highest index in use is MAX_COUNT itself.
                 Effect.CancelCheckIns -> for (i in 0..CheckInSchedule.MAX_COUNT) scheduler.cancel(request(AlarmKind.CHECK_IN, index = i))
                 is Effect.ArmChild -> Unit // handled inside the transaction
                 Effect.RollWindow -> roller.roll()

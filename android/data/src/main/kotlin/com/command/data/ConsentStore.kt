@@ -1,6 +1,5 @@
 package com.command.data
 
-import androidx.room.withTransaction
 import com.command.data.db.CommandDb
 import com.command.data.db.ConsentRow
 import com.command.domain.model.ConsentCascade
@@ -8,6 +7,7 @@ import com.command.domain.model.ConsentKey
 import com.command.domain.model.ConsentSource
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.OccurrenceCommand
+import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.SkipReason
 import com.command.domain.time.Clock
 import kotlinx.coroutines.flow.Flow
@@ -51,11 +51,15 @@ class ConsentStore @Inject constructor(
         db.consents().insert(ConsentRow(key = key, granted = true, atUtc = clock.nowMs(), source = source, boundaryVersion = boundaryVersion, shownTextHash = shownTextHash))
     }
 
-    /** Revokes [key] and everything that depends on it. Keys that were not granted are left alone. */
+    /**
+     * Revokes [key] and everything that depends on it, and removes the data it allowed, in one transaction: a crash
+     * cannot leave a consent withdrawn but its data (or its alarms) still in place. Keys that were not granted are
+     * left alone. The platform half (stop workers, delete cached files) runs after the commit.
+     */
     suspend fun revoke(key: ConsentKey, source: ConsentSource = ConsentSource.USER) {
         val revoked = ArrayList<ConsentKey>()
         val purgedFiles = HashMap<ConsentKey, List<String>>()
-        db.withTransaction {
+        occurrences.inTransaction(EventSource.SYSTEM) { tx ->
             for (k in ConsentCascade.withDependents(key)) {
                 val current = db.consents().latest(k)
                 if (current?.granted != true) continue
@@ -68,18 +72,24 @@ class ConsentStore @Inject constructor(
                         db.maintenance().clearGeminiRenders()
                     }
                     ConsentKey.CLOUD_SYNC -> db.maintenance().clearSyncOutbox()
+                    ConsentKey.CALENDAR_READ -> removeImportedCalendarOccurrences(tx)
                     else -> Unit
                 }
             }
         }
-        if (ConsentKey.CALENDAR_READ in revoked) removeImportedCalendarOccurrences()
         for (k in revoked) listener.onRevoked(k, purgedFiles[k].orEmpty())
     }
 
-    /** Imported occurrences that have not fired disappear as skipped (never as completed); fired ones are history. */
-    private suspend fun removeImportedCalendarOccurrences() {
+    /**
+     * Imported occurrences that have not fired disappear as skipped (never as completed). One that has already fired
+     * is history and is left alone, and is not even attempted, so the audit log records no pointless rejections.
+     */
+    private suspend fun removeImportedCalendarOccurrences(tx: OccurrenceRepository.Tx) {
         for (id in db.maintenance().linkedOccurrenceIds()) {
-            occurrences.apply(id, OccurrenceCommand.Skip(SkipReason.CALENDAR_REMOVED), EventSource.SYSTEM)
+            val row = db.occurrences().get(id) ?: continue
+            if (row.state == OccurrenceState.SCHEDULED || row.state == OccurrenceState.ARMED) {
+                tx.apply(id, OccurrenceCommand.Skip(SkipReason.CALENDAR_REMOVED), EventSource.SYSTEM)
+            }
         }
         db.maintenance().clearCalendarLinks()
         db.maintenance().deselectCalendars()

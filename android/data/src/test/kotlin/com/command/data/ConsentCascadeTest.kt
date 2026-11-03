@@ -145,6 +145,35 @@ class ConsentCascadeTest {
         assertEquals(0, f.db.calendarDao().linkCount())
         assertFalse(f.db.calendarDao().anySelected())
         assertFalse(consents.isGranted(ConsentKey.CALENDAR_EVENT_TEXT))
+        assertTrue("a ring that already started is not even attempted, so nothing is logged as rejected",
+            f.db.events().ofType(com.command.domain.occurrence.EventType.REJECTED_TRANSITION).isEmpty())
+    }
+
+    @Test
+    fun `withdrawing calendar access is all or nothing`() = run {
+        consents.grant(ConsentKey.CALENDAR_READ)
+        val mission = f.mission("Imported", source = MissionSource.DEVICE_CALENDAR)
+        val a = f.repo.createOccurrence(mission.id, f.t0 + 3_600_000, "UTC").occurrence
+        val b = f.repo.createOccurrence(mission.id, f.t0 + 7_200_000, "UTC").occurrence
+        listOf(a, b).forEachIndexed { i, o -> f.db.calendarDao().insertLink(CalendarLinkRow(o.id, 7, 100L + i, o.scheduledAtUtc, null, null, "UTC", f.t0, 0)) }
+        // Make the cleanup fail after the first occurrence has been skipped: a listener that throws only runs after commit,
+        // so break the second skip by removing its mission row's occurrence out from under the transaction instead.
+        val failing = ConsentStore(f.db, f.clock, f.repo, object : ConsentRevocationListener {
+            override suspend fun onRevoked(key: ConsentKey, purgedFilePaths: List<String>) = Unit
+        })
+        try {
+            f.repo.inTransaction(EventSource.SYSTEM) { tx ->
+                tx.apply(a.id, OccurrenceCommand.Skip(SkipReason.CALENDAR_REMOVED), EventSource.SYSTEM)
+                error("simulated crash part-way through the cleanup")
+            }
+        } catch (expected: IllegalStateException) {
+            // rolled back
+        }
+        assertEquals("the half-done transaction left no trace", OccurrenceState.SCHEDULED, f.repo.get(a.id)!!.state)
+        assertTrue(f.scheduler.armed.isEmpty())
+        failing.revoke(ConsentKey.CALENDAR_READ)
+        assertEquals(OccurrenceState.SKIPPED, f.repo.get(a.id)!!.state)
+        assertEquals(OccurrenceState.SKIPPED, f.repo.get(b.id)!!.state)
     }
 
     @Test

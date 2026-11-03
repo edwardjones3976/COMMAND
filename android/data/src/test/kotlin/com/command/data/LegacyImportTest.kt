@@ -203,6 +203,34 @@ class LegacyImportTest {
     }
 
     @Test
+    fun `a corrupt legacy file is reported, not thrown, and never retried`() = run {
+        val file = context.getDatabasePath(LegacyImporter.LEGACY_DB_NAME)
+        file.parentFile!!.mkdirs()
+        file.writeBytes(ByteArray(2048) { (it * 31).toByte() }) // not an SQLite file
+        val report = importer.importIfNeeded()!!
+        assertTrue(report.failed)
+        assertEquals(0, report.imported)
+        assertEquals("failed", f.db.settings().get("legacy_import_done"))
+        assertNull("it is not retried on the next start", importer.importIfNeeded())
+        val event = f.db.events().ofType(EventType.LEGACY_IMPORTED).single()
+        assertEquals("true", Codec.decodePayload(event.payloadJson)["failed"])
+        assertTrue("the old file is left alone", file.isFile && file.length() == 2048L)
+        assertEquals(0, f.db.missions().count())
+    }
+
+    @Test
+    fun `a legacy database whose tables do not match is reported, not thrown`() = run {
+        val file = context.getDatabasePath(LegacyImporter.LEGACY_DB_NAME)
+        file.parentFile!!.mkdirs()
+        android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(file, null).use {
+            it.execSQL("CREATE TABLE missions (unrelated INTEGER)")
+        }
+        val report = importer.importIfNeeded()!!
+        assertTrue(report.failed)
+        assertEquals(0, f.db.missions().count())
+    }
+
+    @Test
     fun `the import is audited with counts only`() = run {
         legacy = LegacyDb.create(context, wal = false).also { it.insertPreviousAppSeeds(); it.insertUserMissions(); it.insertDefaultStreakProfile() }
         importer.importIfNeeded()

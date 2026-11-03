@@ -2,6 +2,7 @@ package com.command.data
 
 import android.content.Context
 import android.database.Cursor
+import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
 import androidx.room.withTransaction
 import com.command.data.db.CommandDb
@@ -22,6 +23,7 @@ import com.command.domain.occurrence.EventType
 import com.command.domain.time.Clock
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import kotlin.coroutines.cancellation.CancellationException
 import java.util.UUID
 import javax.inject.Inject
 
@@ -33,6 +35,8 @@ data class LegacyImportReport(
     val disabledPast: Int,
     val presets: Int,
     val customProfileCreated: Boolean,
+    /** The old database could not be read. Nothing was imported and nothing was changed; the old files are untouched. */
+    val failed: Boolean = false,
 )
 
 /**
@@ -51,15 +55,41 @@ class LegacyImporter @Inject constructor(
     private val clock: Clock,
 ) {
     suspend fun importIfNeeded(): LegacyImportReport? {
-        if (db.settings().get(SettingKeys.LEGACY_IMPORT_DONE) == "true") return null
+        val done = db.settings().get(SettingKeys.LEGACY_IMPORT_DONE)
+        if (done == "true" || done == "failed") return null
         val file: File = context.getDatabasePath(LEGACY_DB_NAME)
-        val report = if (file.isFile) readAndImport(file) else EMPTY
-        db.settings().put(SettingRow(SettingKeys.LEGACY_IMPORT_DONE, "true"))
+        val report = if (file.isFile) {
+            try {
+                readAndImport(file)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                recordFailure(e)
+            }
+        } else {
+            EMPTY
+        }
+        db.settings().put(SettingRow(SettingKeys.LEGACY_IMPORT_DONE, if (report.failed) "failed" else "true"))
         return report
     }
 
+    /** Leaves a trace (the kind of error only) and gives up for good: the app starts normally without the old data. */
+    private suspend fun recordFailure(e: Exception): LegacyImportReport {
+        val kind = e.javaClass.simpleName.filter { it.isLetterOrDigit() }.take(48).ifEmpty { "Error" }
+        db.events().insert(
+            EventRow(
+                occurrenceId = null, missionId = null, type = EventType.LEGACY_IMPORTED, atUtc = clock.nowMs(),
+                elapsedRealtime = clock.elapsedRealtimeMs(), bootId = null, source = EventSource.SYSTEM,
+                payloadJson = Codec.encodePayload(EventPayload.of("failed" to "true", "error" to kind).values),
+            ),
+        )
+        return LegacyImportReport(0, 0, 0, 0, 0, customProfileCreated = false, failed = true)
+    }
+
     private suspend fun readAndImport(file: File): LegacyImportReport {
-        val legacy = SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READWRITE)
+        // Android's default corruption handler deletes a database it cannot open. These are the user's old files and
+        // must survive whatever state they are in, so corruption is handled by doing nothing here.
+        val legacy = SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READWRITE, DatabaseErrorHandler { })
         try {
             // Fold the write-ahead log into the main file first so rows the old app wrote last are visible.
             legacy.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
