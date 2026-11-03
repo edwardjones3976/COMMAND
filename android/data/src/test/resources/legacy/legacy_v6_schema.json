@@ -1,0 +1,977 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 6,
+    "identityHash": "b2ad6f5b0abb3de2c91b33b432cd213b",
+    "entities": [
+      {
+        "tableName": "missions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `category` TEXT NOT NULL, `firstActionPrompt` TEXT NOT NULL, `scheduledEpochMs` INTEGER NOT NULL, `durationMinutes` INTEGER NOT NULL, `personalityId` TEXT NOT NULL, `voicePackId` TEXT NOT NULL, `handshakeType` TEXT NOT NULL, `isMissionLocked` INTEGER NOT NULL, `status` TEXT NOT NULL, `calendarEventId` INTEGER, `isFromGoogleCalendar` INTEGER NOT NULL, `isRecurring` INTEGER NOT NULL, `recurrenceRule` TEXT, `hasConflict` INTEGER NOT NULL, `conflictDescription` TEXT, `presetId` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstActionPrompt",
+            "columnName": "firstActionPrompt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduledEpochMs",
+            "columnName": "scheduledEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "durationMinutes",
+            "columnName": "durationMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "personalityId",
+            "columnName": "personalityId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "voicePackId",
+            "columnName": "voicePackId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "handshakeType",
+            "columnName": "handshakeType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isMissionLocked",
+            "columnName": "isMissionLocked",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "calendarEventId",
+            "columnName": "calendarEventId",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "isFromGoogleCalendar",
+            "columnName": "isFromGoogleCalendar",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isRecurring",
+            "columnName": "isRecurring",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recurrenceRule",
+            "columnName": "recurrenceRule",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hasConflict",
+            "columnName": "hasConflict",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "conflictDescription",
+            "columnName": "conflictDescription",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "presetId",
+            "columnName": "presetId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "voice_packs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `actorName` TEXT NOT NULL, `accentLabel` TEXT NOT NULL, `emotionalTone` TEXT NOT NULL, `languageTag` TEXT NOT NULL, `pitch` REAL NOT NULL, `speechRate` REAL NOT NULL, `isCustom` INTEGER NOT NULL, `usesDrillSergeantArt` INTEGER NOT NULL, `sampleQuote` TEXT NOT NULL, `reveilleScript` TEXT NOT NULL, `handshakeSuccessScript` TEXT NOT NULL, `starterScript` TEXT NOT NULL, `isFavorite` INTEGER NOT NULL, `eqPreset` TEXT NOT NULL, `volumeBoostPercent` INTEGER NOT NULL, `cadenceStyle` TEXT NOT NULL, `qualityTierLabel` TEXT NOT NULL, `voiceModelType` TEXT NOT NULL, `vocalGritPercent` INTEGER NOT NULL, `aggressionPercent` INTEGER NOT NULL, `isHumanStem` INTEGER NOT NULL, `licenseType` TEXT NOT NULL, `legalAttribution` TEXT NOT NULL, `formantShiftPercent` INTEGER NOT NULL, `stemResourceId` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "actorName",
+            "columnName": "actorName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accentLabel",
+            "columnName": "accentLabel",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "emotionalTone",
+            "columnName": "emotionalTone",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "languageTag",
+            "columnName": "languageTag",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pitch",
+            "columnName": "pitch",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "speechRate",
+            "columnName": "speechRate",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isCustom",
+            "columnName": "isCustom",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "usesDrillSergeantArt",
+            "columnName": "usesDrillSergeantArt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sampleQuote",
+            "columnName": "sampleQuote",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reveilleScript",
+            "columnName": "reveilleScript",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "handshakeSuccessScript",
+            "columnName": "handshakeSuccessScript",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "starterScript",
+            "columnName": "starterScript",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isFavorite",
+            "columnName": "isFavorite",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eqPreset",
+            "columnName": "eqPreset",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "volumeBoostPercent",
+            "columnName": "volumeBoostPercent",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cadenceStyle",
+            "columnName": "cadenceStyle",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "qualityTierLabel",
+            "columnName": "qualityTierLabel",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "voiceModelType",
+            "columnName": "voiceModelType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "vocalGritPercent",
+            "columnName": "vocalGritPercent",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggressionPercent",
+            "columnName": "aggressionPercent",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isHumanStem",
+            "columnName": "isHumanStem",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "licenseType",
+            "columnName": "licenseType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "legalAttribution",
+            "columnName": "legalAttribution",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "formantShiftPercent",
+            "columnName": "formantShiftPercent",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stemResourceId",
+            "columnName": "stemResourceId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "streak_profile",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `currentStreakDays` INTEGER NOT NULL, `longestStreakDays` INTEGER NOT NULL, `lastCompletedEpochDay` INTEGER NOT NULL, `recoverableStreakDays` INTEGER NOT NULL, `isStreakMissed` INTEGER NOT NULL, `commandCredits` INTEGER NOT NULL, `unlockedBadgesCsv` TEXT NOT NULL, `activePresetName` TEXT NOT NULL, `selectedPersonalityId` TEXT NOT NULL, `selectedVoicePackId` TEXT NOT NULL, `instructionFirmness` INTEGER NOT NULL, `obnoxiousness` INTEGER NOT NULL, `alertIntensity` INTEGER NOT NULL, `persistence` INTEGER NOT NULL, `handshakeDifficulty` INTEGER NOT NULL, `scheduleRigidity` INTEGER NOT NULL, `recoveryStructure` INTEGER NOT NULL, `headphoneOnlyMode` INTEGER NOT NULL, `quietHoursDucking` INTEGER NOT NULL, `customTestPhrase` TEXT NOT NULL, `compareVoiceAId` TEXT NOT NULL, `compareVoiceBId` TEXT NOT NULL, `hasCompletedOnboarding` INTEGER NOT NULL, `defaultHandshakeType` TEXT NOT NULL, `recoveryProtocol` TEXT NOT NULL, `activeCustomPresetId` TEXT, `activityPresetMapJson` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "currentStreakDays",
+            "columnName": "currentStreakDays",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "longestStreakDays",
+            "columnName": "longestStreakDays",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastCompletedEpochDay",
+            "columnName": "lastCompletedEpochDay",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recoverableStreakDays",
+            "columnName": "recoverableStreakDays",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isStreakMissed",
+            "columnName": "isStreakMissed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "commandCredits",
+            "columnName": "commandCredits",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unlockedBadgesCsv",
+            "columnName": "unlockedBadgesCsv",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "activePresetName",
+            "columnName": "activePresetName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "selectedPersonalityId",
+            "columnName": "selectedPersonalityId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "selectedVoicePackId",
+            "columnName": "selectedVoicePackId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "instructionFirmness",
+            "columnName": "instructionFirmness",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "obnoxiousness",
+            "columnName": "obnoxiousness",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "alertIntensity",
+            "columnName": "alertIntensity",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "persistence",
+            "columnName": "persistence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "handshakeDifficulty",
+            "columnName": "handshakeDifficulty",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduleRigidity",
+            "columnName": "scheduleRigidity",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recoveryStructure",
+            "columnName": "recoveryStructure",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "headphoneOnlyMode",
+            "columnName": "headphoneOnlyMode",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "quietHoursDucking",
+            "columnName": "quietHoursDucking",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "customTestPhrase",
+            "columnName": "customTestPhrase",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "compareVoiceAId",
+            "columnName": "compareVoiceAId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "compareVoiceBId",
+            "columnName": "compareVoiceBId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hasCompletedOnboarding",
+            "columnName": "hasCompletedOnboarding",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "defaultHandshakeType",
+            "columnName": "defaultHandshakeType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recoveryProtocol",
+            "columnName": "recoveryProtocol",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "activeCustomPresetId",
+            "columnName": "activeCustomPresetId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "activityPresetMapJson",
+            "columnName": "activityPresetMapJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "personality_presets",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `description` TEXT NOT NULL, `basePersonalityId` TEXT NOT NULL, `voicePackId` TEXT NOT NULL, `instructionFirmness` INTEGER NOT NULL, `obnoxiousness` INTEGER NOT NULL, `alertIntensity` INTEGER NOT NULL, `persistence` INTEGER NOT NULL, `handshakeDifficulty` INTEGER NOT NULL, `scheduleRigidity` INTEGER NOT NULL, `recoveryStructure` INTEGER NOT NULL, `preferredHandshakeType` TEXT NOT NULL, `chainedHandshakeType` TEXT NOT NULL, `holdDurationSeconds` INTEGER NOT NULL, `graceWindowMinutes` INTEGER NOT NULL, `escalationIntervalSeconds` INTEGER NOT NULL, `customPersonaPrompt` TEXT NOT NULL, `vocabularyRules` TEXT NOT NULL, `catchphrasesCsv` TEXT NOT NULL, `reveillePhaseTemplate` TEXT NOT NULL, `starterPhaseTemplate` TEXT NOT NULL, `accountabilityPhaseTemplate` TEXT NOT NULL, `recoveryPhaseTemplate` TEXT NOT NULL, `cadenceStyle` TEXT NOT NULL, `eqPreset` TEXT NOT NULL, `customPitch` REAL NOT NULL, `customSpeechRate` REAL NOT NULL, `vocalGritPercent` INTEGER NOT NULL, `aggressionPercent` INTEGER NOT NULL, `isActiveGlobal` INTEGER NOT NULL, `isPreloaded` INTEGER NOT NULL, `assignedCategoriesCsv` TEXT NOT NULL, `sampleDirective` TEXT NOT NULL, `createdAtEpochMs` INTEGER NOT NULL, `updatedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "basePersonalityId",
+            "columnName": "basePersonalityId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "voicePackId",
+            "columnName": "voicePackId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "instructionFirmness",
+            "columnName": "instructionFirmness",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "obnoxiousness",
+            "columnName": "obnoxiousness",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "alertIntensity",
+            "columnName": "alertIntensity",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "persistence",
+            "columnName": "persistence",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "handshakeDifficulty",
+            "columnName": "handshakeDifficulty",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "scheduleRigidity",
+            "columnName": "scheduleRigidity",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recoveryStructure",
+            "columnName": "recoveryStructure",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "preferredHandshakeType",
+            "columnName": "preferredHandshakeType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "chainedHandshakeType",
+            "columnName": "chainedHandshakeType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "holdDurationSeconds",
+            "columnName": "holdDurationSeconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "graceWindowMinutes",
+            "columnName": "graceWindowMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "escalationIntervalSeconds",
+            "columnName": "escalationIntervalSeconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "customPersonaPrompt",
+            "columnName": "customPersonaPrompt",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "vocabularyRules",
+            "columnName": "vocabularyRules",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "catchphrasesCsv",
+            "columnName": "catchphrasesCsv",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reveillePhaseTemplate",
+            "columnName": "reveillePhaseTemplate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "starterPhaseTemplate",
+            "columnName": "starterPhaseTemplate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountabilityPhaseTemplate",
+            "columnName": "accountabilityPhaseTemplate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "recoveryPhaseTemplate",
+            "columnName": "recoveryPhaseTemplate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cadenceStyle",
+            "columnName": "cadenceStyle",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eqPreset",
+            "columnName": "eqPreset",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "customPitch",
+            "columnName": "customPitch",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "customSpeechRate",
+            "columnName": "customSpeechRate",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "vocalGritPercent",
+            "columnName": "vocalGritPercent",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aggressionPercent",
+            "columnName": "aggressionPercent",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isActiveGlobal",
+            "columnName": "isActiveGlobal",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isPreloaded",
+            "columnName": "isPreloaded",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "assignedCategoriesCsv",
+            "columnName": "assignedCategoriesCsv",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sampleDirective",
+            "columnName": "sampleDirective",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMs",
+            "columnName": "createdAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updatedAtEpochMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "preset_routing_rules",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `ruleName` TEXT NOT NULL, `targetCategory` TEXT NOT NULL, `startHour` INTEGER NOT NULL, `endHour` INTEGER NOT NULL, `targetPresetId` TEXT NOT NULL, `priorityOrder` INTEGER NOT NULL, `isEnabled` INTEGER NOT NULL, `notes` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ruleName",
+            "columnName": "ruleName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetCategory",
+            "columnName": "targetCategory",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startHour",
+            "columnName": "startHour",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endHour",
+            "columnName": "endHour",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetPresetId",
+            "columnName": "targetPresetId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "priorityOrder",
+            "columnName": "priorityOrder",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isEnabled",
+            "columnName": "isEnabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notes",
+            "columnName": "notes",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "escalation_policies",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `policyName` TEXT NOT NULL, `graceWindowMinutes` INTEGER NOT NULL, `repeatIntervalSeconds` INTEGER NOT NULL, `volumeRampCurve` TEXT NOT NULL, `maxStrikesBeforeRecovery` INTEGER NOT NULL, `autoTriggerFiveMinStarter` INTEGER NOT NULL, `linkedPresetId` TEXT, `isSystemDefault` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "policyName",
+            "columnName": "policyName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "graceWindowMinutes",
+            "columnName": "graceWindowMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "repeatIntervalSeconds",
+            "columnName": "repeatIntervalSeconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "volumeRampCurve",
+            "columnName": "volumeRampCurve",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "maxStrikesBeforeRecovery",
+            "columnName": "maxStrikesBeforeRecovery",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "autoTriggerFiveMinStarter",
+            "columnName": "autoTriggerFiveMinStarter",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "linkedPresetId",
+            "columnName": "linkedPresetId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isSystemDefault",
+            "columnName": "isSystemDefault",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "handshake_calibrations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `profileName` TEXT NOT NULL, `primaryHandshakeType` TEXT NOT NULL, `secondaryHandshakeType` TEXT NOT NULL, `holdSecondsRequired` INTEGER NOT NULL, `mathComplexityLevel` INTEGER NOT NULL, `requiredVoicePhrase` TEXT NOT NULL, `strictVerification` INTEGER NOT NULL, `isSystemDefault` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profileName",
+            "columnName": "profileName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "primaryHandshakeType",
+            "columnName": "primaryHandshakeType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "secondaryHandshakeType",
+            "columnName": "secondaryHandshakeType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "holdSecondsRequired",
+            "columnName": "holdSecondsRequired",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mathComplexityLevel",
+            "columnName": "mathComplexityLevel",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requiredVoicePhrase",
+            "columnName": "requiredVoicePhrase",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "strictVerification",
+            "columnName": "strictVerification",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isSystemDefault",
+            "columnName": "isSystemDefault",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "mission_blueprints",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `title` TEXT NOT NULL, `category` TEXT NOT NULL, `defaultDurationMinutes` INTEGER NOT NULL, `firstActionInstruction` TEXT NOT NULL, `spokenPromptTemplate` TEXT NOT NULL, `assignedPresetId` TEXT NOT NULL, `escalationPolicyId` TEXT, `handshakeProfileId` TEXT, `checklistStepsCsv` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "defaultDurationMinutes",
+            "columnName": "defaultDurationMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstActionInstruction",
+            "columnName": "firstActionInstruction",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "spokenPromptTemplate",
+            "columnName": "spokenPromptTemplate",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "assignedPresetId",
+            "columnName": "assignedPresetId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "escalationPolicyId",
+            "columnName": "escalationPolicyId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "handshakeProfileId",
+            "columnName": "handshakeProfileId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "checklistStepsCsv",
+            "columnName": "checklistStepsCsv",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'b2ad6f5b0abb3de2c91b33b432cd213b')"
+    ]
+  }
+}

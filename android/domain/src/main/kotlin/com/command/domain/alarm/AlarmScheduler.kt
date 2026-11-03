@@ -39,3 +39,13 @@ interface AlarmScheduler {
 interface WorkEnqueuer {
     fun enqueue(kind: WorkKind, occurrenceId: String)
 }
+
+/** Posts a follow-up status question to the user (a notification with quick answers). */
+interface CheckInPoster {
+    fun post(occurrenceId: String, requestCode: Int, index: Int)
+}
+
+/** Tops up the rolling window of armed alarms after one fires. */
+fun interface WindowRoller {
+    fun roll()
+}
