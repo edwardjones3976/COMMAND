@@ -472,4 +472,27 @@ class OccurrenceRepositoryTest {
         val child = f.db.occurrences().forMission(m.id).single { it.parentOccurrenceId == o.id }
         assertEquals("09:00 the next morning, 25 hours later because the clocks went back that night", at(2026, 11, 1), child.scheduledAtUtc)
     }
+
+    @Test
+    fun `a caller that blocks the main thread is never stuck behind a command that was started on it`() = run {
+        val o = scheduled()
+        for (c in listOf(OccurrenceCommand.Arm(ArmMode.EXACT), OccurrenceCommand.Fire, OccurrenceCommand.Acknowledge(), OccurrenceCommand.StartGuidance)) apply(o, c)
+        val looper = org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper())
+
+        // A command that starts on the main looper takes the occurrence's lock and goes into its transaction. To go on it needs the main looper
+        // again, so nothing it holds may be waited for by a thread that is blocking the main looper.
+        val onMain = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).async { f.repo.apply(o.id, OccurrenceCommand.ReportStarted, EventSource.USER) }
+        looper.idle()
+
+        // This is the main thread, and it blocks here until the second command has run, as a test or a caller using runBlocking does.
+        val second = withTimeoutOrNull(10_000) { f.repo.apply(o.id, OccurrenceCommand.ReportWorking, EventSource.USER) }
+        assertNotNull("the second command ran", second)
+
+        val end = System.currentTimeMillis() + 10_000
+        while (!onMain.isCompleted && System.currentTimeMillis() < end) {
+            looper.idle()
+            Thread.sleep(5)
+        }
+        assertTrue("and so did the first", onMain.isCompleted)
+    }
 }

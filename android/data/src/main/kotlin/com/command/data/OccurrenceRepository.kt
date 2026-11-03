@@ -43,9 +43,11 @@ import com.command.domain.occurrence.TransitionResult
 import com.command.domain.schedule.RestWindow
 import com.command.domain.schedule.RestWindows
 import com.command.domain.time.Clock
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
 import java.time.LocalTime
 import java.time.ZoneId
@@ -114,8 +116,10 @@ class OccurrenceRepository @Inject constructor(
      * not interleave there: a later cancel could otherwise be undone by an earlier command's effect that was still on its way (a question
      * posted for an occurrence that is already done, a follow-up alarm armed after it was cancelled). One lock per occurrence, from a fixed
      * set picked by its id so that there is nothing to clean up, is held from the start of [apply]'s transaction to the end of its effects.
-     * No effect calls back into [apply], so nothing waits on itself. Commands that share a transaction through [inTransaction] span several
-     * occurrences and are not covered.
+     * No effect calls back into [apply], so nothing waits on itself. All of it runs on [Dispatchers.Default], so that whoever holds a lock
+     * never needs the main looper to go on: a caller that blocks the main thread (a test, `runBlocking`) would otherwise wait for a lock held
+     * by a command that was started on that thread and cannot resume without it. Commands that share a transaction through [inTransaction]
+     * span several occurrences and are not covered.
      */
     private val locks = Array(OCCURRENCE_LOCKS) { Mutex() }
 
@@ -220,11 +224,13 @@ class OccurrenceRepository @Inject constructor(
         command: OccurrenceCommand,
         source: EventSource,
         extras: ApplyExtras = ApplyExtras.NONE,
-    ): ApplyResult = lockOf(occurrenceId).withLock {
-        val pending = ArrayList<Pending>()
-        val result = db.withTransaction { applyInTx(occurrenceId, command, source, extras, pending) }
-        if (result is ApplyResult.Applied) runEffects(pending, source)
-        result
+    ): ApplyResult = withContext(Dispatchers.Default) {
+        lockOf(occurrenceId).withLock {
+            val pending = ArrayList<Pending>()
+            val result = db.withTransaction { applyInTx(occurrenceId, command, source, extras, pending) }
+            if (result is ApplyResult.Applied) runEffects(pending, source)
+            result
+        }
     }
 
     private suspend fun applyInTx(
