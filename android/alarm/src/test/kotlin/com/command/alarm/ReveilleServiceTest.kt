@@ -15,7 +15,9 @@ import androidx.test.core.app.ApplicationProvider
 import com.command.data.OccurrenceRepository
 import com.command.data.db.CommandDb
 import com.command.data.db.OccurrenceRow
+import com.command.data.db.SettingRow
 import com.command.domain.model.EventSource
+import com.command.domain.model.SettingKeys
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.EventType
 import com.command.domain.occurrence.MissReason
@@ -161,6 +163,24 @@ class ReveilleServiceTest {
         assertEquals(OccurrenceState.SCHEDULED, stateOf(o))
         assertTrue(EventType.REJECTED_TRANSITION in eventTypes(o))
         assertTrue("and the service says so itself", EventType.ALARM_FIRED_STALE in eventTypes(o))
+    }
+
+    @Test
+    fun `an alarm that arrives while a pause is on rings nothing and stops, though its occurrence was not yet taken down`() {
+        val o = armed()
+        // The pause is written; the alarms it takes down have not been reached yet.
+        runBlocking {
+            db.settings().put(SettingRow(SettingKeys.GLOBAL_PAUSE_SINCE, clock.nowMs().toString()))
+            db.settings().put(SettingRow(SettingKeys.GLOBAL_PAUSE_UNTIL, (clock.nowMs() + 4 * 3_600_000L).toString()))
+        }
+
+        val service = startService(fireIntent(o)).get()
+
+        awaitUntil(message = "stop") { shadowOf(service).isStoppedBySelf }
+        assertFalse("whatever sounded first is stopped again", output.ringing)
+        assertEquals("it did not ring", OccurrenceState.ARMED, stateOf(o))
+        assertTrue(EventType.ALARM_FIRED_STALE in eventTypes(o))
+        assertFalse(EventType.ALARM_FIRED in eventTypes(o))
     }
 
     @Test
