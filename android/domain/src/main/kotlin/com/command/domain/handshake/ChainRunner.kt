@@ -26,7 +26,8 @@ enum class StepPart { ACKNOWLEDGE, MAIN }
  * says that its own hold was the assistive confirm. [way] counts the times what is on screen for the step has changed (the hold's assistive
  * confirm, a fallback mode, the question that follows a two-step's hold): the tries of each way are numbered from one, so it is part of the
  * identity of a try ([TryId]). [lastMiss] is how the last try on the way that is on screen ended, if it ended wrong (FAILED, or TIMEOUT for a try
- * that took too long): what the screen says under the challenge comes from it, and it is cleared when the way changes.
+ * that took too long): what the screen says under the challenge comes from it, and it is cleared when the way changes. It is only read while
+ * the step is open: a step that passed, or gave out on its last try, keeps what it had and is not on screen again.
  */
 data class StepProgress(
     val position: Int,
@@ -47,7 +48,11 @@ data class StepProgress(
     val shown: HandshakeMode get() = if (part == StepPart.ACKNOWLEDGE) HandshakeMode.HOLD else mode
 }
 
-/** One try, as the record of it will be written: the audit row for a step of a chain, without the times (the screen knows those). */
+/**
+ * One try, as the record of it will be written: the audit row for a step of a chain, without the times (the screen knows those). A row
+ * names the step, the mode and the number of the try on its way, and not the way ([StepProgress.way]): [ChainRunner.restore] works out
+ * the way from the rows that came before.
+ */
 data class Attempt(val position: Int, val mode: HandshakeMode, val attemptNo: Int, val outcome: ChallengeOutcome)
 
 /**
@@ -200,6 +205,13 @@ object ChainRunner {
      * (which replaying the tries produces again) are skipped; a row that does not fit the chain, repeats a try that has been counted, or was
      * made on another mode than the one that is on screen at that point (a copy of the hold's row cannot answer the question that follows
      * it) is skipped too, because an event that is not about the try on screen changes nothing.
+     *
+     * A row is taken for the next try of its step when it has the number and the mode of that try. That is exact for the rows this engine
+     * wrote, each once (the seeded fuzz in the tests replays them after every event), and it is as far as a row can be checked: a row does
+     * not carry the way, so a row that was written twice, the first being a try of a way that has since been left, cannot be told from the
+     * first try of the way that follows when that has the same step, mode and number (a press let go early, repeated after its assistive
+     * confirm began). Keeping that from happening belongs to whoever writes the rows: the rows of an event in one transaction, one event at
+     * a time, and nothing written for an event that is not about the try on screen.
      */
     fun restore(spec: ChainSpec, history: List<Attempt>): ChainState {
         var state = start(spec).state
