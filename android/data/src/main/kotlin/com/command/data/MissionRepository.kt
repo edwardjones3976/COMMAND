@@ -230,14 +230,15 @@ class MissionRepository @Inject constructor(
         val zone = clock.zone()
         // A pause that has run out is closed first, so that what it held back is settled before anything is armed again.
         var pause = PauseStore.read(db)
-        var paused = 0
+        var swallowed = 0
         if (pause != null && pause.isOver(now)) {
-            paused += endPause(pause, now, PauseEnd.EXPIRED)
+            swallowed = endPause(pause, now, PauseEnd.EXPIRED)
             pause = null
         }
         var created = 0
         var discarded = 0
         var repaired = 0
+        var paused = 0
         for (mission in db.missions().enabled().filter { it.source == MissionSource.MANUAL }) {
             val z = zoneOf(mission, zone)
             val wanted = instantsOf(mission, z, now)
@@ -275,14 +276,14 @@ class MissionRepository @Inject constructor(
                 if (occurrences.apply(occ.id, OccurrenceCommand.Arm(armModeNow()), EventSource.SYSTEM) is ApplyResult.Applied) repaired++
             }
         }
-        val report = ReconcileReport(created, discarded, rearmed, lost, missed, precisionChanged, repaired, paused)
+        val report = ReconcileReport(created, discarded, rearmed, lost, missed, precisionChanged, repaired, paused, swallowed)
         if (trigger.alwaysLogged || report.changedAnything) {
             occurrences.logEvent(
                 EventType.BOOT_RECONCILE, null, EventSource.SYSTEM,
                 EventPayload.of(
                     "trigger" to trigger, "created" to created, "discarded" to discarded,
                     "rearmed" to rearmed, "lost" to lost, "missed" to missed, "precision_changed" to precisionChanged, "repaired" to repaired,
-                    "paused" to paused,
+                    "paused" to paused, "swallowed" to swallowed,
                 ),
             )
         }

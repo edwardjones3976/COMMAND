@@ -83,6 +83,11 @@ data class OccurrenceSnapshot(
     val restEndsAtUtc: Long? = null,
     /** The zone the occurrence's times are kept in, for what is said in local terms: "tomorrow, at the same time". */
     val zoneId: String = "UTC",
+    /**
+     * When the global pause in force now ends, or null if there is none (or the occurrence is exempt: a test alarm is asked for on the spot).
+     * An alarm that is delivered while it is set is held back and does not ring, however it got past the taking down of the pause's alarms.
+     */
+    val pausedUntilUtc: Long? = null,
 )
 
 sealed interface TransitionResult {

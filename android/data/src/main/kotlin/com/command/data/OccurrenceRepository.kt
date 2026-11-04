@@ -263,14 +263,17 @@ class OccurrenceRepository @Inject constructor(
         val dials = dialsFor(mission.profileId)
         val lock = MissionLock.effectivePolicy(mission.flexibility, mission.lockPolicy, dials.scheduleRigidity)
         val session = Codec.decodeSession(occ.sessionJson)
+        // A test alarm is the one thing a pause lets through: the person asked for it, there and then.
+        val pausedUntil = if (mission.category == MissionRepository.TEST_CATEGORY) null else PauseStore.active(db, now)?.untilUtcMs
         val snapshot = OccurrenceSnapshot(
             state = occ.state,
             dials = dials,
             lockPolicy = lock,
             recoveryOffers = session.recoveryOffers,
             checkInsAsked = session.checkInsAsked,
-            restEndsAtUtc = restEndsAt(now),
+            restEndsAtUtc = restEndsAt(now, pausedUntil),
             zoneId = occ.zoneId,
+            pausedUntilUtc = pausedUntil,
         )
 
         when (val r = OccurrenceStateMachine.transition(snapshot, command, now)) {
@@ -323,7 +326,6 @@ class OccurrenceRepository @Inject constructor(
                 recordCheckIns(occ, command, r, now)
 
                 val updated = db.occurrences().get(occ.id)!!
-                val pausedUntil = PauseStore.active(db, now)?.untilUtcMs
                 for (effect in r.effects) {
                     when (effect) {
                         is Effect.ArmChild -> {
@@ -448,8 +450,7 @@ class OccurrenceRepository @Inject constructor(
      * When the protected time containing [nowMs] ends, or null if the person is not in any: the end of the rest window they are in or of a
      * global pause, whichever is later. A follow-up question is held back until then.
      */
-    private suspend fun restEndsAt(nowMs: Long): Long? {
-        val pausedUntil = PauseStore.active(db, nowMs)?.untilUtcMs
+    private suspend fun restEndsAt(nowMs: Long, pausedUntil: Long?): Long? {
         val windowEnd = restWindowEndsAt(nowMs)
         return if (pausedUntil == null) windowEnd else maxOf(pausedUntil, windowEnd ?: pausedUntil)
     }

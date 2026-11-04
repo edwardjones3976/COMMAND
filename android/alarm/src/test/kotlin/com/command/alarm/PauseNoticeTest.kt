@@ -147,6 +147,8 @@ class PauseResumeReceiverTest {
         PauseResumeReceiver().onReceive(context, Intent(AlarmContract.ACTION_RESUME_PAUSE))
 
         awaitUntil(message = "the pause to end") { pause() == null }
+        // The pause is forgotten before the platform is told, so the second thing is waited for too.
+        awaitUntil(message = "the platform to be told") { effects.resumptions == 1 }
         assertEquals(1, effects.resumptions)
     }
 

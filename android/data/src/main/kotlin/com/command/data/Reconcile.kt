@@ -32,7 +32,8 @@ enum class ReconcileTrigger {
  * floor, because the probe can miss a removal, see `AlarmScheduler.isArmed`); [precisionChanged] is how many came back with a
  * different precision than they had (an exact alarm that can only be inexact now because the permission was taken away, or the
  * other way round); [repaired] is how many had been stored but never armed (the app stopped between saving and arming) and now are;
- * [paused] is how many a global pause held back in this run (an armed alarm taken down, an occurrence it had held recorded as missed).
+ * [paused] is how many armed alarms a global pause had to take down in this run, and [swallowed] how many occurrences it had held back
+ * were recorded as missed because of it when it ended.
  */
 data class ReconcileReport(
     val created: Int = 0,
@@ -43,6 +44,7 @@ data class ReconcileReport(
     val precisionChanged: Int = 0,
     val repaired: Int = 0,
     val paused: Int = 0,
+    val swallowed: Int = 0,
 ) {
-    val changedAnything: Boolean get() = created + discarded + lost + missed + precisionChanged + repaired + paused > 0
+    val changedAnything: Boolean get() = created + discarded + lost + missed + precisionChanged + repaired + paused + swallowed > 0
 }

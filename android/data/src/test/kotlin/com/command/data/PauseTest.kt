@@ -190,8 +190,28 @@ class PauseTest {
         missions.pause(hour)
 
         val id = missions.testRing()
-
         assertEquals(OccurrenceState.ARMED, f.repo.get(id)!!.state)
+        f.clock.advance(5_000)
+
+        assertTrue("and it rings when it is due", f.repo.apply(id, OccurrenceCommand.Fire, EventSource.SERVICE) is ApplyResult.Applied)
+        assertEquals(OccurrenceState.FIRING, f.repo.get(id)!!.state)
+    }
+
+    @Test
+    fun `an alarm that the platform delivers after the pause began does not ring, whatever the order of the two`() = run {
+        val id = saved(draft(schedule = ScheduleDraft.Once(at(hour))))
+        val o = occurrencesOf(id).single()
+        assertEquals(OccurrenceState.ARMED, o.state)
+        // The pause is written, but the alarms it takes down have not been reached yet.
+        PauseStore.write(f.db, Pause(f.t0, f.t0 + 4 * hour))
+
+        val delivered = f.repo.apply(o.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+
+        assertTrue(delivered is ApplyResult.Rejected)
+        assertEquals("it did not start to ring", OccurrenceState.ARMED, f.repo.get(o.id)!!.state)
+        val report = missions.reconcile(ReconcileTrigger.OPEN)
+        assertEquals("the next reconcile takes it down", 1, report.paused)
+        assertEquals(OccurrenceState.SCHEDULED, f.repo.get(o.id)!!.state)
     }
 
     // --- ending ------------------------------------------------------------------------------------------------
@@ -233,7 +253,8 @@ class PauseTest {
         assertEquals(OccurrenceState.MISSED, o.state)
         assertEquals(MissReason.PAUSED, o.missReason)
         assertEquals(0, report.missed) // the phone was not off; the pause held it back
-        assertEquals(1, report.paused)
+        assertEquals(1, report.swallowed)
+        assertEquals(0, report.paused)
         assertEquals(1, f.pauseEffects.expirations)
         assertEquals(0, f.pauseEffects.resumptions)
         assertNull(missions.observePause().first())

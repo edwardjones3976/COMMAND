@@ -60,10 +60,12 @@ class FakeWorkEnqueuer : WorkEnqueuer {
 
 /** Remembers what a pause asked of the platform: the end of each pause that began, and how many ended by running out or by being ended. */
 class FakePauseEffects : PauseEffects {
-    val startedUntil: MutableList<Long> = ArrayList()
-    var expirations = 0
+    val startedUntil: MutableList<Long> = java.util.Collections.synchronizedList(ArrayList())
+
+    @Volatile var expirations = 0
         private set
-    var resumptions = 0
+
+    @Volatile var resumptions = 0
         private set
 
     override fun started(untilUtcMs: Long) {
