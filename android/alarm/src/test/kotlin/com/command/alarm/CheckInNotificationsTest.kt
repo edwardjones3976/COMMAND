@@ -101,7 +101,7 @@ class CheckInNotificationsTest {
     fun `the poster tags a question by its occurrence, replaces the earlier one, and takes it away on request`() {
         shadowOf(context as android.app.Application).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
         val manager = context.getSystemService(NotificationManager::class.java)
-        val poster = AndroidCheckInPoster(context)
+        val poster = AndroidCheckInPoster(context, ErasureLatch())
 
         poster.post(prompt(id = "occ-1"))
         poster.post(prompt(id = "occ-2", code = 8))
@@ -121,8 +121,35 @@ class CheckInNotificationsTest {
     @Test
     fun `with notifications turned off nothing is posted and nothing breaks`() {
         val manager = context.getSystemService(NotificationManager::class.java)
-        AndroidCheckInPoster(context).post(prompt())
+        AndroidCheckInPoster(context, ErasureLatch()).post(prompt())
         assertNull(shadowOf(manager).getNotification("occ-1", AlarmContract.ID_CHECK_IN))
+    }
+
+    @Test
+    fun `a question that comes up while everything is being erased is not posted, and the title of a mission that is going is not shown`() {
+        shadowOf(context as android.app.Application).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val sealed = ErasureLatch().also { it.seal() }
+
+        AndroidCheckInPoster(context, sealed).post(prompt())
+
+        assertTrue("nothing is posted behind the erase", shadowOf(manager).allNotifications.isEmpty())
+    }
+
+    @Test
+    fun `and one that the erase seals just as it is posted takes itself down again, because the erase cancels the notices once`() {
+        shadowOf(context as android.app.Application).grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        // Open at the first look, closed from the second on: the erase got in between the look and the post.
+        val closesMeanwhile = object : ErasureLatch() {
+            var looks = 0
+            override val sealed: Boolean get() = ++looks > 1
+        }
+
+        AndroidCheckInPoster(context, closesMeanwhile).post(prompt())
+
+        assertTrue("it was posted and then taken down, so nothing is left to sound", shadowOf(manager).allNotifications.isEmpty())
+        assertTrue("and the latch was looked at after the post", closesMeanwhile.looks >= 2)
     }
 
     @Test

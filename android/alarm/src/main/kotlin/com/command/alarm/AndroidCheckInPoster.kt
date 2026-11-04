@@ -16,10 +16,16 @@ import javax.inject.Singleton
 @Singleton
 class AndroidCheckInPoster @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val latch: ErasureLatch,
 ) : CheckInPoster {
 
     override fun post(prompt: CheckInPrompt) {
+        // Everything is being erased: no question about a mission that is going, not even one that was already on its way (a receiver's
+        // delivery is not tracked by RingSession, so the eraser does not wait for it). It looks again after the post: the erase seals first
+        // and cancels the notices after, so a post that the cancel did not see has to take itself down.
+        if (latch.sealed) return
         RingNotifications.post(context, prompt.occurrenceId, AlarmContract.ID_CHECK_IN, CheckInNotifications.question(context, prompt))
+        if (latch.sealed) cancel(prompt.occurrenceId)
     }
 
     override fun cancel(occurrenceId: String) {
