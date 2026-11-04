@@ -282,4 +282,73 @@ class PauseTest {
         assertTrue(f.db.events().ofType(EventType.UNPAUSED).isEmpty())
         assertEquals(0, f.pauseEffects.resumptions)
     }
+
+    // --- what a pause must not get wrong --------------------------------------------------------------------------
+
+    @Test
+    fun `shortening a pause arms again what only the longer one held back`() = run {
+        val id = saved(draft(schedule = ScheduleDraft.Once(at(2 * hour))))
+        missions.pause(12 * hour)
+        assertEquals(OccurrenceState.SCHEDULED, occurrencesOf(id).single().state)
+
+        missions.pause(hour)
+
+        val o = occurrencesOf(id).single()
+        assertEquals(OccurrenceState.ARMED, o.state)
+        assertNotNull(f.scheduler.armed[fireIdentity(o.id)])
+    }
+
+    @Test
+    fun `a test alarm that is waiting is neither taken down by a pause nor by a reconcile inside it`() = run {
+        val id = missions.testRing()
+
+        missions.pause(hour)
+        missions.reconcile(ReconcileTrigger.OPEN)
+
+        assertEquals(OccurrenceState.ARMED, f.repo.get(id)!!.state)
+        assertNotNull(f.scheduler.armed[fireIdentity(id)])
+    }
+
+    @Test
+    fun `renaming a mission during a pause keeps what the pause is holding back, to be settled when it ends`() = run {
+        val daily = ScheduleDraft.Repeating(LocalDate.of(2026, 11, 2), LocalTime.of(10, 0), RRule(Frequency.DAILY))
+        val id = saved(draft(schedule = daily))
+        missions.pause(12 * hour)
+        f.clock.advance(2 * hour) // 11:00: the 10:00 one is due, and held
+
+        missions.save(draft(title = "Renamed", schedule = daily).copy(id = id))
+
+        val held = occurrencesOf(id).first()
+        assertEquals(f.t0 + hour, held.scheduledAtUtc)
+        assertEquals(OccurrenceState.SCHEDULED, held.state)
+        missions.resume()
+        val settled = f.repo.get(held.id)!!
+        assertEquals(OccurrenceState.MISSED, settled.state)
+        assertEquals(MissReason.PAUSED, settled.missReason)
+    }
+
+    @Test
+    fun `an alarm the pause never got to take down is settled as paused too, and not as the phone being off`() = run {
+        val id = saved(draft(schedule = ScheduleDraft.Once(at(2 * hour))))
+        PauseStore.write(f.db, Pause(f.t0, f.t0 + 4 * hour)) // as if the app had stopped before taking it down
+        f.clock.advance(5 * hour)
+
+        missions.reconcile(ReconcileTrigger.PAUSE_ENDED)
+
+        val o = occurrencesOf(id).single()
+        assertEquals(OccurrenceState.MISSED, o.state)
+        assertEquals(MissReason.PAUSED, o.missReason)
+    }
+
+    @Test
+    fun `a reboot clears the notice, so the reconcile after it puts it back, and an ordinary one does not`() = run {
+        missions.pause(4 * hour)
+        assertEquals(1, f.pauseEffects.startedUntil.size)
+
+        missions.reconcile(ReconcileTrigger.OPEN)
+        assertEquals(1, f.pauseEffects.startedUntil.size)
+
+        missions.reconcile(ReconcileTrigger.BOOT)
+        assertEquals(listOf(f.t0 + 4 * hour, f.t0 + 4 * hour), f.pauseEffects.startedUntil)
+    }
 }

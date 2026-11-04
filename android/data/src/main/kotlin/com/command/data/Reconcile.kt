@@ -21,7 +21,10 @@ enum class ReconcileTrigger {
     PAUSE_ENDED,
 
     /** The person ended a pause early. */
-    RESUMED;
+    RESUMED,
+
+    /** A pause was started or moved: the run takes down what it holds back and arms again what a shorter one released. */
+    PAUSE_STARTED;
 
     /** A run the person did not start is worth a line in the audit log even when it found nothing to do. */
     val alwaysLogged: Boolean get() = this != OPEN && this != PERIODIC

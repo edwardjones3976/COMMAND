@@ -158,6 +158,6 @@ class ReconcileWorkerTest {
         assertEquals(MissReason.PAUSED, o.missReason)
         assertNull(runBlocking { missions.observePause().first() })
         assertEquals(1, events(EventType.UNPAUSED).size)
-        assertTrue(events(EventType.BOOT_RECONCILE).single().payloadJson.contains("PAUSE_ENDED"))
+        assertTrue("the run says why it ran", events(EventType.BOOT_RECONCILE).any { it.payloadJson.contains("PAUSE_ENDED") })
     }
 }

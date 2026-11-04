@@ -158,7 +158,13 @@ class MissionRepository @Inject constructor(
         val wanted = instantsOf(row, zone, now)
         // What to leave alone: occurrences at times the new rule still gives, including one that is only just overdue (an
         // alarm the system has not delivered yet must not be lost by renaming its mission).
-        val keep = instantsOf(row, zone, now, lookBackMs = GRACE_MS).toSet()
+        // What a pause is holding back is history in waiting: the ten-minute look-back must not let a rename delete it.
+        val held = PauseStore.active(db, now)?.let { p ->
+            db.occurrences().forMission(row.id)
+                .filter { it.state == OccurrenceState.SCHEDULED && it.scheduledAtUtc >= p.sinceUtcMs && it.scheduledAtUtc < now }
+                .map { it.scheduledAtUtc }
+        }.orEmpty()
+        val keep = instantsOf(row, zone, now, lookBackMs = GRACE_MS).toSet() + held
         val removed = db.withTransaction {
             if (existing == null) db.missions().insert(row) else db.missions().update(row)
             if (existing == null) {
@@ -235,6 +241,8 @@ class MissionRepository @Inject constructor(
             swallowed = endPause(pause, now, PauseEnd.EXPIRED)
             pause = null
         }
+        // A reboot clears the notice in the shade while the pause goes on: it is posted again with the run after the reboot.
+        if (pause != null && (trigger == ReconcileTrigger.BOOT || trigger == ReconcileTrigger.PACKAGE_REPLACED)) pauseEffects.started(pause.untilUtcMs)
         var created = 0
         var discarded = 0
         var repaired = 0
@@ -252,7 +260,7 @@ class MissionRepository @Inject constructor(
         var missed = 0
         var precisionChanged = 0
         for (occ in db.occurrences().inStates(listOf(OccurrenceState.SCHEDULED, OccurrenceState.ARMED))) {
-            if (pause != null && occ.scheduledAtUtc < pause.untilUtcMs) {
+            if (pause != null && occ.scheduledAtUtc < pause.untilUtcMs && occ.missionId != TEST_MISSION_ID) {
                 // The pause holds it back: nothing arms it and nothing misses it; the end of the pause settles it.
                 if (occ.state == OccurrenceState.ARMED && occurrences.apply(occ.id, OccurrenceCommand.Disarm, EventSource.SYSTEM) is ApplyResult.Applied) paused++
                 continue
@@ -309,15 +317,13 @@ class MissionRepository @Inject constructor(
         if (stored != null && stored.isOver(now)) endPause(stored, now, PauseEnd.EXPIRED)
         val pause = Pause(sinceUtcMs = stored?.takeUnless { it.isOver(now) }?.sinceUtcMs ?: now, untilUtcMs = now + forMs)
         PauseStore.write(db, pause)
-        var disarmed = 0
-        for (occ in db.occurrences().inStates(listOf(OccurrenceState.ARMED))) {
-            if (occ.scheduledAtUtc < pause.untilUtcMs && occurrences.apply(occ.id, OccurrenceCommand.Disarm, EventSource.USER) is ApplyResult.Applied) disarmed++
-        }
+        pauseEffects.started(pause.untilUtcMs)
+        // The reconcile under the new pause takes down what it holds back, and arms again what a shorter pause than the one before released.
+        val report = reconcileLocked(ReconcileTrigger.PAUSE_STARTED)
         occurrences.logEvent(
             EventType.PAUSED, null, EventSource.USER,
-            EventPayload.of("since" to pause.sinceUtcMs, "until" to pause.untilUtcMs, "disarmed" to disarmed),
+            EventPayload.of("since" to pause.sinceUtcMs, "until" to pause.untilUtcMs, "disarmed" to report.paused),
         )
-        pauseEffects.started(pause.untilUtcMs)
         pause
     }
 
@@ -342,10 +348,11 @@ class MissionRepository @Inject constructor(
         // Up to the end of the pause, or up to now when the person ended it early.
         val boundary = minOf(pause.untilUtcMs, now)
         var swallowed = 0
-        for (occ in db.occurrences().inStates(listOf(OccurrenceState.SCHEDULED))) {
-            if (occ.scheduledAtUtc >= pause.sinceUtcMs && occ.scheduledAtUtc < boundary &&
-                occurrences.apply(occ.id, OccurrenceCommand.Miss(MissReason.PAUSED), EventSource.SYSTEM) is ApplyResult.Applied
-            ) swallowed++
+        for (occ in db.occurrences().inStates(listOf(OccurrenceState.SCHEDULED, OccurrenceState.ARMED))) {
+            if (occ.missionId == TEST_MISSION_ID || occ.scheduledAtUtc < pause.sinceUtcMs || occ.scheduledAtUtc >= boundary) continue
+            // One the pause never got to take down (the app stopped in between) is taken down first, to be settled as what it was.
+            if (occ.state == OccurrenceState.ARMED && occurrences.apply(occ.id, OccurrenceCommand.Disarm, EventSource.SYSTEM) !is ApplyResult.Applied) continue
+            if (occurrences.apply(occ.id, OccurrenceCommand.Miss(MissReason.PAUSED), EventSource.SYSTEM) is ApplyResult.Applied) swallowed++
         }
         PauseStore.clear(db)
         occurrences.logEvent(EventType.UNPAUSED, null, EventSource.SYSTEM, EventPayload.of("how" to how, "swallowed" to swallowed))
