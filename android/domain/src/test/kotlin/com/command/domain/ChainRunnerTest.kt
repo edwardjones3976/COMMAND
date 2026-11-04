@@ -114,7 +114,7 @@ class ChainRunnerTest {
         assertEquals(ChainStatus.RUNNING, run.state.status)
         assertTrue(run.state.step!!.assistive)
         assertEquals("a fresh allowance for the new way", 3, run.state.triesLeft)
-        assertEquals("and its tries are numbered from one", TryId(0, 1), run.state.tryOnScreen)
+        assertEquals("and its tries are numbered from one, on a way of their own", TryId(0, 1, 1), run.state.tryOnScreen)
         run.assist()
         assertEquals(row(0, HOLD, 1, ACCESSIBLE_ALT), run.rows.last())
         assertEquals(ChainStatus.SATISFIED, run.state.status)
@@ -321,7 +321,7 @@ class ChainRunnerTest {
         assertEquals(1, run.state.current)
         assertEquals("typing acknowledged the alarm, so the two-step only asks what comes first", StepPart.MAIN, run.state.step!!.part)
         assertEquals(HandshakeMode.TWO_STEP, run.state.shown)
-        assertEquals(TryId(1, 1), run.state.tryOnScreen)
+        assertEquals(TryId(1, 1, 1), run.state.tryOnScreen)
         assertFalse(run.state.firstActionIndicated)
 
         run.pass()
@@ -345,7 +345,7 @@ class ChainRunnerTest {
         assertEquals("acknowledged, and the question is still to be answered", ChainStatus.RUNNING, run.state.status)
         assertEquals(StepPart.MAIN, run.state.step!!.part)
         assertEquals(TWO_STEP, run.state.shown)
-        assertEquals("the question has tries of its own, from one", TryId(0, 1), run.state.tryOnScreen)
+        assertEquals("the question has tries of its own, from one, on a way of its own", TryId(0, 1, 1), run.state.tryOnScreen)
         assertFalse(run.state.firstActionIndicated)
 
         run.pass()
@@ -525,7 +525,107 @@ class ChainRunnerTest {
         val after = changed.state
         changed.send(ChainEvent.Failed(stale))
         assertSame(after, changed.state)
-        assertEquals(TryId(0, 1), changed.state.tryOnScreen)
+        assertEquals(TryId(0, 1, 1), changed.state.tryOnScreen)
+    }
+
+    // --- a try is identified by its way as well ---------------------------------------------------------------------
+
+    @Test
+    fun `a repeated event about the hold in front of a two-step is not taken for the answer to its question`() {
+        val run = Run(spec(ChainOp.OR, TWO_STEP, retries = 2))
+        val hold = run.here()
+
+        run.send(ChainEvent.Passed(hold)).send(ChainEvent.Passed(hold)) // the same press, delivered twice
+
+        assertEquals(listOf(row(0, HOLD, 1, SUCCESS)), run.rows)
+        assertEquals("the question is still waiting for its answer", ChainStatus.RUNNING, run.state.status)
+        assertFalse("and nothing was said about what comes first", run.state.firstActionIndicated)
+        assertEquals(StepPart.MAIN, run.state.step!!.part)
+        assertEquals("the question has an identity of its own", TryId(0, 1, 1), run.state.tryOnScreen)
+        assertTrue(hold != run.state.tryOnScreen)
+    }
+
+    @Test
+    fun `a late event about a way the step has left is not taken for a try of the way that took its place`() {
+        // The press is used up and the assistive confirm takes its place: a late release of the press's first try is not the confirm's first try.
+        val hold = Run(spec(ChainOp.OR, HOLD, retries = 2))
+        val press = hold.here()
+        hold.fail(2)
+        val onTheConfirm = hold.state
+        assertTrue(onTheConfirm.step!!.assistive)
+        hold.send(ChainEvent.Failed(press))
+        assertSame("a try of the press cannot use up a try of the confirm", onTheConfirm, hold.state)
+
+        // The same for a fallback: typing is used up and the numbers take its place.
+        val typing = Run(spec(ChainOp.OR, TYPING, retries = 2))
+        val phrase = typing.here()
+        typing.fail(2)
+        val onTheNumbers = typing.state
+        assertEquals(CONFIRM_SEQUENCE, onTheNumbers.shown)
+        typing.send(ChainEvent.Failed(phrase)).send(ChainEvent.TimedOut(phrase)).send(ChainEvent.Passed(phrase))
+        assertSame("a try of typing cannot be a try of the numbers", onTheNumbers, typing.state)
+        assertEquals(3, typing.rows.size)
+    }
+
+    @Test
+    fun `a step remembers how its last try ended until its way changes, and a replay leads to the same memory`() {
+        val run = Run(spec(ChainOp.OR, TYPING, retries = 3))
+        assertNull(run.state.step!!.lastMiss)
+
+        run.fail()
+        assertEquals(FAILED, run.state.step!!.lastMiss)
+        run.timeOut()
+        assertEquals("a try that took too long is not a wrong one", TIMEOUT, run.state.step!!.lastMiss)
+        assertEquals(run.state, ChainRunner.restore(run.spec, run.rows))
+
+        run.fail() // the third try: typing is used up, and the numbers take its place
+        assertEquals(CONFIRM_SEQUENCE, run.state.shown)
+        assertNull("a new way starts clean", run.state.step!!.lastMiss)
+        assertEquals(run.state, ChainRunner.restore(run.spec, run.rows))
+
+        val press = Run(spec(ChainOp.OR, HOLD, retries = 2)).fail(2) // the press is used up and the three taps take its place
+        assertTrue(press.state.step!!.assistive)
+        assertNull("the confirm starts clean too", press.state.step!!.lastMiss)
+        assertEquals(press.state, ChainRunner.restore(press.spec, press.rows))
+
+        val hold = Run(spec(ChainOp.OR, HOLD, retries = 2)).fail().pass()
+        assertNull("a step that passed has nothing wrong to remember on screen", hold.state.step)
+        assertEquals(FAILED, hold.state.steps[0].lastMiss)
+    }
+
+    @Test
+    fun `a step that another step acknowledged asks its question under an identity of its own`() {
+        val run = Run(spec(ChainOp.SEQUENCE, TYPING, TWO_STEP))
+        val waiting = run.state.steps[1]
+
+        run.pass()
+
+        assertEquals(StepPart.MAIN, run.state.step!!.part)
+        assertTrue("the two-step's way changed when typing acknowledged the alarm", run.state.step!!.way > waiting.way)
+    }
+
+    @Test
+    fun `a replay counts only the rows that were made on the way that is on screen`() {
+        // Two copies of the hold's row do not answer the question that follows it.
+        val chain = spec(ChainOp.OR, TWO_STEP, retries = 2)
+        val twice = listOf(row(0, HOLD, 1, SUCCESS), row(0, HOLD, 1, SUCCESS))
+        val restored = ChainRunner.restore(chain, twice)
+        assertEquals(ChainStatus.RUNNING, restored.status)
+        assertEquals(StepPart.MAIN, restored.step!!.part)
+        assertFalse(restored.firstActionIndicated)
+        assertEquals(ChainRunner.restore(chain, twice.take(1)), restored)
+
+        // A row for typing does not count on a step that asks for a hold, whatever its numbers.
+        val hold = spec(ChainOp.OR, HOLD)
+        assertEquals(ChainRunner.start(hold).state, ChainRunner.restore(hold, listOf(row(0, TYPING, 1, FAILED), row(0, TYPING, 1, SUCCESS))))
+
+        // After a change of mode, a row of the mode that was left cannot count on the new one.
+        val live = Run(spec(ChainOp.OR, TYPING, retries = 2)).fail(2)
+        assertEquals(live.state, ChainRunner.restore(live.spec, live.rows + row(0, TYPING, 1, SUCCESS)))
+
+        // And a row that was refused does not leave its mark on the state: it is as if it had not been written.
+        val mixed = listOf(row(0, HOLD, 1, FAILED), row(0, TYPING, 2, FAILED), row(0, HOLD, 2, FAILED))
+        assertEquals(ChainRunner.restore(hold, listOf(mixed[0], mixed[2])), ChainRunner.restore(hold, mixed))
     }
 
     // --- the record is the truth -----------------------------------------------------------------------------------
@@ -557,13 +657,19 @@ class ChainRunnerTest {
             var state = start.state
             val history = ArrayList<Attempt>(start.attempts)
             var events = 0
+            val seen = HashMap<Int, HashSet<TryId>>()
+            val lastSeen = HashMap<Int, TryId>()
+            state.tryOnScreen?.let { first ->
+                seen.getOrPut(first.position) { HashSet() }.add(first)
+                lastSeen[first.position] = first
+            }
             // Turning to another step leaves no row until the person does something there, so the step that was on screen is not part of
             // the record until then; everything else is.
             var turnedWithoutAct = false
             while (state.status == ChainStatus.RUNNING && events++ < 80) {
                 val here = state.tryOnScreen!!
                 // One event in ten is about some other try: a duplicate, a late timer, a screen that was recreated.
-                val at = if (next(10) == 0) TryId(next(chain.steps.size), 1 + next(4)) else here
+                val at = if (next(10) == 0) TryId(next(chain.steps.size), 1 + next(4), next(3)) else here
                 val event = when (next(20)) {
                     in 0..8 -> ChainEvent.Failed(at)
                     in 9..11 -> ChainEvent.TimedOut(at)
@@ -576,6 +682,14 @@ class ChainRunnerTest {
                     throw AssertionError("an event about $at changed the state while $here was on screen: $event")
                 }
                 if (event !is ChainEvent.Switch && at != here) ignored++
+                step.state.tryOnScreen?.let { now ->
+                    // The tries of every way are numbered from one, so what makes a try this one and no other is its identity: it is never
+                    // used again for the same step, turning away and back being the same try and not a new one.
+                    if (lastSeen[now.position] != now) {
+                        assertTrue("round $round: $now was on screen before", seen.getOrPut(now.position) { HashSet() }.add(now))
+                        lastSeen[now.position] = now
+                    }
+                }
                 if (step.state.current != state.current && step.attempts.isEmpty()) turnedWithoutAct = true
                 if (step.attempts.isNotEmpty()) turnedWithoutAct = false
                 state = step.state
@@ -637,6 +751,6 @@ class ChainRunnerTest {
 
         assertEquals(live.state, restored)
         assertEquals(StepPart.MAIN, restored.step!!.part)
-        assertEquals("the question begins its tries again", TryId(0, 1), restored.tryOnScreen)
+        assertEquals("the question begins its tries again", TryId(0, 1, 1), restored.tryOnScreen)
     }
 }

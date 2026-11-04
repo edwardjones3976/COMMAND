@@ -23,7 +23,10 @@ enum class StepPart { ACKNOWLEDGE, MAIN }
  * asked for yet, or one the person ran out of tries on). [assistive] is the hold's own way for a person who cannot hold a finger down: three
  * deliberate taps in place of the press. [attempts] counts the tries made on the part and mode that are on offer. [acknowledged] is a
  * two-step's: the acknowledgement it needs has been given, by a hold of its own or by another step that passed, and [acknowledgedAssistively]
- * says that its own hold was the assistive confirm.
+ * says that its own hold was the assistive confirm. [way] counts the times what is on screen for the step has changed (the hold's assistive
+ * confirm, a fallback mode, the question that follows a two-step's hold): the tries of each way are numbered from one, so it is part of the
+ * identity of a try ([TryId]). [lastMiss] is how the last try on the way that is on screen ended, if it ended wrong (FAILED, or TIMEOUT for a try
+ * that took too long): what the screen says under the challenge comes from it, and it is cleared when the way changes.
  */
 data class StepProgress(
     val position: Int,
@@ -35,6 +38,8 @@ data class StepProgress(
     val passedAssistively: Boolean = false,
     val acknowledged: Boolean = false,
     val acknowledgedAssistively: Boolean = false,
+    val way: Int = 0,
+    val lastMiss: ChallengeOutcome? = null,
 ) {
     val part: StepPart get() = if (mode == HandshakeMode.TWO_STEP && !acknowledged) StepPart.ACKNOWLEDGE else StepPart.MAIN
 
@@ -46,11 +51,12 @@ data class StepProgress(
 data class Attempt(val position: Int, val mode: HandshakeMode, val attemptNo: Int, val outcome: ChallengeOutcome)
 
 /**
- * The try an event is about: the step, and which try on it ([ChainState.tryOnScreen] says what is on screen now). An event that is not
- * about the try on screen is a duplicate or a late one (a double tap, a timer that outlived a switch, a screen that was recreated) and
- * changes nothing.
+ * The try an event is about: the step, which way it is on ([StepProgress.way]: the tries of each way are numbered from one, so a repeated
+ * event about the hold in front of a two-step must not be taken for its first try at the question), and which try on that way
+ * ([ChainState.tryOnScreen] says what is on screen now). An event that is not about the try on screen is a duplicate or a late one (a
+ * double tap, a timer that outlived a switch, a screen that was recreated) and changes nothing.
  */
-data class TryId(val position: Int, val tryNo: Int)
+data class TryId(val position: Int, val tryNo: Int, val way: Int = 0)
 
 /** What a person did on the try that is on screen. */
 sealed interface ChainEvent {
@@ -81,7 +87,7 @@ data class ChainState(val spec: ChainSpec, val steps: List<StepProgress>, val cu
     val step: StepProgress? get() = steps.getOrNull(current)
 
     /** The try that is on screen, which is what an event has to be about: the screen hands it back with each thing the person does. */
-    val tryOnScreen: TryId? get() = step?.let { TryId(it.position, it.attempts + 1) }
+    val tryOnScreen: TryId? get() = step?.let { TryId(it.position, it.attempts + 1, it.way) }
 
     /** The challenge on screen: the step's mode, or the hold that a two-step begins with. Null once the chain is over. */
     val shown: HandshakeMode? get() = step?.shown
@@ -191,25 +197,30 @@ object ChainRunner {
 
     /**
      * The state that the rows of a ring lead to. Rows that no event produced (a silence, a cancellation) and the notes of a change of mode
-     * (which replaying the tries produces again) are skipped; a row that does not fit the chain, or repeats a try that has been counted, is
-     * skipped too, because an event that is not about the try on screen changes nothing.
+     * (which replaying the tries produces again) are skipped; a row that does not fit the chain, repeats a try that has been counted, or was
+     * made on another mode than the one that is on screen at that point (a copy of the hold's row cannot answer the question that follows
+     * it) is skipped too, because an event that is not about the try on screen changes nothing.
      */
     fun restore(spec: ChainSpec, history: List<Attempt>): ChainState {
         var state = start(spec).state
         for (row in history) {
             if (state.status != ChainStatus.RUNNING) break
-            val at = TryId(row.position, row.attemptNo)
+            if (row.outcome == ChallengeOutcome.FALLBACK || row.outcome == ChallengeOutcome.CANCELLED || row.outcome == ChallengeOutcome.SAFETY_SILENCE) continue
+            // The try the row is about: the next try of the way that is on screen for its step. Anything else is not a try of this chain.
+            val target = state.steps.getOrNull(row.position) ?: continue
+            if (target.status != StepStatus.OPEN || row.attemptNo != target.attempts + 1 || row.mode != target.shown) continue
+            if (row.position != state.current) {
+                val moved = advance(state, ChainEvent.Switch(row.position)).state
+                if (moved.current != row.position) continue
+                state = moved
+            }
+            val at = state.tryOnScreen ?: continue
             val event = when (row.outcome) {
                 ChallengeOutcome.SUCCESS -> ChainEvent.Passed(at)
                 ChallengeOutcome.ACCESSIBLE_ALT -> ChainEvent.PassedAssistively(at)
                 ChallengeOutcome.FAILED -> ChainEvent.Failed(at)
                 ChallengeOutcome.TIMEOUT -> ChainEvent.TimedOut(at)
-                ChallengeOutcome.FALLBACK, ChallengeOutcome.CANCELLED, ChallengeOutcome.SAFETY_SILENCE -> continue
-            }
-            if (row.position != state.current) {
-                val moved = advance(state, ChainEvent.Switch(row.position)).state
-                if (moved.current != row.position) continue
-                state = moved
+                else -> continue
             }
             state = advance(state, event).state
         }
@@ -221,14 +232,14 @@ object ChainRunner {
         val row = Attempt(step.position, step.shown, attemptNo, if (assistive) ChallengeOutcome.ACCESSIBLE_ALT else ChallengeOutcome.SUCCESS)
         if (step.part == StepPart.ACKNOWLEDGE) {
             // The hold that a two-step begins with: the alarm is acknowledged, and what comes first is still to be said.
-            val held = step.copy(acknowledged = true, acknowledgedAssistively = assistive, attempts = 0, assistive = false)
+            val held = step.copy(acknowledged = true, acknowledgedAssistively = assistive, attempts = 0, assistive = false, way = step.way + 1, lastMiss = null)
             return ChainAdvance(state.copy(steps = state.steps.replacing(held)), listOf(row))
         }
         val passed = step.copy(attempts = attemptNo, status = StepStatus.PASSED, passedAssistively = assistive)
         // A step that passed has acknowledged the alarm for any two-step that is still to come: it need not begin with a hold of its own.
         val steps = state.steps.replacing(passed).map {
             if (it.mode == HandshakeMode.TWO_STEP && it.status == StepStatus.OPEN && !it.acknowledged) {
-                it.copy(acknowledged = true, attempts = 0, assistive = false)
+                it.copy(acknowledged = true, attempts = 0, assistive = false, way = it.way + 1, lastMiss = null)
             } else {
                 it
             }
@@ -240,7 +251,7 @@ object ChainRunner {
         val used = step.attempts + 1
         val rows = arrayListOf(Attempt(step.position, step.shown, used, outcome))
         if (used < state.allowance(step.position)) {
-            return ChainAdvance(state.copy(steps = state.steps.replacing(step.copy(attempts = used))), rows)
+            return ChainAdvance(state.copy(steps = state.steps.replacing(step.copy(attempts = used, lastMiss = outcome))), rows)
         }
         val replacement = replacementFor(step.copy(attempts = used))
         if (replacement != null) {
@@ -256,11 +267,11 @@ object ChainRunner {
      * fallback, once; nothing is left after that.
      */
     private fun replacementFor(step: StepProgress): StepProgress? = when {
-        step.shown == HandshakeMode.HOLD && !step.assistive -> step.copy(assistive = true, attempts = 0)
+        step.shown == HandshakeMode.HOLD && !step.assistive -> step.copy(assistive = true, attempts = 0, way = step.way + 1, lastMiss = null)
         step.part == StepPart.ACKNOWLEDGE -> null
         step.mode != HandshakeMode.HOLD && !step.changedMode -> {
             val next = step.mode.fallback.offered
-            if (next == step.mode) null else step.copy(mode = next, assistive = false, attempts = 0, changedMode = true)
+            if (next == step.mode) null else step.copy(mode = next, assistive = false, attempts = 0, changedMode = true, way = step.way + 1, lastMiss = null)
         }
         else -> null
     }
