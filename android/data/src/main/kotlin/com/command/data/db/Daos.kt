@@ -93,6 +93,10 @@ interface OccurrenceDao {
     @Query("SELECT * FROM occurrences WHERE mission_id = :missionId ORDER BY scheduled_at_utc")
     suspend fun forMission(missionId: String): List<OccurrenceRow>
 
+    /** Every occurrence there is, for the one job that has to reach all of them: taking back every alarm before everything is erased. */
+    @Query("SELECT * FROM occurrences ORDER BY scheduled_at_utc")
+    suspend fun all(): List<OccurrenceRow>
+
     @Query("SELECT * FROM occurrences WHERE state IN (:states) ORDER BY scheduled_at_utc")
     suspend fun inStates(states: List<OccurrenceState>): List<OccurrenceRow>
 

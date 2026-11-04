@@ -27,6 +27,7 @@ import com.command.onboarding.WelcomeScreen
 import com.command.reliability.ReliabilityRoute
 import com.command.schedule.ScheduleRoute
 import com.command.settings.SettingsRoute
+import com.command.yourdata.DataRoute
 
 object Routes {
     const val WELCOME = "welcome"
@@ -37,6 +38,7 @@ object Routes {
     const val CONSENTS = "consents"
     const val HISTORY = "history"
     const val SETTINGS = "settings"
+    const val DATA = "data"
     const val ARG_ID = "id"
     private const val DETAIL = "detail"
     private const val EDITOR = "mission"
@@ -127,8 +129,10 @@ private fun CommandNavHost(
                 onOpenHistory = { navController.navigate(Routes.HISTORY) },
                 onOpenReliability = { navController.navigate(Routes.RELIABILITY) },
                 onOpenConsents = { navController.navigate(Routes.CONSENTS) },
+                onOpenData = { navController.navigate(Routes.DATA) },
             )
         }
+        composable(Routes.DATA) { DataRoute(onBack = { navController.popBackStack() }) }
         composable(
             Routes.DETAIL_PATTERN,
             arguments = listOf(navArgument(Routes.ARG_ID) { type = NavType.StringType }),

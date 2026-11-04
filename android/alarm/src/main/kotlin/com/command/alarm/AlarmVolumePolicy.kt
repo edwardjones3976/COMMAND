@@ -118,6 +118,16 @@ class AlarmVolumePolicy @Inject constructor(
         undo(only = null)
     }
 
+    /**
+     * Puts the volume back now, whatever is ringing: for erasing everything, which has ended every ring first and is about to delete the
+     * record that says what the volume was. False when the record is still there afterwards, because the platform refused to put the
+     * volume back: nothing will put it back later once the record is gone, so the caller says so.
+     */
+    suspend fun restoreNow(): Boolean = lock.withLock {
+        undo(only = null)
+        settings.volumeRestore() == null
+    }
+
     private suspend fun undo(only: String?) {
         val record = settings.volumeRestore() ?: return
         if (only != null && record.occurrenceId != only) return

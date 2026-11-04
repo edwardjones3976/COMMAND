@@ -24,6 +24,7 @@ import com.command.settings.SettingsTags
 import com.command.testing.android.FakeAlarmModule
 import com.command.testing.android.awaitUntil
 import com.command.testing.android.testMission
+import com.command.yourdata.DataTags
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
@@ -117,6 +118,29 @@ class HistoryAndSettingsNavigationTest {
 
         tap(SettingsTags.LINK_HISTORY)
         waitFor(HistoryTags.EMPTY)
+        controller.pause().stop().destroy()
+    }
+
+    @Test
+    fun `from Settings to Your data, where a copy and the erase are offered with what there is, and the erase only asks`() {
+        started("Morning pages")
+        val controller = open()
+
+        tap(ScheduleTags.LINK_SETTINGS)
+        tap(SettingsTags.LINK_DATA)
+        waitFor(DataTags.COUNTS)
+        compose.onNodeWithText("Right now: 1 mission, 1 alarm with what happened to it and ", substring = true).assertIsDisplayed()
+        compose.onNodeWithTag(DataTags.SAVE).assertIsDisplayed()
+
+        tap(DataTags.ERASE)
+        waitFor(DataTags.ERASE_DIALOG)
+        compose.onNodeWithText("Erase everything?").assertIsDisplayed()
+        tap(DataTags.ERASE_KEEP)
+        compose.waitUntil(timeoutMillis = 30_000) { !exists(DataTags.ERASE_DIALOG) }
+        assertEquals("keeping the data left the alarm where it was", 1, runBlocking { db.occurrences().count() })
+
+        back(controller)
+        waitFor(SettingsTags.LINK_DATA)
         controller.pause().stop().destroy()
     }
 

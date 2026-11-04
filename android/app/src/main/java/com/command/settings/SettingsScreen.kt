@@ -53,6 +53,7 @@ object SettingsTags {
     const val LINK_HISTORY = "settings_link_history"
     const val LINK_RELIABILITY = "settings_link_reliability"
     const val LINK_CONSENTS = "settings_link_consents"
+    const val LINK_DATA = "settings_link_data"
     const val PAUSE_1H = "settings_pause_1h"
     const val PAUSE_4H = "settings_pause_4h"
     const val PAUSE_12H = "settings_pause_12h"
@@ -67,6 +68,7 @@ fun SettingsRoute(
     onOpenHistory: () -> Unit,
     onOpenReliability: () -> Unit,
     onOpenConsents: () -> Unit,
+    onOpenData: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -77,6 +79,7 @@ fun SettingsRoute(
         onOpenHistory = onOpenHistory,
         onOpenReliability = onOpenReliability,
         onOpenConsents = onOpenConsents,
+        onOpenData = onOpenData,
         version = com.example.BuildConfig.VERSION_NAME,
         onPause = viewModel::pauseFor,
         onEndPause = viewModel::endPause,
@@ -98,6 +101,7 @@ fun SettingsScreen(
     onEndPause: () -> Unit = {},
     zone: ZoneId = ZoneId.systemDefault(),
     today: LocalDate = LocalDate.now(zone),
+    onOpenData: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -151,6 +155,7 @@ fun SettingsScreen(
                 item { Link(R.string.settings_link_history, onOpenHistory, SettingsTags.LINK_HISTORY) }
                 item { Link(R.string.settings_link_reliability, onOpenReliability, SettingsTags.LINK_RELIABILITY) }
                 item { Link(R.string.settings_link_consents, onOpenConsents, SettingsTags.LINK_CONSENTS) }
+                item { Link(R.string.settings_link_data, onOpenData, SettingsTags.LINK_DATA) }
                 item {
                     Column(Modifier.padding(top = 16.dp).testTag(SettingsTags.ABOUT), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(stringResource(R.string.settings_about_title), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
