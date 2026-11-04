@@ -15,9 +15,10 @@ enum class HandshakeMode {
         }
 
     /**
-     * Whether a person can be asked for this challenge today. Hold, the confirmation sequence, typing and two-step are built and tested; QR,
-     * NFC and voice are planned (each needs a camera, a tag reader or a microphone, and its own consent) and stay marked as planned until
-     * their tests pass (spec section 4). A chain that names one is run with the mode [offered] in its place, and the record says so.
+     * Whether a person can be asked for this challenge today. Hold, the confirmation sequence, typing and two-step have their rules built
+     * and tested in :domain (the screens that ask for them belong to the app); QR, NFC and voice are planned (each needs a camera, a tag
+     * reader or a microphone, and its own consent) and stay marked as planned until their tests pass (spec section 4). A chain that names
+     * one is run with the mode [offered] in its place, and the record says so.
      */
     val available: Boolean
         get() = when (this) {

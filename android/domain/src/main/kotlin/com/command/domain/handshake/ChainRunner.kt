@@ -143,7 +143,10 @@ data class ChainState(val spec: ChainSpec, val steps: List<StepProgress>, val cu
  * replaced by its fallback ([HandshakeMode.fallback]) with a fresh allowance. When that is used up too the step is stuck: in OR the chain
  * turns to any other open step, in AND and SEQUENCE the chain is out of tries (the alarm goes on ringing until its time is up; the person
  * can always silence it, and Back offers the delay and the skip). The assistive confirm is bounded like everything else: the allowance is
- * what makes the chain end, and a person who cannot do it still has the silence, the delay and the skip.
+ * what makes the chain end, and a person who cannot do it still has the silence, the delay and the skip. It may also be offered, and
+ * taken, before the tries on the press are used up ([ChainEvent.PassedAssistively] is accepted for any hold that is on screen): a person
+ * with a screen reader or a keyboard cannot press and hold, and making them fail the press first would be no kindness. Either way it is
+ * recorded as the accessible alternative, never as a plain success.
  *
  * *Events are about a try.* Each carries the [TryId] of the try it was produced for, and an event that is not about the try on screen (a
  * second tap on a button that has already been answered, a timer that outlived a switch to another step) changes nothing, so that a
