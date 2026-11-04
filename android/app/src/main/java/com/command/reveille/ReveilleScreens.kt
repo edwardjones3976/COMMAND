@@ -149,9 +149,9 @@ private fun EscapeSheet(actions: ReveilleActions, onDismiss: () -> Unit) {
         modifier = Modifier.testTag(ReveilleTags.ESCAPE),
         title = { Text(stringResource(R.string.reveille_escape_title)) },
         text = {
-            // It scrolls, so that a very large font cannot push the buttons out of reach.
+            // It scrolls, so that a very large font cannot push the buttons out of reach, and the choices come first: on a phone on its
+            // side at twice the type size the explanation filled the window and the silence was below it.
             Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(stringResource(R.string.reveille_escape_body), style = MaterialTheme.typography.bodyMedium)
                 OutlinedButton(
                     onClick = actions.onSilence,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(ReveilleTags.ESCAPE_SILENCE),
@@ -172,6 +172,7 @@ private fun EscapeSheet(actions: ReveilleActions, onDismiss: () -> Unit) {
                 OutlinedButton(onClick = actions.onSkip, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(ReveilleTags.ESCAPE_SKIP)) {
                     Text(stringResource(R.string.reveille_escape_skip), style = MaterialTheme.typography.labelLarge)
                 }
+                Text(stringResource(R.string.reveille_escape_body), style = MaterialTheme.typography.bodyMedium)
             }
         },
         confirmButton = {

@@ -105,6 +105,24 @@ class ReveilleLargeTypeTest {
     }
 
     @Test
+    @Config(fontScale = 2f, qualifiers = "ldrtl-w360dp-h640dp-xxhdpi")
+    fun `the delay choices are read whole at twice the type size when the text runs from right to left`() {
+        showWayOut()
+        assertRead(2f)
+    }
+
+    @Test
+    @Config(fontScale = 2f, qualifiers = "w640dp-h360dp-land-xxhdpi")
+    fun `with the phone on its side at twice the type size every way out can still be reached`() {
+        showWayOut()
+
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_SILENCE).assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_KEEP).assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_SKIP).performScrollTo().assertIsDisplayed()
+        for (minutes in listOf(10, 30, 60)) compose.onNodeWithTag(ReveilleTags.escapeDelay(minutes)).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
     @Config(fontScale = 2f)
     fun `at twice the type size every way out can still be reached`() {
         showWayOut()
