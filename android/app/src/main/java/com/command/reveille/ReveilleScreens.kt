@@ -141,9 +141,10 @@ fun ReveilleContent(
  * What Back offers while the alarm rings. Silence needs nothing from the person. Delay and Skip are answered by the mission's own Mission
  * Lock: a fixed commitment asks for a confirmation or a reason first (the friction dialog opens over this one), a flexible one does not.
  *
- * The silence is in the row of actions at the bottom, beside Keep ringing, and not among the choices: the choices scroll (a very large font
- * would push them out of reach), and a silence that scrolled with them could be scrolled out of sight. The row never scrolls; where the two
- * buttons do not fit side by side it wraps, and both are still there.
+ * The silence is one of the dialog's two actions, beside Keep ringing, and not among the choices: the choices scroll (a very large font
+ * would push them out of reach), and a silence that scrolled with them could be scrolled out of sight. The actions never scroll, and the
+ * dialog lays them out in a flow row of its own, which wraps where they do not fit side by side. (The question over this one builds its
+ * own FlowRow for its two, because Material gives a dialog only two action slots.)
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable

@@ -154,6 +154,25 @@ class ReveilleLargeTypeTest {
     }
 
     @Test
+    @Config(fontScale = 2f, qualifiers = "ldrtl-w360dp-h640dp-xxhdpi")
+    fun `at twice the type size with the text running from right to left the silence is still in view when the choices have been scrolled to the end`() {
+        showWayOut()
+
+        compose.onNode(hasText("Choose what is true", substring = true)).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_SILENCE).assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_KEEP).assertIsDisplayed()
+    }
+
+    @Test
+    @Config(fontScale = 2f, qualifiers = "ldrtl-w360dp-h640dp-xxhdpi")
+    fun `at twice the type size with the text running from right to left the silence of a question is still in view when the reasons have been scrolled to the end`() {
+        showWayOut(friction = FrictionPrompt(LockPolicy.REASON) { })
+
+        compose.onNodeWithText("Other").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.FRICTION_SILENCE).assertIsDisplayed()
+    }
+
+    @Test
     @Config(fontScale = 2f, qualifiers = "w640dp-h360dp-land-xxhdpi")
     fun `with the phone on its side at twice the type size the silence is still in view when the choices have been scrolled to the end`() {
         showWayOut()
