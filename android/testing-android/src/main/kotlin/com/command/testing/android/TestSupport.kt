@@ -132,8 +132,12 @@ class FakeSpeaker : Speaker {
         return result
     }
 
+    /** Runs when the engine is asked to get ready, so that a test can look at what else has happened by then (and not by when it asks). */
+    var onPrepare: () -> Unit = {}
+
     override fun prepare() {
         prepares++
+        onPrepare()
     }
 
     override fun stop() {
