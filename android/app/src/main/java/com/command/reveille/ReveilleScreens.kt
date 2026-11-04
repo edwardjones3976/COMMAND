@@ -140,6 +140,11 @@ fun ReveilleContent(
 /**
  * What Back offers while the alarm rings. Silence needs nothing from the person. Delay and Skip are answered by the mission's own Mission
  * Lock: a fixed commitment asks for a confirmation or a reason first (the friction dialog opens over this one), a flexible one does not.
+ *
+ * The silence is one of the dialog's two actions, beside Keep ringing, and not among the choices: the choices scroll (a very large font
+ * would push them out of reach), and a silence that scrolled with them could be scrolled out of sight. The actions never scroll, and the
+ * dialog lays them out in a flow row of its own, which wraps where they do not fit side by side. (The question over this one builds its
+ * own FlowRow for its two, because Material gives a dialog only two action slots.)
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -149,14 +154,8 @@ private fun EscapeSheet(actions: ReveilleActions, onDismiss: () -> Unit) {
         modifier = Modifier.testTag(ReveilleTags.ESCAPE),
         title = { Text(stringResource(R.string.reveille_escape_title)) },
         text = {
-            // It scrolls, so that a very large font cannot push the buttons out of reach, and the choices come first: on a phone on its
-            // side at twice the type size the explanation filled the window and the silence was below it.
+            // It scrolls, so that a very large font cannot push the choices out of reach.
             Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(
-                    onClick = actions.onSilence,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(ReveilleTags.ESCAPE_SILENCE),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                ) { Text(stringResource(R.string.reveille_escape_silence), style = MaterialTheme.typography.labelLarge) }
                 Text(stringResource(R.string.reveille_escape_delay_title), style = MaterialTheme.typography.labelLarge)
                 // The three delays wrap onto another line when they do not fit side by side, so that large type never squeezes a label until
                 // it breaks inside a word ('mi' and 'n' at twice the size on a 360 dp phone, when they shared the width equally).
@@ -179,6 +178,13 @@ private fun EscapeSheet(actions: ReveilleActions, onDismiss: () -> Unit) {
             TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 56.dp).testTag(ReveilleTags.ESCAPE_KEEP)) {
                 Text(stringResource(R.string.reveille_escape_keep))
             }
+        },
+        dismissButton = {
+            OutlinedButton(
+                onClick = actions.onSilence,
+                modifier = Modifier.heightIn(min = 56.dp).testTag(ReveilleTags.ESCAPE_SILENCE),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            ) { Text(stringResource(R.string.reveille_escape_silence), style = MaterialTheme.typography.labelLarge) }
         },
     )
 }
@@ -345,7 +351,11 @@ private fun Closed(message: String, onClose: () -> Unit, title: String? = null) 
     Button(onClick = onClose, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text(stringResource(R.string.reveille_close)) }
 }
 
-/** Mission Lock, kept minimal until the full flow lands: exactly as much friction as the mission asks for. */
+/**
+ * Mission Lock, kept minimal until the full flow lands: exactly as much friction as the mission asks for. While the alarm rings
+ * ([onSilence] is given) its Safety silence is in the row of actions with Cancel, which never scrolls, and not among the reasons, which do.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun FrictionDialog(
     required: LockPolicy,
@@ -365,15 +375,6 @@ internal fun FrictionDialog(
         text = {
             // It scrolls, so that a very large font cannot push the buttons out of reach.
             Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // While the alarm rings the way to stop it is here too, one tap with nothing asked first: a question about putting it off or
-                // skipping it must never stand between the person and the silence.
-                if (onSilence != null) {
-                    OutlinedButton(
-                        onClick = onSilence,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(ReveilleTags.FRICTION_SILENCE),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                    ) { Text(stringResource(R.string.reveille_escape_silence), style = MaterialTheme.typography.labelLarge) }
-                }
                 when (required) {
                     LockPolicy.REASON -> reasons.forEach { reason ->
                         OutlinedButton(onClick = { onConfirm(FrictionEvidence.Reason(reason)) }, modifier = Modifier.fillMaxWidth()) {
@@ -392,7 +393,20 @@ internal fun FrictionDialog(
                 }
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.reveille_friction_cancel)) } },
+        // While the alarm rings the way to stop it is here too, one tap with nothing asked first: a question about putting it off or
+        // skipping it must never stand between the person and the silence, and it stays in view whatever has been scrolled.
+        dismissButton = {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (onSilence != null) {
+                    OutlinedButton(
+                        onClick = onSilence,
+                        modifier = Modifier.heightIn(min = 56.dp).testTag(ReveilleTags.FRICTION_SILENCE),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    ) { Text(stringResource(R.string.reveille_escape_silence), style = MaterialTheme.typography.labelLarge) }
+                }
+                TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 56.dp)) { Text(stringResource(R.string.reveille_friction_cancel)) }
+            }
+        },
     )
 }
 

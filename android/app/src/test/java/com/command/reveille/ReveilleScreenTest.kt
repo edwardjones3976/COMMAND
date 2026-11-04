@@ -6,7 +6,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -376,7 +379,18 @@ class ReveilleScreenTest {
     }
 
     @Test
-    fun `a Mission Lock question that asks for a reason carries Safety silence above the reasons`() {
+    fun `the Safety silence of the way out and of the question over it is in the row of actions, which never scrolls, and the choices are in what does`() {
+        showWithBack(firing, Recorder(), FrictionPrompt(LockPolicy.REASON) { })()
+
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_SILENCE).assert(hasAnyAncestor(hasScrollAction()).not())
+        compose.onNodeWithTag(ReveilleTags.FRICTION_SILENCE).assert(hasAnyAncestor(hasScrollAction()).not())
+        // The matcher is not blind: what the dialogs let scroll is the choices.
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_SKIP).assert(hasAnyAncestor(hasScrollAction()))
+        compose.onNodeWithText("Other").assert(hasAnyAncestor(hasScrollAction()))
+    }
+
+    @Test
+    fun `a Mission Lock question that asks for a reason carries Safety silence in its row of actions`() {
         val r = Recorder()
         showWithBack(firing, r, FrictionPrompt(LockPolicy.REASON) { })()
 
