@@ -34,8 +34,14 @@ sealed interface ReveilleUiState {
     data object Loading : ReveilleUiState
     data object NotFound : ReveilleUiState
 
-    /** The alarm is ringing: hold to acknowledge, or silence it. */
-    data class Firing(val title: String, val holdSeconds: Int, val earlyRelease: Boolean, val offerAccessibleConfirm: Boolean) : ReveilleUiState
+    /** The alarm is ringing: hold to acknowledge, or silence it. [occurrenceId] says which one, so that nothing the screen remembers about one ring is taken for another's. */
+    data class Firing(
+        val occurrenceId: String,
+        val title: String,
+        val holdSeconds: Int,
+        val earlyRelease: Boolean,
+        val offerAccessibleConfirm: Boolean,
+    ) : ReveilleUiState
 
     /** Silenced or missed: nothing was started. The user can pick it up again or let it go. */
     data class Silenced(val title: String, val missed: Boolean = false) : ReveilleUiState
@@ -67,6 +73,15 @@ class ReveilleViewModel @Inject constructor(
 
     private var occurrenceId: String? = null
     private var observing: Job? = null
+
+    /**
+     * Advances whenever the screen a question was asked on is gone: another occurrence takes over, the screen changes kind, or the alarm is
+     * silenced. A command that was tapped on the old screen and is answered later finds the number changed, and asks nothing.
+     */
+    private var screen = 0
+
+    /** Runs between a command being decided and its answer being used: a seam for the one test that has to place a screen change in between. */
+    internal var beforeAnswer: suspend () -> Unit = {}
     private var holdAttempts = 0
     private var earlyRelease = false
     var accessibilityTouchExploration = false
@@ -76,6 +91,7 @@ class ReveilleViewModel @Inject constructor(
         // Another occurrence replaces the one on screen: stop watching the old one, so it can never draw over the new one,
         // and forget anything that belonged to it.
         observing?.cancel()
+        screen++
         occurrenceId = id
         holdAttempts = 0
         earlyRelease = false
@@ -89,7 +105,15 @@ class ReveilleViewModel @Inject constructor(
                     // button the state machine would refuse.
                     repository.apply(row.id, OccurrenceCommand.StartGuidance, EventSource.USER)
                 }
-                _state.value = project(row)
+                val projected = project(row)
+                // A question belongs to the screen it was asked on. When the alarm is answered some other way (the notification's Safety
+                // silence) or runs out while a Mission Lock question is open over it, the screen changes under the question: it goes with
+                // the screen, so that a dialog about a ringing alarm is never left over one that has stopped.
+                if (projected::class != _state.value::class) {
+                    screen++
+                    _friction.value = null
+                }
+                _state.value = projected
             }
         }
     }
@@ -102,7 +126,7 @@ class ReveilleViewModel @Inject constructor(
                 val chain = DialEffects.defaultChain(repository.dialsOf(row).handshakeDifficulty)
                 // Only the hold challenge exists so far; typing, sequences and two-step arrive with the full handshake engine.
                 val hold = chain.steps.firstOrNull { it.mode == HandshakeMode.HOLD }?.holdSeconds ?: FALLBACK_HOLD_SECONDS
-                ReveilleUiState.Firing(brief.title, hold, earlyRelease, accessibilityTouchExploration)
+                ReveilleUiState.Firing(row.id, brief.title, hold, earlyRelease, accessibilityTouchExploration)
             }
             OccurrenceState.SAFETY_SILENCED -> ReveilleUiState.Silenced(brief.title)
             OccurrenceState.MISSED -> ReveilleUiState.Silenced(brief.title, missed = true)
@@ -157,7 +181,13 @@ class ReveilleViewModel @Inject constructor(
 
     // --- everything else is one tap ---------------------------------------------------------------------------
 
-    fun silence() = command(OccurrenceCommand.SafetySilence)
+    /** One tap, from anywhere, including from over a Mission Lock question: that question has nothing left to wait for. */
+    fun silence() {
+        screen++
+        _friction.value = null
+        command(OccurrenceCommand.SafetySilence)
+    }
+
     fun resume() = command(OccurrenceCommand.Resume)
     fun started() = command(OccurrenceCommand.ReportStarted)
 
@@ -175,10 +205,19 @@ class ReveilleViewModel @Inject constructor(
     /** Tries the command bare; if the mission is fixed and wants more, asks, then tries again with what the user gave. */
     private fun withFriction(build: (FrictionEvidence) -> OccurrenceCommand) {
         val id = occurrenceId ?: return
+        val askedOn = screen
+        // The screen can change while a command is being decided (another ring takes over, the alarm is silenced from its notification, it
+        // runs out). What would be asked then is about nothing the person can see, so it is not asked, and a question that is waiting is
+        // not answered for a ring that is no longer on the screen.
+        fun moved() = id != occurrenceId || askedOn != screen
         fun attempt(evidence: FrictionEvidence) {
             viewModelScope.launch {
-                when (val result = repository.apply(id, build(evidence), EventSource.USER)) {
-                    is ApplyResult.NeedsFriction -> _friction.value = FrictionPrompt(result.required) { given -> attempt(given) }
+                val result = repository.apply(id, build(evidence), EventSource.USER)
+                beforeAnswer()
+                if (moved()) return@launch
+                when (result) {
+                    is ApplyResult.NeedsFriction ->
+                        _friction.value = FrictionPrompt(result.required) { given -> if (moved()) _friction.value = null else attempt(given) }
                     else -> _friction.value = null
                 }
             }

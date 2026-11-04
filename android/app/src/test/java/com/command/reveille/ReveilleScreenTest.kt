@@ -5,6 +5,7 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -12,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.down
 import androidx.compose.ui.test.up
 import androidx.compose.ui.test.center
@@ -64,7 +66,7 @@ class ReveilleScreenTest {
         )
     }
 
-    private val firing = ReveilleUiState.Firing("Write the report", holdSeconds = 3, earlyRelease = false, offerAccessibleConfirm = false)
+    private val firing = ReveilleUiState.Firing("occ-1", "Write the report", holdSeconds = 3, earlyRelease = false, offerAccessibleConfirm = false)
 
     private fun show(state: ReveilleUiState, r: Recorder, friction: FrictionPrompt? = null) {
         compose.setContent {
@@ -257,12 +259,12 @@ class ReveilleScreenTest {
     // --- the way out that Back opens ---------------------------------------------------------------------------
 
     /** Shows [state] with its Back dispatcher in hand, and returns what presses Back. */
-    private fun showWithBack(state: ReveilleUiState, r: Recorder): () -> Unit {
+    private fun showWithBack(state: ReveilleUiState, r: Recorder, friction: FrictionPrompt? = null): () -> Unit {
         var dispatcher: OnBackPressedDispatcher? = null
         compose.setContent {
             dispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
             CommandTheme(darkTheme = true) {
-                ReveilleContent(state, null, SkipReasonCode.values().toList(), r.actions(), {}, {})
+                ReveilleContent(state, friction, SkipReasonCode.values().toList(), r.actions(), { r.frictionGiven += it }, { r.frictionDismissed++ })
             }
         }
         return { compose.runOnIdle { dispatcher!!.onBackPressed() } }
@@ -353,6 +355,162 @@ class ReveilleScreenTest {
         restoration.emulateSavedInstanceStateRestore()
 
         compose.onNodeWithTag(ReveilleTags.ESCAPE).assertIsDisplayed()
+    }
+
+    // --- the way out, after review: two dialogs, one ring ------------------------------------------------------
+
+    @Test
+    fun `a Mission Lock question asked over the way out carries Safety silence, one tap, with nothing asked first`() {
+        val r = Recorder()
+        val back = showWithBack(firing, r, FrictionPrompt(LockPolicy.CONFIRM) { })
+        back()
+
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertExists()
+        compose.onNodeWithText("Skip a fixed commitment?").assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.FRICTION_SILENCE).assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.FRICTION_SILENCE).performClick()
+
+        assertEquals(1, r.silenced)
+        assertTrue("silencing is not a confirmation", r.frictionGiven.isEmpty())
+        assertEquals(0, r.frictionDismissed)
+    }
+
+    @Test
+    fun `a Mission Lock question that asks for a reason carries Safety silence above the reasons`() {
+        val r = Recorder()
+        showWithBack(firing, r, FrictionPrompt(LockPolicy.REASON) { })()
+
+        compose.onNodeWithText("Why skip?").assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.FRICTION_SILENCE).assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.FRICTION_SILENCE).performClick()
+        assertEquals(1, r.silenced)
+        assertTrue(r.frictionGiven.isEmpty())
+    }
+
+    @Test
+    fun `a Mission Lock question on a screen that is not ringing has no silence to offer`() {
+        show(ReveilleUiState.Direction("Write the report", "Open the document", 5), Recorder(), FrictionPrompt(LockPolicy.CONFIRM) { })
+
+        compose.onNodeWithText("Skip a fixed commitment?").assertIsDisplayed()
+        compose.onAllNodesWithTagCount(ReveilleTags.FRICTION_SILENCE, 0)
+    }
+
+    @Test
+    fun `cancelling the Mission Lock question leaves the way out open and nothing decided`() {
+        val r = Recorder()
+        showWithBack(firing, r, FrictionPrompt(LockPolicy.CONFIRM) { })()
+
+        compose.onNodeWithText("Keep going").performClick()
+
+        assertEquals(1, r.frictionDismissed)
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertIsDisplayed()
+        assertEquals(0, r.silenced + r.skipped + r.delays.size)
+    }
+
+    @Test
+    fun `answered by any route, the way out starts closed for the next alarm`() {
+        var dispatcher: OnBackPressedDispatcher? = null
+        var state by mutableStateOf<ReveilleUiState>(firing)
+        compose.setContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            CommandTheme(darkTheme = true) {
+                ReveilleContent(state, null, SkipReasonCode.values().toList(), Recorder().actions(), {}, {})
+            }
+        }
+        compose.runOnIdle { dispatcher!!.onBackPressed() }
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertIsDisplayed()
+
+        state = ReveilleUiState.Silenced("Write the report")
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertDoesNotExist()
+        state = firing.copy(occurrenceId = "occ-2", title = "Stretch")
+
+        compose.onNodeWithText("Stretch").assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertDoesNotExist()
+    }
+
+    @Test
+    fun `when another alarm takes over, the way out opened for the first does not carry over to it`() {
+        var dispatcher: OnBackPressedDispatcher? = null
+        var state by mutableStateOf<ReveilleUiState>(firing)
+        compose.setContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            CommandTheme(darkTheme = true) {
+                ReveilleContent(state, null, SkipReasonCode.values().toList(), Recorder().actions(), {}, {})
+            }
+        }
+        compose.runOnIdle { dispatcher!!.onBackPressed() }
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertIsDisplayed()
+
+        state = firing.copy(occurrenceId = "occ-2", title = "Stretch")
+
+        compose.onNodeWithText("Stretch").assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertDoesNotExist()
+    }
+
+    @Test
+    fun `the same ring keeps its way out open while the screen is redrawn with the same alarm`() {
+        var dispatcher: OnBackPressedDispatcher? = null
+        var state by mutableStateOf<ReveilleUiState>(firing)
+        compose.setContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            CommandTheme(darkTheme = true) {
+                ReveilleContent(state, null, SkipReasonCode.values().toList(), Recorder().actions(), {}, {})
+            }
+        }
+        compose.runOnIdle { dispatcher!!.onBackPressed() }
+
+        state = firing.copy(earlyRelease = true) // a failed hold redraws the ring screen; it is still the same alarm
+
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertIsDisplayed()
+    }
+
+    @Test
+    fun `what was open before the activity was recreated is not opened over another alarm`() {
+        var dispatcher: OnBackPressedDispatcher? = null
+        var shown: ReveilleUiState = firing
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            CommandTheme(darkTheme = true) {
+                ReveilleContent(shown, null, SkipReasonCode.values().toList(), Recorder().actions(), {}, {})
+            }
+        }
+        compose.runOnIdle { dispatcher!!.onBackPressed() }
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertIsDisplayed()
+
+        shown = firing.copy(occurrenceId = "occ-2", title = "Stretch") // by the time the screen is back, another alarm is the one ringing
+        restoration.emulateSavedInstanceStateRestore()
+
+        compose.onNodeWithText("Stretch").assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertDoesNotExist()
+    }
+
+    @Test
+    fun `a press that began on one ring's hold target does not finish on the ring that took over`() {
+        compose.mainClock.autoAdvance = false
+        var state by mutableStateOf<ReveilleUiState>(firing)
+        val r = Recorder()
+        compose.setContent {
+            CommandTheme(darkTheme = true) {
+                ReveilleContent(state, null, SkipReasonCode.values().toList(), r.actions(), {}, {})
+            }
+        }
+        compose.onNodeWithTag(ReveilleTags.HOLD).performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(2_000)
+
+        state = firing.copy(occurrenceId = "occ-2", title = "Stretch") // another ring takes over while the finger is down
+        compose.mainClock.advanceTimeBy(2_500) // long enough for the first ring's three seconds to have passed
+        compose.onNodeWithTag(ReveilleTags.HOLD).performTouchInput { up() }
+        compose.mainClock.advanceTimeBy(500)
+
+        assertTrue("nothing was held on the ring that is on the screen: ${r.completed}", r.completed.isEmpty())
+    }
+
+    @Test
+    fun `Keep ringing is as easy to hit as the rest`() {
+        showWithBack(firing, Recorder())()
+
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_KEEP).assertHeightIsAtLeast(56.dp)
     }
 }
 
