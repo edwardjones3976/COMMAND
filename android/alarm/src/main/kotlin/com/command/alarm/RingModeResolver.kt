@@ -1,6 +1,7 @@
 package com.command.alarm
 
 import android.content.Context
+import androidx.core.app.NotificationManagerCompat
 import com.command.data.ApplyResult
 import com.command.data.OccurrenceRepository
 import com.command.data.SessionPlan
@@ -49,8 +50,17 @@ class RingModeResolver @Inject constructor(
         }
 
         val title = repository.missionTitle(row.missionId)
+        // The erase may have sealed the latch, silenced everything and cancelled every notice while the database was being asked, and
+        // nothing waits for this receiver-owned work (RingSession.isBusy tracks the service only): look again before the sound is made...
+        if (latch.sealed) return
         val notification = RingNotifications.ring(context, occurrenceId, requestCode, title, fallback = true, timeoutMs = remaining)
         val posted = RingNotifications.post(context, occurrenceId, AlarmContract.ID_FALLBACK, notification)
+        // ...and once more after it: the erase seals first and cancels the notices after, so a post that the cancel did not see has to
+        // take itself down (the same two looks as AndroidAlarmScheduler.arm).
+        if (latch.sealed) {
+            NotificationManagerCompat.from(context).cancel(occurrenceId, AlarmContract.ID_FALLBACK)
+            return
+        }
         repository.logEvent(EventType.RING_DEGRADED, row, EventSource.RECEIVER, EventPayload.of("reason" to reason, "notified" to posted))
     }
 }
