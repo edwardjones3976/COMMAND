@@ -449,6 +449,28 @@ class HandshakeScreenTest {
     }
 
     @Test
+    fun `taps of the assistive confirm that come back with a restored screen tell the view model again, so that the try that was begun has its clock`() {
+        val r = Recorder()
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            CommandTheme(darkTheme = true) {
+                ReveilleContent(firing(Challenge.Hold(TryId(0, 1), 3, earlyRelease = false, assistive = true, acknowledging = false)), null, emptyList(), r.actions(), {}, {})
+            }
+        }
+        compose.waitForIdle()
+        assertTrue("nothing has been tapped: nothing to tell", r.assistiveBegun.isEmpty())
+        compose.onNodeWithTag(ReveilleTags.ACCESSIBLE).performClick()
+        compose.onNodeWithText("Tap to confirm (2 of 3)").assertIsDisplayed()
+        assertEquals("the first tap begins the try", listOf(TryId(0, 1)), r.assistiveBegun)
+
+        restoration.emulateSavedInstanceStateRestore()
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Tap to confirm (2 of 3)").assertIsDisplayed()
+        assertEquals("and the restored tap tells it again", listOf(TryId(0, 1), TryId(0, 1)), r.assistiveBegun)
+    }
+
+    @Test
     fun `a press that began on one try's hold target does not finish on the next try's`() {
         compose.mainClock.autoAdvance = false
         var state by mutableStateOf(firing(Challenge.Hold(TryId(0, 1), 3, earlyRelease = false, assistive = false, acknowledging = false)))

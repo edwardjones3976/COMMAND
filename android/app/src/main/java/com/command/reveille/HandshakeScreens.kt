@@ -174,6 +174,9 @@ internal fun OutOfTriesNote() {
 @Composable
 internal fun AssistiveConfirm(tryId: TryId, primary: Boolean, onBegun: () -> Unit = {}, onConfirmed: () -> Unit) {
     var taps by rememberSaveable(tryId) { mutableIntStateOf(0) }
+    // Taps that come back with a restored screen (they are saved with it) mean that the try had begun: the view model is told again, so that
+    // it has its clock. It does nothing if it knows already (a screen that was only turned).
+    LaunchedEffect(tryId) { if (taps > 0) onBegun() }
     val label = if (taps == 0) {
         stringResource(R.string.reveille_hold_accessible_button)
     } else {
