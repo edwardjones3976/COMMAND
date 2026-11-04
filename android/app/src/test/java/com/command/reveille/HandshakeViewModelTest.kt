@@ -720,6 +720,103 @@ class HandshakeViewModelTest {
     }
 
     @Test
+    fun `a try that was waiting for its turn when Safety silence was tapped is not written down after the silence`() {
+        val o = ringing("builtin_command")
+        show(o)
+        val first = typing().tryId
+
+        vm.typingSubmitted(first, "not it") // being written down: it holds the turn
+        vm.typingSubmitted(TryId(first.position, first.tryNo + 1, first.way), "not it either") // the second try, waiting for its turn
+        vm.silence() // the tap does not wait for anybody
+
+        awaitUi("silenced") { it is ReveilleUiState.Silenced }
+        settle()
+        assertEquals(
+            "the first try, and then the silence: the second try came after the end of the ring and is not part of its history",
+            listOf(ChallengeOutcome.FAILED, ChallengeOutcome.SAFETY_SILENCE),
+            rows(o).map { it.outcome },
+        )
+    }
+
+    @Test
+    fun `an answer from the screen of another ring is not about the ring on screen, even when its try is numbered the same`() {
+        val a = ringing("builtin_command")
+        val b = ringing("builtin_command")
+        val asked = ArrayList<Int>()
+        vm.attemptTimer = { seconds ->
+            asked += seconds
+            awaitCancellation()
+        }
+        show(a)
+        val tryOfA = typing().tryId
+        show(b) // another ring takes over; it begins at try 1 as well
+        assertEquals("every ring begins at the same try", tryOfA, typing().tryId)
+
+        vm.typingChanged(a.id, tryOfA, "S") // a key from the old screen: it would start this ring's clock
+        vm.typingSubmitted(a.id, tryOfA, PHRASE) // and the right phrase from it: it would pass this ring
+        settle()
+        assertEquals(OccurrenceState.FIRING, stateOf(b))
+        assertTrue("nothing is written for the ring on screen", rows(b).isEmpty())
+        assertTrue("and its clock was not started", asked.isEmpty())
+        assertTrue("nor was the other ring's", rows(a).isEmpty())
+
+        vm.typingChanged(b.id, tryOfA, "S") // the same events from this ring's own screen are heard
+        awaitUntil(message = "the clock starts") { asked.isNotEmpty() }
+        vm.typingSubmitted(b.id, tryOfA, PHRASE)
+        awaitUi("direction") { it is ReveilleUiState.Direction }
+        assertEquals(OccurrenceState.GUIDED_START, stateOf(b))
+        assertEquals(OccurrenceState.FIRING, stateOf(a))
+    }
+
+    @Test
+    fun `the first of the three taps begins the try, and a try that is begun and left runs out and counts, from the first tap`() {
+        vm.offerAccessibleConfirm = true
+        val o = ringing("builtin_steady")
+        val gate = CompletableDeferred<Unit>()
+        val asked = ArrayList<Int>()
+        vm.attemptTimer = { seconds ->
+            asked += seconds
+            gate.await()
+        }
+        show(o)
+        val first = hold().tryId
+        assertTrue("nothing has been tapped: no clock", asked.isEmpty())
+
+        val begun = clock.nowMs()
+        vm.assistiveBegun(first) // the first tap
+        awaitUntil(message = "the clock starts") { asked.isNotEmpty() }
+        clock.advance(4_000)
+        vm.assistiveBegun(first) // a second tap does not start another
+        settle()
+        assertEquals(1, asked.size)
+
+        gate.complete(Unit) // the time is up
+        awaitChallenge("the next try") { it is Challenge.Hold && it.tryId.tryNo == 2 }
+        val row = rows(o).single()
+        assertEquals(ChallengeOutcome.TIMEOUT, row.outcome)
+        assertEquals("from the first tap", begun, row.startedAt)
+        assertEquals(begun + 4_000, row.endedAt)
+        assertEquals(OccurrenceState.FIRING, stateOf(o))
+    }
+
+    @Test
+    fun `Safety silence tapped during a press ends a row that starts where the press began`() {
+        val o = ringing("builtin_steady")
+        show(o)
+        val now = clock.nowMs()
+        vm.holdStarted(hold().tryId, now - 1_500) // the finger went down a moment ago and is still down
+        settle()
+
+        vm.silence()
+
+        awaitUi("silenced") { it is ReveilleUiState.Silenced }
+        val row = rows(o).single()
+        assertEquals(ChallengeOutcome.SAFETY_SILENCE, row.outcome)
+        assertEquals("from the press", now - 1_500, row.startedAt)
+        assertEquals("to the tap", now, row.endedAt)
+    }
+
+    @Test
     fun `with the real clock a begun try runs out after ninety seconds and not before, and doing nothing never does`() {
         val o = ringing("builtin_command")
         show(o)

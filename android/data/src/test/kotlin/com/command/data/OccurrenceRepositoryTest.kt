@@ -226,15 +226,24 @@ class OccurrenceRepositoryTest {
         assertEquals(Personality.ACCOUNTABILITY_PARTNER, plan.personality)
     }
 
+    /** An occurrence that is ringing: armed and fired. */
+    private suspend fun ringing(missionTitle: String = "Write the report"): OccurrenceRow {
+        val o = scheduled(missionTitle)
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+        return f.repo.get(o.id)!!
+    }
+
     @Test
     fun `the tries of a ring come back in the order they were written, as the engine reads them`() = run {
-        val o = scheduled()
+        val o = ringing()
         f.repo.recordChallenge(o.id, ChallengeRecord(0, HandshakeMode.TYPING, 1, ChallengeOutcome.FAILED, f.t0, f.t0 + 1_000))
-        f.repo.recordChallenges(
-            o.id,
-            listOf(
-                ChallengeRecord(0, HandshakeMode.TYPING, 2, ChallengeOutcome.TIMEOUT, f.t0 + 1_000, f.t0 + 2_000),
-                ChallengeRecord(0, HandshakeMode.TYPING, 2, ChallengeOutcome.FALLBACK, f.t0 + 2_000, f.t0 + 2_000),
+        assertTrue(
+            f.repo.recordChallenges(
+                o.id,
+                listOf(
+                    ChallengeRecord(0, HandshakeMode.TYPING, 2, ChallengeOutcome.TIMEOUT, f.t0 + 1_000, f.t0 + 2_000),
+                    ChallengeRecord(0, HandshakeMode.TYPING, 2, ChallengeOutcome.FALLBACK, f.t0 + 2_000, f.t0 + 2_000),
+                ),
             ),
         )
         assertEquals(
@@ -245,20 +254,40 @@ class OccurrenceRepositoryTest {
             ),
             f.repo.attemptsOf(o.id),
         )
-        assertEquals("another ring's tries are not this one's", emptyList<Attempt>(), f.repo.attemptsOf(scheduled("Another").id))
+        assertEquals("another ring's tries are not this one's", emptyList<Attempt>(), f.repo.attemptsOf(ringing("Another").id))
     }
 
     @Test
-    fun `a write for an occurrence that does not exist is refused, and an empty one writes nothing`() = run {
-        val o = scheduled()
+    fun `a write for an occurrence that does not exist writes nothing and says so, and an empty one writes nothing`() = run {
+        val o = ringing()
         val good = ChallengeRecord(0, HandshakeMode.CONFIRM_SEQUENCE, 3, ChallengeOutcome.FAILED, f.t0, f.t0 + 1_000)
         val orphan = ChallengeRecord(0, HandshakeMode.CONFIRM_SEQUENCE, 3, ChallengeOutcome.FALLBACK, f.t0, f.t0 + 1_000)
-        val failed = runCatching { f.repo.recordChallenges("no-such-occurrence", listOf(good, orphan)) }.isFailure
-        assertTrue("a row for an occurrence that does not exist is refused", failed)
+        assertFalse("nothing is written for an occurrence that does not exist", f.repo.recordChallenges("no-such-occurrence", listOf(good, orphan)))
         assertEquals(emptyList<Attempt>(), f.repo.attemptsOf("no-such-occurrence"))
 
-        f.repo.recordChallenges(o.id, emptyList())
+        assertTrue("nothing to write is written", f.repo.recordChallenges(o.id, emptyList()))
         assertEquals("no rows is no write", emptyList<Attempt>(), f.repo.attemptsOf(o.id))
+    }
+
+    @Test
+    fun `an alarm that is no longer ringing takes no more rows, however its ring ended`() = run {
+        val row = ChallengeRecord(0, HandshakeMode.TYPING, 1, ChallengeOutcome.FAILED, f.t0, f.t0 + 1_000)
+        val endings = listOf(
+            "Safety silence" to OccurrenceCommand.SafetySilence,
+            "a skip" to OccurrenceCommand.Skip(SkipReason.USER),
+            "a delay" to OccurrenceCommand.Delay(10),
+            "the ring running out" to OccurrenceCommand.Miss(MissReason.TIMEOUT),
+            "the acknowledgement" to OccurrenceCommand.Acknowledge(),
+        )
+        for ((way, ending) in endings) {
+            val o = ringing(way)
+            assertTrue("$way: while the ring goes on the row is written", f.repo.recordChallenges(o.id, listOf(row)))
+            val before = f.repo.attemptsOf(o.id)
+            assertTrue("$way: the ring ends", apply(o, ending) is ApplyResult.Applied)
+
+            assertFalse("$way: a row that was waiting for its turn is refused", f.repo.recordChallenges(o.id, listOf(row.copy(attemptNo = 2))))
+            assertEquals("$way: and nothing was added to the history", before, f.repo.attemptsOf(o.id))
+        }
     }
 
     @Test

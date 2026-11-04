@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import com.command.alarm.AlarmContract
 import com.command.reveille.ReveilleActions
 import com.command.reveille.ReveilleContent
+import com.command.reveille.ReveilleUiState
 import com.command.reveille.ReveilleViewModel
 import com.command.ui.theme.CommandTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -47,22 +48,7 @@ class ReveilleActivity : ComponentActivity() {
                     state = state,
                     friction = friction,
                     reasons = viewModel.reasons,
-                    actions = ReveilleActions(
-                        onHoldStarted = viewModel::holdStarted,
-                        onHoldCompleted = viewModel::holdCompleted,
-                        onHoldReleasedEarly = viewModel::holdReleasedEarly,
-                        onAssistiveConfirmed = viewModel::assistiveConfirmed,
-                        onTypingChanged = viewModel::typingChanged,
-                        onTypingSubmitted = viewModel::typingSubmitted,
-                        onSequenceTapped = viewModel::sequenceTapped,
-                        onTwoStepIndicated = viewModel::twoStepIndicated,
-                        onSilence = viewModel::silence,
-                        onResume = viewModel::resume,
-                        onStarted = viewModel::started,
-                        onDelay = viewModel::delay,
-                        onSkip = viewModel::skip,
-                        onClose = { finishAndRemoveTask() },
-                    ),
+                    actions = ringActions(viewModel, (state as? ReveilleUiState.Firing)?.occurrenceId) { finishAndRemoveTask() },
                     onFrictionConfirm = viewModel::confirmFriction,
                     onFrictionDismiss = viewModel::dismissFriction,
                 )
@@ -123,3 +109,27 @@ class ReveilleActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 }
+
+/**
+ * What the ring screen can ask of the view model, with everything that is about the handshake bound to [ring], the ring the screen is drawn
+ * for. The screen of a ring that was replaced by another's may still deliver a callback; it carries its own ring, which is not the ring on
+ * screen now, and the view model does nothing with it (the numbering of tries begins at 1 on every ring, so the try alone cannot tell). With
+ * no ring on screen ([ring] null) a handshake callback does nothing.
+ */
+internal fun ringActions(viewModel: ReveilleViewModel, ring: String?, onClose: () -> Unit) = ReveilleActions(
+    onHoldStarted = { at, startedAt -> ring?.let { viewModel.holdStarted(it, at, startedAt) } },
+    onHoldCompleted = { at, startedAt, endedAt -> ring?.let { viewModel.holdCompleted(it, at, startedAt, endedAt) } },
+    onHoldReleasedEarly = { at, startedAt, endedAt -> ring?.let { viewModel.holdReleasedEarly(it, at, startedAt, endedAt) } },
+    onAssistiveBegun = { at -> ring?.let { viewModel.assistiveBegun(it, at) } },
+    onAssistiveConfirmed = { at -> ring?.let { viewModel.assistiveConfirmed(it, at) } },
+    onTypingChanged = { at, text -> ring?.let { viewModel.typingChanged(it, at, text) } },
+    onTypingSubmitted = { at, text -> ring?.let { viewModel.typingSubmitted(it, at, text) } },
+    onSequenceTapped = { at, number -> ring?.let { viewModel.sequenceTapped(it, at, number) } },
+    onTwoStepIndicated = { at -> ring?.let { viewModel.twoStepIndicated(it, at) } },
+    onSilence = viewModel::silence,
+    onResume = viewModel::resume,
+    onStarted = viewModel::started,
+    onDelay = viewModel::delay,
+    onSkip = viewModel::skip,
+    onClose = onClose,
+)

@@ -207,11 +207,17 @@ class OccurrenceRepository @Inject constructor(
         db.challenges().insert(ChallengeRow(0, occurrenceId, record.chainPosition, record.mode, record.attemptNo, record.outcome, record.startedAt, record.endedAt))
     }
 
-    /** The rows of one event, written together: a restart never finds a try without the change of mode that it caused. */
-    suspend fun recordChallenges(occurrenceId: String, records: List<ChallengeRecord>) {
-        if (records.isEmpty()) return
-        db.withTransaction {
+    /**
+     * The rows of one event, written together: a restart never finds a try without the change of mode that it caused. They are written only
+     * while the ring is still going: an alarm that was silenced, skipped, put off or missed while the event waited for its turn takes no
+     * more rows, which would otherwise sit in its history after its end. True when they were written (nothing to write counts as written).
+     */
+    suspend fun recordChallenges(occurrenceId: String, records: List<ChallengeRecord>): Boolean {
+        if (records.isEmpty()) return true
+        return db.withTransaction {
+            if (db.occurrences().get(occurrenceId)?.state != OccurrenceState.FIRING) return@withTransaction false
             for (r in records) db.challenges().insert(ChallengeRow(0, occurrenceId, r.chainPosition, r.mode, r.attemptNo, r.outcome, r.startedAt, r.endedAt))
+            true
         }
     }
 

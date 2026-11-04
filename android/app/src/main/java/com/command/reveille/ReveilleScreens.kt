@@ -98,9 +98,10 @@ object ReveilleTags {
 
 /** Everything the screens can ask for, so they can be tested without a view model. */
 class ReveilleActions(
-    val onHoldStarted: (TryId) -> Unit = {},
+    val onHoldStarted: (TryId, Long) -> Unit = { _, _ -> },
     val onHoldCompleted: (TryId, Long, Long) -> Unit,
     val onHoldReleasedEarly: (TryId, Long, Long) -> Unit,
+    val onAssistiveBegun: (TryId) -> Unit = {},
     val onAssistiveConfirmed: (TryId) -> Unit,
     val onTypingChanged: (TryId, String) -> Unit = { _, _ -> },
     val onTypingSubmitted: (TryId, String) -> Unit = { _, _ -> },
@@ -320,13 +321,13 @@ private fun HoldArea(state: ReveilleUiState.Firing, hold: Challenge.Hold, action
         val target: @Composable () -> Unit = {
             key(hold.tryId) {
                 if (hold.assistive) {
-                    AssistiveConfirm(hold.tryId, primary = true) { actions.onAssistiveConfirmed(hold.tryId) }
+                    AssistiveConfirm(hold.tryId, primary = true, onBegun = { actions.onAssistiveBegun(hold.tryId) }) { actions.onAssistiveConfirmed(hold.tryId) }
                 } else {
                     HoldButton(
                         hold.seconds,
                         onCompleted = { started, ended -> actions.onHoldCompleted(hold.tryId, started, ended) },
                         onReleasedEarly = { started, ended -> actions.onHoldReleasedEarly(hold.tryId, started, ended) },
-                        onStarted = { actions.onHoldStarted(hold.tryId) },
+                        onStarted = { started -> actions.onHoldStarted(hold.tryId, started) },
                         size = holdSize,
                         onCannotHold = { revealed = true },
                     )
@@ -346,7 +347,7 @@ private fun HoldArea(state: ReveilleUiState.Firing, hold: Challenge.Hold, action
                 ) {
                     TitleBlock(state, caption)
                     if (released) ReleasedHint(hold)
-                    if (offerConfirm) AssistiveConfirm(hold.tryId, primary = false) { actions.onAssistiveConfirmed(hold.tryId) }
+                    if (offerConfirm) AssistiveConfirm(hold.tryId, primary = false, onBegun = { actions.onAssistiveBegun(hold.tryId) }) { actions.onAssistiveConfirmed(hold.tryId) }
                 }
                 target()
             }
@@ -361,7 +362,7 @@ private fun HoldArea(state: ReveilleUiState.Firing, hold: Challenge.Hold, action
                     }
                 }
                 target()
-                if (offerConfirm && !hold.assistive) AssistiveConfirm(hold.tryId, primary = false) { actions.onAssistiveConfirmed(hold.tryId) }
+                if (offerConfirm && !hold.assistive) AssistiveConfirm(hold.tryId, primary = false, onBegun = { actions.onAssistiveBegun(hold.tryId) }) { actions.onAssistiveConfirmed(hold.tryId) }
             }
         }
     }
@@ -403,7 +404,7 @@ fun HoldButton(
     onCompleted: (Long, Long) -> Unit,
     onReleasedEarly: (Long, Long) -> Unit,
     now: () -> Long = System::currentTimeMillis,
-    onStarted: () -> Unit = {},
+    onStarted: (Long) -> Unit = {},
     size: Dp = HOLD_SIZE,
     onCannotHold: (() -> Unit)? = null,
 ) {
@@ -433,7 +434,7 @@ fun HoldButton(
                 detectTapGestures(
                     onPress = {
                         val started = now()
-                        onStarted()
+                        onStarted(started)
                         coroutineScope {
                             val timer = launch {
                                 // The hold is timed on the frame clock, which the system animation settings do not scale:

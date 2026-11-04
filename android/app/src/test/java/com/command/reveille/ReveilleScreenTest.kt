@@ -45,6 +45,7 @@ class ReveilleScreenTest {
 
     private class Recorder {
         val holdStarted = ArrayList<TryId>()
+        val holdStartedAt = ArrayList<Long>()
         val completed = ArrayList<Pair<Long, Long>>()
         val early = ArrayList<Pair<Long, Long>>()
         val assistive = ArrayList<TryId>()
@@ -58,7 +59,10 @@ class ReveilleScreenTest {
         var frictionDismissed = 0
 
         fun actions() = ReveilleActions(
-            onHoldStarted = { holdStarted += it },
+            onHoldStarted = { at, startedAt ->
+                holdStarted += at
+                holdStartedAt += startedAt
+            },
             onHoldCompleted = { _, a, b -> completed += a to b },
             onHoldReleasedEarly = { _, a, b -> early += a to b },
             onAssistiveConfirmed = { assistive += it },
@@ -112,6 +116,7 @@ class ReveilleScreenTest {
         compose.onNodeWithTag(ReveilleTags.HOLD).performTouchInput { up() }
         compose.mainClock.advanceTimeBy(500)
         assertEquals(listOf(TryId(0, 1)), r.holdStarted)
+        assertEquals("the press says when it began, and the completion says the same", r.completed.single().first, r.holdStartedAt.single())
         assertEquals(1, r.completed.size)
         assertTrue("a completed hold is not also an early release", r.early.isEmpty())
     }

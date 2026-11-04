@@ -56,6 +56,7 @@ class HandshakeScreenTest {
         val tapped = ArrayList<Pair<TryId, Int>>()
         val indicated = ArrayList<TryId>()
         val assistive = ArrayList<TryId>()
+        val assistiveBegun = ArrayList<TryId>()
         val completed = ArrayList<TryId>()
         val early = ArrayList<TryId>()
         var silenced = 0
@@ -63,6 +64,7 @@ class HandshakeScreenTest {
         fun actions() = ReveilleActions(
             onHoldCompleted = { at, _, _ -> completed += at },
             onHoldReleasedEarly = { at, _, _ -> early += at },
+            onAssistiveBegun = { assistiveBegun += it },
             onAssistiveConfirmed = { assistive += it },
             onTypingChanged = { at, text -> typed += at to text },
             onTypingSubmitted = { at, text -> submitted += at to text },
@@ -220,6 +222,26 @@ class HandshakeScreenTest {
         restoration.emulateSavedInstanceStateRestore()
 
         assertEquals("up and", editableText(ReveilleTags.TYPING_FIELD))
+    }
+
+    @Test
+    fun `typed text that comes back with a restored screen tells the view model again, so that the try that was begun has its clock`() {
+        val r = Recorder()
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            CommandTheme(darkTheme = true) { ReveilleContent(firing(typing()), null, emptyList(), r.actions(), {}, {}) }
+        }
+        compose.waitForIdle()
+        assertTrue("an empty field has nothing to tell", r.typed.isEmpty())
+        compose.onNodeWithTag(ReveilleTags.TYPING_FIELD).performTextInput("up and")
+        val whileTyping = r.typed.size
+        assertTrue("heard while it was typed", whileTyping >= 1)
+
+        restoration.emulateSavedInstanceStateRestore()
+        compose.waitForIdle()
+
+        assertTrue("and again when it came back", r.typed.size > whileTyping)
+        assertEquals(TryId(0, 1) to "up and", r.typed.last())
     }
 
     @Test
@@ -416,12 +438,14 @@ class HandshakeScreenTest {
         compose.onNodeWithText("I cannot hold: confirm instead").assertIsDisplayed()
         compose.onNodeWithTag(ReveilleTags.ACCESSIBLE).performClick()
         compose.onNodeWithText("Tap to confirm (2 of 3)").assertIsDisplayed()
+        assertEquals("the first tap begins the try", listOf(TryId(0, 1)), r.assistiveBegun)
         compose.onNodeWithTag(ReveilleTags.ACCESSIBLE).performClick()
         compose.onNodeWithText("Tap to confirm (3 of 3)").assertIsDisplayed()
         assertTrue("two taps are not a confirmation", r.assistive.isEmpty())
         compose.onNodeWithTag(ReveilleTags.ACCESSIBLE).performClick()
 
         assertEquals(listOf(TryId(0, 1)), r.assistive)
+        assertEquals("and only the first tap does", listOf(TryId(0, 1)), r.assistiveBegun)
     }
 
     @Test

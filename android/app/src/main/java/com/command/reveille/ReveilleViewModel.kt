@@ -101,6 +101,9 @@ class ReveilleViewModel @Inject constructor(
     private var occurrenceId: String? = null
     private var observing: Job? = null
 
+    /** The ring on screen now, or null. The screens hand back the ring they were drawn for with every event; a test of the view model alone speaks of this one. */
+    internal val ringOnScreen: String? get() = occurrenceId
+
     /**
      * Advances whenever the screen a question was asked on is gone: another occurrence takes over, the screen changes kind, or the alarm is
      * silenced. A command that was tapped on the old screen and is answered later finds the number changed, and asks nothing.
@@ -307,17 +310,20 @@ class ReveilleViewModel @Inject constructor(
     }
 
     /**
-     * Runs [block] after the events before it. A ring that was replaced while this waited has no chain any more ([show] cleared it), and
-     * every entry point does nothing without one.
+     * Runs [block] after the events before it. An event is about a ring: one that comes from the screen of another ring than the one on screen
+     * now (the screens hand back the ring they were drawn for) does nothing, even when its try is numbered like one of this ring's, because
+     * every ring begins at try 1; the check is made here, inside the lock, when the event's turn comes. A ring that was replaced while this
+     * waited has no chain any more ([show] cleared it), and every entry point does nothing without one. With no [ring] it is not an event of
+     * a screen at all (a fence, a redraw).
      */
-    private fun inRing(block: suspend () -> Unit) {
-        viewModelScope.launch { engine.withLock { block() } }
+    private fun inRing(ring: String? = null, block: suspend () -> Unit) {
+        viewModelScope.launch { engine.withLock { if (ring == null || ring == occurrenceId) block() } }
     }
 
     /** Runs [block] once every event that was sent before it has been handled: a fence for a test of something that must not happen. */
     internal fun afterPendingEvents(block: () -> Unit) = inRing { block() }
 
-    private fun send(event: ChainEvent, startedAtMs: Long? = null, endedAtMs: Long? = null) = inRing { advance(event, endedAtMs, startedAtMs) }
+    private fun send(ring: String, event: ChainEvent, startedAtMs: Long? = null, endedAtMs: Long? = null) = inRing(ring) { advance(event, endedAtMs, startedAtMs) }
 
     /** [startedAtMs] and [endedAtMs] are when the try began and ended, if the screen knows it (a press does); otherwise it is when its first key or tap came, and now. */
     private suspend fun advance(event: ChainEvent, endedAtMs: Long? = null, startedAtMs: Long? = null) {
@@ -349,50 +355,62 @@ class ReveilleViewModel @Inject constructor(
         if (began == null) began = clock.nowMs()
         if (timer?.isActive == true) return
         val seconds = state.timeoutSeconds(tryId.position)
+        val ring = occurrenceId ?: return
         timer = viewModelScope.launch {
             attemptTimer(seconds)
-            send(ChainEvent.TimedOut(tryId))
+            send(ring, ChainEvent.TimedOut(tryId))
         }
     }
 
     // --- what the person does ----------------------------------------------------------------------------------
 
-    /** A new press clears the "released early" hint from the last one. */
-    fun holdStarted(at: TryId) = inRing {
-        if (chain?.tryOnScreen == at && earlyRelease) {
+    /**
+     * A new press clears the "released early" hint from the last one, and says when it began: a silence tapped while the finger is still down
+     * ends a row that starts there, and not at the tap.
+     */
+    fun holdStarted(ring: String, at: TryId, startedAtMs: Long) = inRing(ring) {
+        if (chain?.tryOnScreen != at) return@inRing
+        began = startedAtMs
+        if (earlyRelease) {
             earlyRelease = false
             publish()
         }
     }
 
-    fun holdCompleted(at: TryId, startedAtMs: Long, endedAtMs: Long) = send(ChainEvent.Passed(at), startedAtMs, endedAtMs)
+    fun holdCompleted(ring: String, at: TryId, startedAtMs: Long, endedAtMs: Long) = send(ring, ChainEvent.Passed(at), startedAtMs, endedAtMs)
 
-    fun holdReleasedEarly(at: TryId, startedAtMs: Long, endedAtMs: Long) = inRing {
+    fun holdReleasedEarly(ring: String, at: TryId, startedAtMs: Long, endedAtMs: Long) = inRing(ring) {
         if (chain?.tryOnScreen != at) return@inRing
         advance(ChainEvent.Failed(at), endedAtMs, startedAtMs)
         // A try that does not move the chain (it cannot happen: a wrong try is always counted) still redraws the hint.
         publish()
     }
 
+    /** The first of the assistive confirm's three taps begins the try: from then on it must be finished in the step's time, like a phrase or a sequence. */
+    fun assistiveBegun(ring: String, at: TryId) = inRing(ring) {
+        val state = chain ?: return@inRing
+        if (state.tryOnScreen == at) startTimer(state, at)
+    }
+
     /** The hold's assistive confirm: three deliberate taps made, for a person who cannot hold a finger down. Recorded as that. */
-    fun assistiveConfirmed(at: TryId) = send(ChainEvent.PassedAssistively(at))
+    fun assistiveConfirmed(ring: String, at: TryId) = send(ring, ChainEvent.PassedAssistively(at))
 
     /** The first key of a try begins it: from then on it must be finished in the step's time. */
-    fun typingChanged(at: TryId, text: String) {
+    fun typingChanged(ring: String, at: TryId, text: String) {
         if (text.isEmpty()) return
-        inRing {
+        inRing(ring) {
             val state = chain ?: return@inRing
             if (state.tryOnScreen == at) startTimer(state, at)
         }
     }
 
     /** Done on an empty field is not an answer: nothing was tried, so no try is used (doing nothing is never a try). */
-    fun typingSubmitted(at: TryId, text: String) {
+    fun typingSubmitted(ring: String, at: TryId, text: String) {
         if (text.isBlank()) return
-        send(if (TypedPhrase.matches(text, phrase)) ChainEvent.Passed(at) else ChainEvent.Failed(at))
+        send(ring, if (TypedPhrase.matches(text, phrase)) ChainEvent.Passed(at) else ChainEvent.Failed(at))
     }
 
-    fun sequenceTapped(at: TryId, number: Int) = inRing {
+    fun sequenceTapped(ring: String, at: TryId, number: Int) = inRing(ring) {
         val state = chain ?: return@inRing
         if (state.tryOnScreen != at) return@inRing
         // A number that is done is disabled on the screen; a tap on it that is delivered late (the one before it was still being written
@@ -410,7 +428,7 @@ class ReveilleViewModel @Inject constructor(
     }
 
     /** "I am doing: ..." The person has said what they will do first. It acknowledges; it does not start. */
-    fun twoStepIndicated(at: TryId) = send(ChainEvent.Passed(at))
+    fun twoStepIndicated(ring: String, at: TryId) = send(ring, ChainEvent.Passed(at))
 
     // --- everything else is one tap ---------------------------------------------------------------------------
 

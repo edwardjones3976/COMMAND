@@ -151,14 +151,18 @@ class HistoryViewModelTest {
         val ahead = occurrence("Pinned", -5 * hour / 2, started, zone = "Pacific/Auckland")
         val here = occurrence("Here", 2 * hour, started)
 
-        awaitUntil(message = "the one on the phone's own day") { ready()?.days?.flatMap { it.entries }?.any { it.occurrenceId == here } == true }
+        awaitUntil(message = "the one on the phone's own day, counted") {
+            ready()?.let { r -> r.days.flatMap { it.entries }.any { it.occurrenceId == here } && r.month.eligibleDays == 1 } == true
+        }
         assertEquals("only the one that is on the phone's day is listed", listOf(here), ready()!!.days.flatMap { it.entries }.map { it.occurrenceId })
         assertEquals("and only that one is counted", 1, ready()!!.month.eligibleDays)
 
         // A day later the phone is on the 3rd as well: the pinned one is inside, in the list and in the counts.
         clock.advance(24 * hour)
         occurrence("Touch", 3 * hour, started) // any change makes the screen read its rows again
-        awaitUntil(message = "the pinned one") { ready()?.days?.flatMap { it.entries }?.any { it.occurrenceId == ahead } == true }
+        awaitUntil(message = "the pinned one, counted") {
+            ready()?.let { r -> r.days.flatMap { it.entries }.any { it.occurrenceId == ahead } && r.month.eligibleDays == 2 } == true
+        }
         assertEquals(listOf(LocalDate.of(2026, 11, 3)), ready()!!.days.filter { d -> d.entries.any { it.occurrenceId == ahead } }.map { it.date })
         assertEquals(2, ready()!!.month.eligibleDays)
     }
@@ -175,7 +179,9 @@ class HistoryViewModelTest {
 
         val pinned = occurrence("Pinned far ahead", 30 * 24 * hour - 3 * hour / 2, started, zone = "Pacific/Kiritimati")
 
-        awaitUntil(message = "the pinned one") { ready()?.days?.flatMap { it.entries }?.any { it.occurrenceId == pinned } == true }
+        awaitUntil(message = "the pinned one, counted") {
+            ready()?.let { r -> r.days.flatMap { it.entries }.any { it.occurrenceId == pinned } && r.month.daysWithStart == 1 } == true
+        }
         assertEquals(listOf(LocalDate.of(2026, 10, 4)), ready()!!.days.map { it.date })
         assertEquals(1, ready()!!.month.eligibleDays)
         assertEquals(1, ready()!!.month.daysWithStart)

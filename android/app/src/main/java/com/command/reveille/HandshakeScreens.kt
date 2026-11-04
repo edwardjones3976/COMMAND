@@ -64,6 +64,9 @@ internal val TYPING_KEYBOARD = KeyboardOptions(
 @Composable
 internal fun TypingChallenge(challenge: Challenge.Typing, onChanged: (String) -> Unit, onSubmitted: (String) -> Unit) {
     var text by rememberSaveable(challenge.tryId) { mutableStateOf("") }
+    // What was typed comes back with a restored screen (it is saved with it) without anyone typing it: the try had begun, so the view model is
+    // told again and its clock runs. It does nothing if it knows already (a screen that was only turned).
+    LaunchedEffect(challenge.tryId) { if (text.isNotEmpty()) onChanged(text) }
     val focus = remember { FocusRequester() }
     val screenReader = LocalContext.current.getSystemService(AccessibilityManager::class.java)?.isTouchExplorationEnabled == true
     LaunchedEffect(challenge.tryId) { if (!screenReader) runCatching { focus.requestFocus() } }
@@ -165,10 +168,11 @@ internal fun OutOfTriesNote() {
 /**
  * The hold's assistive confirm, for a person who cannot hold a finger down: [ASSISTIVE_TAPS] deliberate taps in place of the press, the
  * label saying how many are done (a screen reader announces it as it changes). [primary] is the whole answer to the hold (the tries
- * on the press are used up), otherwise it sits under the hold target (a screen reader is on).
+ * on the press are used up), otherwise it sits under the hold target (a screen reader is on). The first tap begins the try ([onBegun]): from
+ * then on it must be finished in the step's time, like a phrase or a sequence.
  */
 @Composable
-internal fun AssistiveConfirm(tryId: TryId, primary: Boolean, onConfirmed: () -> Unit) {
+internal fun AssistiveConfirm(tryId: TryId, primary: Boolean, onBegun: () -> Unit = {}, onConfirmed: () -> Unit) {
     var taps by rememberSaveable(tryId) { mutableIntStateOf(0) }
     val label = if (taps == 0) {
         stringResource(R.string.reveille_hold_accessible_button)
@@ -177,6 +181,7 @@ internal fun AssistiveConfirm(tryId: TryId, primary: Boolean, onConfirmed: () ->
     }
     val modifier = Modifier.fillMaxWidth().heightIn(min = if (primary) 96.dp else 56.dp).semantics { liveRegion = LiveRegionMode.Polite }.testTag(ReveilleTags.ACCESSIBLE)
     val tapped = {
+        if (taps == 0) onBegun()
         if (taps + 1 >= ASSISTIVE_TAPS) onConfirmed() else taps += 1
     }
     if (primary) {
