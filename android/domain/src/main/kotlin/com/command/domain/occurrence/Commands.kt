@@ -14,8 +14,12 @@ sealed class OccurrenceCommand(val label: String) {
 
     data object Fire : OccurrenceCommand("FIRE")
 
-    /** A handshake chain succeeded. The accessible-alternative flag is recorded on the challenge row, not here. */
-    data class Acknowledge(val accessibleAlternative: Boolean = false) : OccurrenceCommand("ACKNOWLEDGE")
+    /**
+     * A handshake chain succeeded. The accessible-alternative flag is recorded on the challenge row, not here. [firstActionIndicated] is a
+     * two-step that was passed as one: the person said what they will do first. It is its own audit event, and it never moves the occurrence
+     * past acknowledged: acknowledging is not starting.
+     */
+    data class Acknowledge(val accessibleAlternative: Boolean = false, val firstActionIndicated: Boolean = false) : OccurrenceCommand("ACKNOWLEDGE")
 
     /** Always legal while ringing and never behind friction; it is not success. */
     data object SafetySilence : OccurrenceCommand("SAFETY_SILENCE")

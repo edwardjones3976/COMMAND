@@ -13,6 +13,26 @@ enum class HandshakeMode {
             QR, NFC, VOICE -> TYPING
             TWO_STEP -> HOLD
         }
+
+    /**
+     * Whether a person can be asked for this challenge today. Hold, the confirmation sequence, typing and two-step are built and tested; QR,
+     * NFC and voice are planned (each needs a camera, a tag reader or a microphone, and its own consent) and stay marked as planned until
+     * their tests pass (spec section 4). A chain that names one is run with the mode [offered] in its place, and the record says so.
+     */
+    val available: Boolean
+        get() = when (this) {
+            HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP -> true
+            QR, NFC, VOICE -> false
+        }
+
+    /** The mode that is really asked for in place of this one: itself when it is [available], otherwise its fallback, and so on until one is. */
+    val offered: HandshakeMode
+        get() {
+            var mode = this
+            var hops = 0
+            while (!mode.available && hops++ < values().size) mode = mode.fallback
+            return mode
+        }
 }
 
 enum class ChainOp { AND, OR, SEQUENCE }
