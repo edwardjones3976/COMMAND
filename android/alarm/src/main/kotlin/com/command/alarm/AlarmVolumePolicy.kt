@@ -75,7 +75,9 @@ class AlarmVolumePolicy @Inject constructor(
     }
 
     /** Puts the volume back after [occurrenceId]'s ring, unless the person has changed it since. */
-    suspend fun restoreFor(occurrenceId: String) = lock.withLock { undo(only = occurrenceId) }
+    suspend fun restoreFor(occurrenceId: String) {
+        lock.withLock { undo(only = occurrenceId) }
+    }
 
     /** From the service, which cannot wait for the database: the work is done on the policy's own scope. */
     fun restoreSoonFor(occurrenceId: String) {
@@ -112,25 +114,105 @@ class AlarmVolumePolicy @Inject constructor(
      * ring is sounding in this process, whichever it is, what it raised is kept, so opening the app to answer an alarm never turns the
      * alarm down. What the database says about the occurrence cannot decide this: a ring that was killed stays "firing" there.
      */
-    suspend fun restoreStale() = lock.withLock {
-        settings.volumeRestore() ?: return
-        if (session.isRinging) return
-        undo(only = null)
+    suspend fun restoreStale() {
+        lock.withLock {
+            settings.volumeRestore() ?: return
+            if (session.isRinging) return
+            undo(only = null)
+        }
     }
 
     /**
-     * Puts the volume back now, whatever is ringing: for erasing everything, which has ended every ring first and is about to delete the
-     * record that says what the volume was. False when the record is still there afterwards, because the platform refused to put the
-     * volume back: nothing will put it back later once the record is gone, so the caller says so.
+     * What an erase could not finish putting back, kept in memory: the record of it is in the database, which the erase deletes, and trying
+     * again needs to know what the volume was. [seen] is what the volume stood at when the attempt ended, so that a level the person sets
+     * themselves afterwards is told from the one the platform left. Guarded by [lock].
      */
-    suspend fun restoreNow(): Boolean = lock.withLock {
-        undo(only = null)
-        settings.volumeRestore() == null
+    private class Unfinished(val original: Int, val seen: Int)
+
+    @Volatile private var unfinished: Unfinished? = null
+
+    /**
+     * An erase is under way. Only then is a restore that falls short remembered, whoever did the restore: the ring's own clean-up runs on
+     * its own scope as the erase ends the ring, and the erase must still be able to say that the volume is not what the person had. (An
+     * ordinary ring that ends on a phone with a floor leaves nothing behind.)
+     */
+    @Volatile private var erasing = false
+
+    fun eraseBegan() {
+        erasing = true
     }
 
-    private suspend fun undo(only: String?) {
-        val record = settings.volumeRestore() ?: return
-        if (only != null && record.occurrenceId != only) return
+    /** The erase failed before it deleted anything: the app goes on as it was. */
+    fun eraseAbandoned() {
+        erasing = false
+    }
+
+    /** Whether an erase left the volume unrestored, so that [retryUnfinishedRestore] has something to try. */
+    val hasUnfinishedRestore: Boolean get() = unfinished != null
+
+    /**
+     * Puts the volume back now, whatever is ringing: for erasing everything, which has ended every ring first and is about to delete the
+     * record that says what the volume was. False when the volume is not what the person had, because the platform refused to put it back
+     * or would only take it as low as its own floor. What was wanted is kept, so that [retryUnfinishedRestore] can try again once the record
+     * is gone; the caller says so in the meantime.
+     */
+    suspend fun restoreNow(): Boolean = lock.withLock {
+        val record = settings.volumeRestore()
+        if (record == null) {
+            // Nothing is recorded: nothing was raised, or the ring's own clean-up has already put it back. If that fell short, it noted so
+            // (an erase is under way), and the volume is tried again from the note.
+            return@withLock retryLocked()
+        }
+        val exact = undo(only = null)
+        if (exact) {
+            unfinished = null
+        } else if (unfinished == null) {
+            // A refusal keeps the record; the note of what was wanted is made here (a level only reached its floor was noted by the restore).
+            unfinished = Unfinished(record.original, audio?.getStreamVolume(AudioManager.STREAM_ALARM) ?: record.set)
+        }
+        exact
+    }
+
+    /**
+     * After an erase that could not put the volume back and has since deleted its record: tries again, from what was kept. True when it is
+     * done: the volume is back, or the person has set it themselves since (what they chose is theirs). False when the platform refuses
+     * still, or still keeps it above its floor. Needs no database.
+     */
+    suspend fun retryUnfinishedRestore(): Boolean = lock.withLock { retryLocked() }
+
+    /** [retryUnfinishedRestore], for a caller that holds [lock]. */
+    private fun retryLocked(): Boolean {
+        val left = unfinished ?: return true
+        val manager = audio
+        if (manager == null || manager.getStreamVolume(AudioManager.STREAM_ALARM) != left.seen) {
+            unfinished = null
+            return true
+        }
+        try {
+            manager.setStreamVolume(AudioManager.STREAM_ALARM, left.original, 0)
+        } catch (e: SecurityException) {
+            return false
+        }
+        val now = manager.getStreamVolume(AudioManager.STREAM_ALARM)
+        return if (now == left.original) {
+            unfinished = null
+            true
+        } else {
+            unfinished = Unfinished(left.original, now)
+            false
+        }
+    }
+
+    /**
+     * Puts back what the ring of [only] (or any ring, when it is null) raised. True when the volume is as the person would want it
+     * afterwards: put back exactly, moved by the person since (what they chose is theirs), or there was nothing to put back. False when the
+     * platform refused (the record stays, so that the next reconcile tries again) or took it only as far as its own floor allows (the record
+     * is cleared, because nothing more can be done, and the log says what was wanted and what came out).
+     */
+    private suspend fun undo(only: String?): Boolean {
+        val record = settings.volumeRestore() ?: return true
+        if (only != null && record.occurrenceId != only) return true
+        var exact = true
         val manager = audio
         if (manager != null) {
             if (manager.getStreamVolume(AudioManager.STREAM_ALARM) == record.set) {
@@ -141,12 +223,15 @@ class AlarmVolumePolicy @Inject constructor(
                     repository.get(record.occurrenceId)?.let {
                         repository.logEvent(EventType.VOLUME_SET_REFUSED, it, EventSource.SERVICE, EventPayload.of("phase" to "restore"))
                     }
-                    return
+                    return false
                 }
                 val now = manager.getStreamVolume(AudioManager.STREAM_ALARM)
                 if (now != record.original) {
                     // The platform keeps an app without its privileged audio permission above a floor of its own, so a level below it cannot be
-                    // put back. The record is cleared (nothing more can be done) but the log says what was wanted and what came out.
+                    // put back. The record is cleared (nothing more can be done) but the log says what was wanted and what came out, and the
+                    // caller is told that the volume is not what the person had.
+                    exact = false
+                    if (erasing) unfinished = Unfinished(record.original, now)
                     repository.get(record.occurrenceId)?.let {
                         repository.logEvent(EventType.VOLUME_SET_REFUSED, it, EventSource.SERVICE, EventPayload.of("phase" to "restore", "wanted" to record.original, "got" to now))
                     }
@@ -157,6 +242,7 @@ class AlarmVolumePolicy @Inject constructor(
             }
         }
         settings.clearVolumeRestore()
+        return exact
     }
 
     private companion object {

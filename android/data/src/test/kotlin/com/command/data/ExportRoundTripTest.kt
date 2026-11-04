@@ -274,6 +274,25 @@ class ExportRoundTripTest {
     }
 
     @Test
+    fun `an alarm whose stored state or reason cannot be read says UNKNOWN in the history, not a blank, and the export still works`() = run {
+        val ids = populate()
+        val raw = f.db.openHelper.writableDatabase
+        raw.execSQL("UPDATE occurrences SET state = 'FROM_A_NEWER_VERSION' WHERE id = '${ids.getValue("started")}'")
+        raw.execSQL("UPDATE occurrences SET miss_reason = 'NOT_A_REASON' WHERE id = '${ids.getValue("missed")}'")
+
+        val table = parseCsv(export().text("history.csv").removePrefix("\uFEFF"))
+        val byId = table.drop(1).associateBy { it[0] }
+
+        val started = byId.getValue(ids.getValue("started"))
+        assertEquals("the state is exported as it is stored", "FROM_A_NEWER_VERSION", started[8])
+        assertEquals("UNKNOWN", started[9])
+        assertEquals("UNKNOWN", byId.getValue(ids.getValue("missed"))[9])
+        assertEquals("the others are told as before", "SILENCED", byId.getValue(ids.getValue("silenced"))[9])
+        assertEquals(DataExporter.UNKNOWN_OUTCOME, "UNKNOWN")
+        assertTrue("and the README tells the person the same word", export().text("README.txt").contains("(UNKNOWN when the state or the reason"))
+    }
+
+    @Test
     fun `a title a spreadsheet would take for a formula is shown as text in the history and exact in the data`() = run {
         val formula = "=HYPERLINK(\"http://example.org\",\"Open\")"
         val mission = f.mission(title = formula)

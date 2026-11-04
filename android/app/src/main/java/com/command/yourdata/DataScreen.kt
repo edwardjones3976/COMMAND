@@ -266,14 +266,17 @@ private fun Erased(done: EraseStatus.Done, modifier: Modifier, onClose: () -> Un
         verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
     ) {
         Text(
-            if (done.complete) {
-                stringResource(R.string.data_erased_done)
-            } else {
-                pluralStringResource(R.plurals.data_erased_partial, done.leftovers + done.problems, done.leftovers + done.problems)
+            when {
+                done.complete -> stringResource(R.string.data_erased_done)
+                done.onlyVolumeLeft -> stringResource(R.string.data_erased_volume_only)
+                else -> pluralStringResource(R.plurals.data_erased_partial, done.leftovers + done.problems, done.leftovers + done.problems)
             },
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(bottom = 16.dp),
         )
+        if (done.volumeLeft && !done.onlyVolumeLeft) {
+            Text(stringResource(R.string.data_erased_volume_also), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(bottom = 16.dp))
+        }
         Button(onClick = onClose, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(DataTags.CLOSE)) {
             Text(stringResource(R.string.data_erased_close), style = MaterialTheme.typography.labelLarge)
         }

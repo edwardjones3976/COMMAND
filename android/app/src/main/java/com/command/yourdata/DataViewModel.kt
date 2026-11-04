@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -33,9 +34,15 @@ sealed interface EraseStatus {
     data object Confirming : EraseStatus
     data object Working : EraseStatus
 
-    /** [leftovers] are files that could not be deleted, [problems] steps that did not work. Both are zero when everything is gone. */
-    data class Done(val leftovers: Int, val problems: Int) : EraseStatus {
+    /**
+     * [leftovers] are files that could not be deleted, [problems] steps that did not work. Both are zero when everything is gone.
+     * [volumeLeft] is one of the problems: the alarm volume could not be put back, which closing the app does not change.
+     */
+    data class Done(val leftovers: Int, val problems: Int, val volumeLeft: Boolean = false) : EraseStatus {
         val complete: Boolean get() = leftovers == 0 && problems == 0
+
+        /** Nothing is left but the volume, so that the words about "the rest" that Android clears would be untrue. */
+        val onlyVolumeLeft: Boolean get() = leftovers == 0 && problems == 1 && volumeLeft
     }
 
     /** The erase itself failed: it can be asked for again. */
@@ -137,11 +144,20 @@ class DataViewModel @Inject constructor(
         viewModelScope.launch {
             val status = try {
                 val report = rights.erase()
-                EraseStatus.Done(report.leftovers.size, report.problems.size)
+                EraseStatus.Done(report.leftovers.size, report.problems.size, report.volumeLeft)
             } catch (e: CancellationException) {
+                // The screen is gone (the activity was destroyed with the phone's "don't keep activities" setting, say) and the erase runs on to
+                // its end without it: by now the database is deleted, and nobody is left to look at a report or to end the app. Android's own
+                // clearing of the app's data finishes whatever the erase could not, so it is asked for here.
+                reset.clearAndExit()
                 throw e
             } catch (e: Exception) {
                 EraseStatus.Failed
+            }
+            if (!isActive) {
+                // The same, when the result reached here without the exception (the erase that finished on the same dispatcher does not throw).
+                reset.clearAndExit()
+                return@launch
             }
             _state.update { it.copy(erase = status) }
         }
@@ -149,4 +165,12 @@ class DataViewModel @Inject constructor(
 
     /** Ends the app. Once everything is erased there is nothing left for it to do, and its memory still holds a closed database. */
     fun closeApp() = reset.clearAndExit()
+
+    /**
+     * The screen is gone for good (not turned: this is not called then). If an erase had finished, nobody is left to end the app, and its
+     * memory still holds a closed database and a closed latch: it is ended here. (While the erase is running the cancelled scope does it.)
+     */
+    override fun onCleared() {
+        if (_state.value.erase is EraseStatus.Done) reset.clearAndExit()
+    }
 }

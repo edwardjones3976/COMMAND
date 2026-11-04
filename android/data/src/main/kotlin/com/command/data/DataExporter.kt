@@ -102,7 +102,8 @@ class DataExporter @Inject constructor(
         append("                      _local hold the clock time as text, and columns that end in _min or _minutes hold minutes.\n")
         append("                      A column that holds bytes is written as {\"base64\": \"...\"}.\n")
         append("history.csv           every alarm that rang or is still planned, with its mission, its time in UTC and in the zone it was set in, its state and how\n")
-        append("                      History tells it. An alarm that was planned and then removed when its mission was edited or deleted never rang and is not in it.\n")
+        append("                      History tells it ($UNKNOWN_OUTCOME when the state or the reason stored for it could not be read). An alarm that was planned and then\n")
+        append("                      removed when its mission was edited or deleted never rang and is not in it.\n")
         append("                      The file is UTF-8 with a byte-order mark, so that a spreadsheet reads the accents. A title that starts with = + - or @ has a '\n")
         append("                      in front of it there, so that a spreadsheet shows it as text.\n\n")
         append("Left out: the caches (").append(SKIPPED.joinToString(", ")).append("), which can be rebuilt and hold nothing you wrote.\n")
@@ -178,7 +179,7 @@ class DataExporter @Inject constructor(
                         at, zone, OccurrenceState.valueOf(state),
                         c.getString(8)?.let { SkipReason.valueOf(it) }, c.getString(9)?.let { MissReason.valueOf(it) },
                     ).reason.name
-                }.getOrDefault("")
+                }.getOrDefault(UNKNOWN_OUTCOME)
                 lines.append(
                     listOf(
                         c.getString(0), c.getString(1), c.getString(2) ?: "", c.getString(3) ?: "", (!c.isNull(4)).toString(), at.toString(),
@@ -214,6 +215,9 @@ class DataExporter @Inject constructor(
     companion object {
         /** Rebuilt on demand, and holding nothing the person wrote. */
         val SKIPPED = setOf("voice_renders", "directive_cache", "sync_outbox")
+
+        /** What the history says for an alarm whose stored state or reason is not one this version knows: not a blank, which would read as "nothing happened". */
+        const val UNKNOWN_OUTCOME = "UNKNOWN"
 
         private val FORMULA_STARTS = setOf('=', '+', '-', '@', '\t', '\r')
     }

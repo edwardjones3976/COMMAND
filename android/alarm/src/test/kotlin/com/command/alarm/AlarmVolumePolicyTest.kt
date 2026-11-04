@@ -280,6 +280,132 @@ class AlarmVolumePolicyTest {
     }
 
     @Test
+    fun `restoring now says whether the volume is the person's again, and keeps what it could not finish for a retry that needs no database`() {
+        allowed()
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 1, 0)
+        val o = armed()
+        runBlocking { policy.raiseFor(o) }
+        assertFalse(policy.hasUnfinishedRestore)
+
+        VolumeRefusalShadow.floor = 3 // the platform keeps it at 3 or more
+        assertFalse("it went only as low as the platform allows", runBlocking { policy.restoreNow() })
+        assertNull("the record is cleared, there is nothing more the database can do", record())
+        assertTrue("but what was wanted is kept", policy.hasUnfinishedRestore)
+        assertFalse("and trying again, with the platform still saying 3, is no better", runBlocking { policy.retryUnfinishedRestore() })
+        assertEquals(3, volume())
+        assertTrue(policy.hasUnfinishedRestore)
+
+        VolumeRefusalShadow.floor = 0
+        assertTrue("the platform allows it now", runBlocking { policy.retryUnfinishedRestore() })
+        assertEquals(1, volume())
+        assertFalse(policy.hasUnfinishedRestore)
+        assertTrue("and then there is nothing left to do", runBlocking { policy.retryUnfinishedRestore() })
+    }
+
+    @Test
+    fun `during an erase a restore that only reached the platform's floor is remembered whoever did it, so that the erase can say so`() {
+        allowed()
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 1, 0)
+        val o = armed()
+        runBlocking { policy.raiseFor(o) }
+        policy.eraseBegan()
+
+        VolumeRefusalShadow.floor = 3
+        runBlocking { policy.restoreFor(o.id) } // the ring's own clean-up, which runs as the erase ends the ring and gets there first
+        assertNull("the record is gone", record())
+        assertTrue("but the shortfall is remembered", policy.hasUnfinishedRestore)
+
+        assertFalse("so the erase's own restore still says the volume is not what the person had", runBlocking { policy.restoreNow() })
+        assertTrue(policy.hasUnfinishedRestore)
+        assertEquals(3, volume())
+
+        VolumeRefusalShadow.floor = 0
+        assertTrue("and it is put back once the platform allows it", runBlocking { policy.retryUnfinishedRestore() })
+        assertEquals(1, volume())
+        assertFalse(policy.hasUnfinishedRestore)
+    }
+
+    @Test
+    fun `a shortfall the ring's clean-up left is forgotten once the person has set the volume themselves`() {
+        allowed()
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 1, 0)
+        val o = armed()
+        runBlocking { policy.raiseFor(o) }
+        policy.eraseBegan()
+        VolumeRefusalShadow.floor = 3
+        runBlocking { policy.restoreFor(o.id) }
+        assertTrue(policy.hasUnfinishedRestore)
+
+        VolumeRefusalShadow.floor = 0
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 6, 0) // theirs
+
+        assertTrue("what they chose is theirs", runBlocking { policy.restoreNow() })
+        assertEquals(6, volume())
+        assertFalse(policy.hasUnfinishedRestore)
+    }
+
+    @Test
+    fun `outside an erase a ring that ended on a floor leaves nothing to report, so a later erase is not blamed for it`() {
+        allowed()
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 1, 0)
+        val o = armed()
+        runBlocking { policy.raiseFor(o) }
+
+        VolumeRefusalShadow.floor = 3
+        runBlocking { policy.restoreFor(o.id) }
+
+        assertFalse(policy.hasUnfinishedRestore)
+        assertTrue("an erase with nothing recorded has nothing to report", runBlocking { policy.restoreNow() })
+    }
+
+    @Test
+    fun `an erase that was abandoned stops remembering what falls short`() {
+        allowed()
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 1, 0)
+        val o = armed()
+        runBlocking { policy.raiseFor(o) }
+        policy.eraseBegan()
+        policy.eraseAbandoned()
+
+        VolumeRefusalShadow.floor = 3
+        runBlocking { policy.restoreFor(o.id) }
+
+        assertFalse(policy.hasUnfinishedRestore)
+    }
+
+    @Test
+    fun `restoring now is a success when nothing was raised, and when the person moved the volume since`() {
+        allowed()
+        assertTrue("nothing was raised", runBlocking { policy.restoreNow() })
+        assertFalse(policy.hasUnfinishedRestore)
+
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 2, 0)
+        val o = armed()
+        runBlocking { policy.raiseFor(o) }
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 4, 0) // the person turns it down themselves, but not to what it was
+        assertTrue("what they chose is theirs", runBlocking { policy.restoreNow() })
+        assertEquals(4, volume())
+        assertFalse(policy.hasUnfinishedRestore)
+    }
+
+    @Test
+    fun `a retry finds the volume moved by the person and leaves it`() {
+        allowed()
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 2, 0)
+        val o = armed()
+        runBlocking { policy.raiseFor(o) }
+        VolumeRefusalShadow.refuse = true
+        assertFalse(runBlocking { policy.restoreNow() })
+        assertTrue(policy.hasUnfinishedRestore)
+
+        VolumeRefusalShadow.refuse = false
+        audio.setStreamVolume(AudioManager.STREAM_ALARM, 5, 0)
+        assertTrue("moved since, so it is theirs", runBlocking { policy.retryUnfinishedRestore() })
+        assertEquals(5, volume())
+        assertFalse(policy.hasUnfinishedRestore)
+    }
+
+    @Test
     fun `a restore that the platform cannot take as low as the person had it is written down with what was wanted and what came out`() {
         allowed()
         audio.setStreamVolume(AudioManager.STREAM_ALARM, 1, 0) // a level that only a privileged caller could have set

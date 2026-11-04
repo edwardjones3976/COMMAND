@@ -52,6 +52,7 @@ class ReconcileWorkerTest {
     @Inject lateinit var db: CommandDb
     @Inject lateinit var clock: FakeClock
     @Inject lateinit var scheduler: FakeAlarmScheduler
+    @Inject lateinit var latch: ErasureLatch
 
     private lateinit var context: Context
 
@@ -89,6 +90,20 @@ class ReconcileWorkerTest {
         assertEquals(1, events(EventType.ALARM_LOST).size)
         val summary = events(EventType.BOOT_RECONCILE).single()
         assertTrue(summary.payloadJson.contains("BOOT"))
+    }
+
+    @Test
+    fun `while everything is being erased a run that was already queued does nothing and queues nothing`() {
+        saveStandup()
+        scheduler.armed.clear() // taken back by the erase
+        latch.seal()
+
+        val result = runBlocking { worker("BOOT").doWork() }
+
+        assertEquals(ListenableWorker.Result.success(), result)
+        assertTrue("no alarm was set again", scheduler.armed.isEmpty())
+        assertTrue(events(EventType.BOOT_RECONCILE).isEmpty())
+        assertEquals("and the backstop was not queued again", 0, WorkManager.getInstance(context).getWorkInfosForUniqueWork(ReconcileAlarmsWorker.NAME_PERIODIC).get().size)
     }
 
     @Test

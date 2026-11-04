@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.work.WorkManager
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.command.alarm.AlarmContract
+import com.command.alarm.ErasureLatch
 import com.command.alarm.ReconcileAlarmsWorker
 import com.command.data.MissionDraft
 import com.command.data.MissionRepository
@@ -42,6 +43,7 @@ class AppStartupTest {
     @Inject lateinit var missions: MissionRepository
     @Inject lateinit var db: CommandDb
     @Inject lateinit var scheduler: FakeAlarmScheduler
+    @Inject lateinit var latch: ErasureLatch
 
     @Before
     fun setUp() {
@@ -73,5 +75,24 @@ class AppStartupTest {
         startup.run()
         assertEquals("nothing was duplicated", 1, db.occurrences().forMission(id).size)
         assertEquals(1, db.missions().count())
+    }
+
+    @Test
+    fun `while everything is being erased opening the app brings nothing back`() = runBlocking {
+        missions.save(
+            MissionDraft(
+                title = "Standup", firstAction = "Open the notes", flexibility = Flexibility.FLEXIBLE,
+                schedule = ScheduleDraft.Once(LocalDateTime.of(2026, 11, 2, 11, 0)),
+            ),
+        )
+        scheduler.armed.clear() // what the erase took back
+        latch.seal()
+
+        startup.run()
+
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertTrue("no alarm was set again", scheduler.armed.isEmpty())
+        assertEquals("the backstop was not queued again", 0, WorkManager.getInstance(context).getWorkInfosForUniqueWork(ReconcileAlarmsWorker.NAME_PERIODIC).get().size)
+        assertEquals("and the previous version's data was not looked at", null, db.settings().get(SettingKeys.LEGACY_IMPORT_DONE))
     }
 }

@@ -18,6 +18,8 @@ class ReconcileAlarmsWorker(context: Context, params: WorkerParameters) : Corout
         val trigger = inputData.getString(KEY_TRIGGER)
             ?.let { name -> ReconcileTrigger.values().firstOrNull { it.name == name } }
             ?: ReconcileTrigger.PERIODIC
+        // Everything is being erased (or is erased): a run that was already queued has nothing to do, and must not queue the backstop again.
+        if (runCatching { AlarmEntryPoint.from(applicationContext).latch().sealed }.getOrDefault(false)) return Result.success()
         // First, before anything that can fail: the backstop must exist even if this run gives up, and after an update from a version
         // that never installed it, before the app has been opened.
         ReconcileScheduler.ensurePeriodic(applicationContext)

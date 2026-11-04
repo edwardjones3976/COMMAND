@@ -4,7 +4,9 @@ import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -234,6 +236,26 @@ class DataScreenTest {
         assertEquals(0, calls.ask)
         compose.onNodeWithTag(DataTags.CLOSE).performClick()
         assertEquals(1, calls.close)
+    }
+
+    @Test
+    fun `when only the alarm volume is left it says that, and does not promise that closing the app clears the rest`() {
+        compose.mainClock.autoAdvance = false
+        val calls = show(ready(erase = EraseStatus.Done(leftovers = 0, problems = 1, volumeLeft = true)))
+
+        compose.onNodeWithText("Everything was deleted, but the alarm volume could not be put back to what it was. You can set it in your phone's sound settings.").assertIsDisplayed()
+        compose.onAllNodes(hasText("lets Android clear the rest", substring = true)).assertCountEquals(0)
+        compose.mainClock.advanceTimeBy(AUTO_CLOSE_MS * 3)
+        assertEquals("it waits for the person", 0, calls.close)
+        compose.onNodeWithTag(DataTags.RETRY).assertIsDisplayed()
+    }
+
+    @Test
+    fun `when the volume is left along with something else it says how many, and says the volume as well`() {
+        show(ready(erase = EraseStatus.Done(leftovers = 2, problems = 1, volumeLeft = true)))
+
+        compose.onNodeWithText("Almost everything was deleted. 3 things could not be removed. Closing COMMAND lets Android clear the rest.").assertIsDisplayed()
+        compose.onNodeWithText("The alarm volume could not be put back to what it was. You can set it in your phone's sound settings.").assertIsDisplayed()
     }
 
     @Test

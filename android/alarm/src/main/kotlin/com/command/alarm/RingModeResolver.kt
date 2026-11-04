@@ -30,8 +30,11 @@ class RingModeResolver @Inject constructor(
     @ApplicationContext private val context: Context,
     private val repository: OccurrenceRepository,
     private val clock: Clock,
+    private val latch: ErasureLatch,
 ) {
     suspend fun degrade(occurrenceId: String, requestCode: Int, reason: String) {
+        // Everything is being erased: no ring, not even this one, may start behind the erase.
+        if (latch.sealed) return
         val fired = repository.apply(occurrenceId, OccurrenceCommand.Fire, EventSource.RECEIVER)
         val row = (fired as? ApplyResult.Applied)?.occurrence
             ?: repository.get(occurrenceId)?.takeIf { it.state == OccurrenceState.FIRING }

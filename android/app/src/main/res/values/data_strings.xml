@@ -48,6 +48,8 @@
         <item quantity="one">Almost everything was deleted. %d thing could not be removed. Closing COMMAND lets Android clear the rest.</item>
         <item quantity="other">Almost everything was deleted. %d things could not be removed. Closing COMMAND lets Android clear the rest.</item>
     </plurals>
+    <string name="data_erased_volume_only">Everything was deleted, but the alarm volume could not be put back to what it was. You can set it in your phone\'s sound settings.</string>
+    <string name="data_erased_volume_also">The alarm volume could not be put back to what it was. You can set it in your phone\'s sound settings.</string>
     <string name="data_erased_close">Close COMMAND now</string>
     <string name="data_erased_retry">Try again</string>
 </resources>

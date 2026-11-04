@@ -7,7 +7,12 @@ import com.command.data.DataOverview
 import com.command.data.ExportSummary
 import com.command.testing.FakeClock
 import com.command.testing.android.awaitUntil
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -16,6 +21,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -28,10 +34,18 @@ import java.time.ZonedDateTime
 @Config(sdk = [36])
 class DataViewModelTest {
 
+    private enum class Survival { NO, WITH_RESULT, WITH_EXCEPTION }
+
     private class FakeRights : DataRights {
         var overview: DataOverview? = DataOverview(missions = 3, alarms = 120, entries = 2114, records = 4000)
         var exportFails = false
         var eraseFails = false
+
+        /**
+         * Like the real eraser, which cannot be cancelled half-way: it runs on to its end even when the screen that asked for it is gone. It
+         * reaches the caller with an exception when it changed dispatcher (the real one runs on the IO dispatcher), without one when it did not.
+         */
+        var eraseSurvives: Survival = Survival.NO
         var eraseReport = ErasureReport(occurrences = 5, leftovers = emptyList(), problems = emptyList())
 
         /** While set, an export or an erase waits for it, so that a test can look at the screen in the middle. */
@@ -56,7 +70,11 @@ class DataViewModelTest {
 
         override suspend fun erase(): ErasureReport {
             erases++
-            hold?.await()
+            when (eraseSurvives) {
+                Survival.NO -> hold?.await()
+                Survival.WITH_RESULT -> withContext(NonCancellable) { hold?.await() }
+                Survival.WITH_EXCEPTION -> withContext(NonCancellable + Dispatchers.Default) { hold?.await() }
+            }
             if (eraseFails) throw IllegalStateException("could not erase")
             return eraseReport
         }
@@ -385,6 +403,131 @@ class DataViewModelTest {
 
         awaitState("done") { it.erase is EraseStatus.Done }
         assertEquals(1, rights.erases)
+    }
+
+    @Test
+    fun `a screen that is destroyed while the erase runs on ends the app when the erase is over, because nobody is left to do it`() {
+        destroyedWhileErasing(Survival.WITH_EXCEPTION)
+    }
+
+    @Test
+    fun `and so when the erase reaches the destroyed screen with its result and not with an exception`() {
+        destroyedWhileErasing(Survival.WITH_RESULT)
+    }
+
+    private fun destroyedWhileErasing(survival: Survival) {
+        ready()
+        rights.hold = CompletableDeferred()
+        rights.eraseSurvives = survival
+
+        vm.askToErase()
+        awaitState("asked") { it.erase == EraseStatus.Confirming }
+        vm.eraseEverything()
+        awaitUntil(message = "the erase is running") { rights.erases == 1 }
+        vm.viewModelScope.cancel() // the activity was destroyed (the phone's "don't keep activities", say) and took its view model with it
+        assertEquals("the erase has not finished, so the app is not ended under it", 0, closes)
+
+        rights.hold!!.complete(Unit)
+
+        awaitUntil(message = "the app is ended") { closes == 1 }
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals("once", 1, closes)
+    }
+
+    /** What happens to a view model when its screen is gone for good (the activity finished, or was destroyed without being turned). */
+    private fun screenGoneForGood() {
+        val method = DataViewModel::class.java.getDeclaredMethod("onCleared")
+        method.isAccessible = true
+        method.invoke(vm)
+    }
+
+    @Test
+    fun `a screen that is gone for good after the erase finished ends the app, because nobody else will`() {
+        ready()
+        vm.askToErase()
+        awaitState("asked") { it.erase == EraseStatus.Confirming }
+        vm.eraseEverything()
+        awaitState("done") { it.erase is EraseStatus.Done }
+        assertEquals("still open: the screen decides when to close", 0, closes)
+
+        screenGoneForGood()
+
+        assertEquals(1, closes)
+    }
+
+    @Test
+    fun `and so when the erase left something, because its memory still holds a closed database all the same`() {
+        ready()
+        rights.eraseReport = ErasureReport(occurrences = 5, leftovers = listOf("files/a"), problems = emptyList())
+        vm.askToErase()
+        awaitState("asked") { it.erase == EraseStatus.Confirming }
+        vm.eraseEverything()
+        awaitState("done") { it.erase is EraseStatus.Done }
+
+        screenGoneForGood()
+
+        assertEquals(1, closes)
+    }
+
+    @Test
+    fun `a screen that goes when nothing was erased ends nothing, whether it was asked, failed or never asked`() {
+        ready()
+        screenGoneForGood()
+        assertEquals("never asked", 0, closes)
+
+        vm.askToErase()
+        awaitState("asked") { it.erase == EraseStatus.Confirming }
+        screenGoneForGood()
+        assertEquals("asked", 0, closes)
+
+        rights.eraseFails = true
+        vm.eraseEverything()
+        awaitState("failed") { it.erase == EraseStatus.Failed }
+        screenGoneForGood()
+        assertEquals("failed outright: the database is still there", 0, closes)
+    }
+
+    @Test
+    fun `an erase that could not put the alarm volume back says so, and when it is all that is left it says so alone`() {
+        ready()
+        rights.eraseReport = ErasureReport(occurrences = 5, leftovers = emptyList(), problems = listOf("the alarm volume could not be put back"), volumeLeft = true)
+        vm.askToErase()
+        awaitState("asked") { it.erase == EraseStatus.Confirming }
+        vm.eraseEverything()
+
+        awaitState("done") { it.erase is EraseStatus.Done }
+        val done = vm.state.value.erase as EraseStatus.Done
+        assertTrue(done.volumeLeft)
+        assertTrue("nothing but the volume is left", done.onlyVolumeLeft)
+        assertFalse(done.complete)
+    }
+
+    @Test
+    fun `the volume along with something else is not all that is left`() {
+        ready()
+        rights.eraseReport = ErasureReport(occurrences = 5, leftovers = listOf("files/a"), problems = listOf("the alarm volume could not be put back"), volumeLeft = true)
+        vm.askToErase()
+        awaitState("asked") { it.erase == EraseStatus.Confirming }
+        vm.eraseEverything()
+
+        awaitState("done") { it.erase is EraseStatus.Done }
+        val done = vm.state.value.erase as EraseStatus.Done
+        assertTrue(done.volumeLeft)
+        assertFalse(done.onlyVolumeLeft)
+    }
+
+    @Test
+    fun `a screen that is cancelled before the erase has begun does not end the app`() {
+        ready()
+        rights.hold = CompletableDeferred()
+
+        vm.askToErase()
+        awaitState("asked") { it.erase == EraseStatus.Confirming }
+        vm.viewModelScope.cancel() // gone while still being asked: nothing was erased
+
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(0, rights.erases)
+        assertEquals(0, closes)
     }
 }
 

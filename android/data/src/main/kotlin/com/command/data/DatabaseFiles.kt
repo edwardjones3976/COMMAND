@@ -13,7 +13,7 @@ import javax.inject.Singleton
  * close the database and delete the files it lives in (this version's and the one the previous version left).
  */
 @Singleton
-class DatabaseFiles @Inject constructor(
+open class DatabaseFiles @Inject constructor(
     @ApplicationContext private val context: Context,
     private val db: CommandDb,
 ) {
@@ -23,7 +23,7 @@ class DatabaseFiles @Inject constructor(
         private set
 
     /** Every occurrence there is: the platform alarms, rings and notices are keyed by them, so they are what has to be taken back. */
-    suspend fun occurrences(): List<OccurrenceRow> = if (isGone) emptyList() else db.occurrences().all()
+    open suspend fun occurrences(): List<OccurrenceRow> = if (isGone) emptyList() else db.occurrences().all()
 
     /**
      * Closes the database and deletes its files, with the journal and write-ahead files beside them, and the previous version's database.

@@ -13,6 +13,7 @@ import com.command.domain.model.SettingKeys
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -134,6 +135,54 @@ class LegacyAlarmCancellerTest {
         canceller.cancelIfNeeded()
 
         assertNull(manager.getNotificationChannel(LegacyAlarmCanceller.CHANNEL_ID))
+    }
+
+    @Test
+    fun `cancelNow takes the old alarms down whether or not the first start did, and leaves the record of that start alone`() = runBlocking {
+        legacyDbWithMissions(7)
+        f.db.settings().put(SettingRow(SettingKeys.LEGACY_ALARMS_CANCELLED, "true")) // the first start finished long ago ...
+        legacyMissionAlarm(7) // ... and alarms of the old kind are there all the same
+        legacyCalendarAlarm()
+        assertNull("cancelIfNeeded would do nothing now", canceller.cancelIfNeeded())
+        assertEquals(2, shadowOf(alarms).scheduledAlarms.size)
+
+        assertTrue("it could look", canceller.cancelNow())
+
+        assertTrue(shadowOf(alarms).scheduledAlarms.isEmpty())
+        assertEquals("true", f.db.settings().get(SettingKeys.LEGACY_ALARMS_CANCELLED))
+    }
+
+    @Test
+    fun `cancelNow does not write the record of the first start, whatever it finds`() = runBlocking {
+        legacyDbWithMissions(7)
+        legacyMissionAlarm(7)
+
+        assertTrue(canceller.cancelNow())
+
+        assertNull("only the first start's own run says that it has been done", f.db.settings().get(SettingKeys.LEGACY_ALARMS_CANCELLED))
+    }
+
+    @Test
+    fun `cancelNow with no old database is a success that takes down the calendar wake-up`() = runBlocking {
+        legacyCalendarAlarm()
+
+        assertTrue(canceller.cancelNow())
+
+        assertTrue(shadowOf(alarms).scheduledAlarms.isEmpty())
+    }
+
+    @Test
+    fun `cancelNow says so when the old database is there and cannot be read, and still takes down what needs no database`() = runBlocking {
+        val file: File = context.getDatabasePath(LegacyImporter.LEGACY_DB_NAME)
+        file.parentFile!!.mkdirs()
+        file.writeBytes(ByteArray(2048) { (it % 251).toByte() })
+        legacyCalendarAlarm()
+
+        assertFalse("the alarms of its missions could not be found", canceller.cancelNow())
+
+        assertTrue("the calendar wake-up needs no database", shadowOf(alarms).scheduledAlarms.isEmpty())
+        assertTrue("and the user's old file is untouched", file.isFile)
+        assertNull("and it did not record that it had looked, which a later start would take for the truth", f.db.settings().get(SettingKeys.LEGACY_ALARMS_CANCELLED))
     }
 
     @Test
