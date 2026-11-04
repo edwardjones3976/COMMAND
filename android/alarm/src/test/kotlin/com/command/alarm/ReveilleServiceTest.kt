@@ -511,6 +511,34 @@ class ReveilleServiceTest {
     }
 
     @Test
+    fun `an erase that seals the latch while the fallback ring is asking the database still keeps it from sounding`() {
+        val o = armed()
+        // Open when the fallback ring begins, closed by the time it is ready to post: the erase got in between its database calls.
+        val closesMeanwhile = object : ErasureLatch() {
+            var looks = 0
+            override val sealed: Boolean get() = ++looks > 1
+        }
+
+        runBlocking { RingModeResolver(context, repo, clock, closesMeanwhile).degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+
+        assertTrue("nothing sounds behind the erase", notifications().allNotifications.isEmpty())
+    }
+
+    @Test
+    fun `and one that seals it just as the notification is posted takes the notification down again`() {
+        val o = armed()
+        val closesAfterPosting = object : ErasureLatch() {
+            var looks = 0
+            override val sealed: Boolean get() = ++looks > 2
+        }
+
+        runBlocking { RingModeResolver(context, repo, clock, closesAfterPosting).degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+
+        assertTrue("it was posted and then taken down, so nothing is left to sound", notifications().allNotifications.isEmpty())
+        assertTrue("and it was looked at after the post", closesAfterPosting.looks >= 3)
+    }
+
+    @Test
     fun `without notification permission the ring still fires and nothing is posted or thrown`() {
         shadowOf(context as android.app.Application).denyPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
         val o = armed()
