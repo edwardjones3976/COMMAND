@@ -38,4 +38,13 @@
     <string name="reveille_reason_NEED_REST">Need rest</string>
     <string name="reveille_reason_NOT_RELEVANT_TODAY">Not relevant today</string>
     <string name="reveille_reason_OTHER">Other</string>
+
+    <!-- What Back offers while the alarm rings -->
+    <string name="reveille_escape_title">Need to get out of this?</string>
+    <string name="reveille_escape_body">Choose what is true. It is recorded exactly as you choose it: silenced, put off or skipped, never as started. A fixed commitment may ask for a little more before it lets go.</string>
+    <string name="reveille_escape_silence">Silence the alarm</string>
+    <string name="reveille_escape_delay_title">Or put it off for</string>
+    <string name="reveille_escape_delay_minutes">%1$d min</string>
+    <string name="reveille_escape_skip">Skip this one</string>
+    <string name="reveille_escape_keep">Keep ringing</string>
 </resources>

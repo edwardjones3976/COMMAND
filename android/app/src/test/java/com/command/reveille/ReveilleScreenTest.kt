@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -156,7 +157,7 @@ class ReveilleScreenTest {
     }
 
     @Test
-    fun `Back does nothing while the alarm rings and is free again afterwards`() {
+    fun `Back is not an exit while the alarm rings, and is free again afterwards`() {
         var dispatcher: OnBackPressedDispatcher? = null
         var state by mutableStateOf<ReveilleUiState>(firing)
         val r = Recorder()
@@ -251,6 +252,107 @@ class ReveilleScreenTest {
         show(ReveilleUiState.Direction("x", "y", 5), r, FrictionPrompt(LockPolicy.CONFIRM) { })
         compose.onNodeWithText("Keep going").performClick()
         assertEquals(1, r.frictionDismissed)
+    }
+
+    // --- the way out that Back opens ---------------------------------------------------------------------------
+
+    /** Shows [state] with its Back dispatcher in hand, and returns what presses Back. */
+    private fun showWithBack(state: ReveilleUiState, r: Recorder): () -> Unit {
+        var dispatcher: OnBackPressedDispatcher? = null
+        compose.setContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            CommandTheme(darkTheme = true) {
+                ReveilleContent(state, null, SkipReasonCode.values().toList(), r.actions(), {}, {})
+            }
+        }
+        return { compose.runOnIdle { dispatcher!!.onBackPressed() } }
+    }
+
+    @Test
+    fun `Back opens the way out while it rings, with silence, three delays, skip or keep ringing, and Safety silence stays on the screen`() {
+        val r = Recorder()
+        val back = showWithBack(firing, r)
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertDoesNotExist()
+
+        back()
+
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertIsDisplayed()
+        compose.onNodeWithText("Need to get out of this?").assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_SILENCE).assertIsDisplayed()
+        for (minutes in listOf(10, 30, 60)) compose.onNodeWithTag(ReveilleTags.escapeDelay(minutes)).assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_SKIP).assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_KEEP).assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.SILENCE).assertExists()
+        assertEquals("opening it decides nothing", 0, r.silenced + r.skipped + r.delays.size)
+    }
+
+    @Test
+    fun `each way out reports itself, silence and skip once and every delay with its minutes`() {
+        val r = Recorder()
+        val back = showWithBack(firing, r)
+        back()
+
+        compose.onNodeWithTag(ReveilleTags.escapeDelay(10)).performClick()
+        compose.onNodeWithTag(ReveilleTags.escapeDelay(30)).performClick()
+        compose.onNodeWithTag(ReveilleTags.escapeDelay(60)).performClick()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_SKIP).performClick()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_SILENCE).performClick()
+
+        assertEquals(listOf(10, 30, 60), r.delays)
+        assertEquals(1, r.skipped)
+        assertEquals(1, r.silenced)
+    }
+
+    @Test
+    fun `keeping it ringing closes the way out and reports nothing, and Back opens it again`() {
+        val r = Recorder()
+        val back = showWithBack(firing, r)
+        back()
+
+        compose.onNodeWithTag(ReveilleTags.ESCAPE_KEEP).performClick()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertDoesNotExist()
+        assertEquals(0, r.silenced + r.skipped + r.delays.size)
+
+        back()
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertIsDisplayed()
+    }
+
+    @Test
+    fun `once the alarm is answered the way out is gone, and it does not come back by itself`() {
+        var dispatcher: OnBackPressedDispatcher? = null
+        var state by mutableStateOf<ReveilleUiState>(firing)
+        val r = Recorder()
+        compose.setContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            CommandTheme(darkTheme = true) {
+                ReveilleContent(state, null, SkipReasonCode.values().toList(), r.actions(), {}, {})
+            }
+        }
+        compose.runOnIdle { dispatcher!!.onBackPressed() }
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertIsDisplayed()
+
+        state = ReveilleUiState.Silenced("Write the report")
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertDoesNotExist()
+        compose.onNodeWithTag(ReveilleTags.RESUME).assertIsDisplayed()
+    }
+
+    @Test
+    fun `the way out survives the activity being recreated`() {
+        var dispatcher: OnBackPressedDispatcher? = null
+        val restoration = StateRestorationTester(compose)
+        val r = Recorder()
+        restoration.setContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            CommandTheme(darkTheme = true) {
+                ReveilleContent(firing, null, SkipReasonCode.values().toList(), r.actions(), {}, {})
+            }
+        }
+        compose.runOnIdle { dispatcher!!.onBackPressed() }
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertIsDisplayed()
+
+        restoration.emulateSavedInstanceStateRestore()
+
+        compose.onNodeWithTag(ReveilleTags.ESCAPE).assertIsDisplayed()
     }
 }
 

@@ -17,6 +17,7 @@ import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.SkipReason
 import com.command.testing.FakeClock
+import com.command.testing.FakeRingController
 import com.command.testing.android.FakeAlarmModule
 import com.command.testing.android.awaitUntil
 import com.command.testing.android.testMission
@@ -48,6 +49,7 @@ class ReveilleViewModelTest {
     @Inject lateinit var repo: OccurrenceRepository
     @Inject lateinit var db: CommandDb
     @Inject lateinit var clock: FakeClock
+    @Inject lateinit var ringer: FakeRingController
 
     private lateinit var vm: ReveilleViewModel
 
@@ -303,4 +305,72 @@ class ReveilleViewModelTest {
 
     @Suppress("unused")
     private val appContext = ApplicationProvider.getApplicationContext<android.content.Context>()
+
+    // --- the way out that Back opens: the ring is still ringing when these are chosen ---------------------------
+
+    @Test
+    fun `a ringing alarm can be delayed, which stops it, closes it as delayed and sets the next one`() {
+        val o = ringing()
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+
+        vm.delay(30)
+
+        awaitUi("closed") { it is ReveilleUiState.Closed }
+        assertEquals(ClosedOutcome.DELAYED, (vm.state.value as ReveilleUiState.Closed).outcome)
+        assertEquals(OccurrenceState.DELAYED, stateOf(o))
+        assertEquals("the ring was told to stop", listOf(o.id), ringer.stopped)
+        val child = runBlocking { db.occurrences().forMission(o.missionId) }.single { it.parentOccurrenceId == o.id }
+        assertEquals(clock.nowMs() + 30 * 60_000L, child.scheduledAtUtc)
+    }
+
+    @Test
+    fun `a ringing alarm can be skipped, recorded as skipped by the person and not as started`() {
+        val o = ringing()
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+
+        vm.skip()
+
+        awaitUi("closed") { it is ReveilleUiState.Closed }
+        assertEquals(OccurrenceState.SKIPPED, stateOf(o))
+        assertEquals(SkipReason.USER, runBlocking { repo.get(o.id)!!.skipReason })
+        assertEquals(listOf(o.id), ringer.stopped)
+        assertNull(vm.friction.value)
+    }
+
+    @Test
+    fun `a fixed commitment asks for its friction while it rings, for a delay as for a skip, and keeps ringing until it is given`() {
+        val o = ringing(flexibility = Flexibility.RIGID, lock = LockPolicy.CONFIRM)
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+
+        vm.delay(10)
+        awaitUntil(message = "friction prompt") { vm.friction.value != null }
+        assertEquals(LockPolicy.CONFIRM, vm.friction.value!!.required)
+        assertEquals("it is still ringing", OccurrenceState.FIRING, stateOf(o))
+        assertTrue(ringer.stopped.isEmpty())
+
+        vm.dismissFriction()
+        assertEquals(OccurrenceState.FIRING, stateOf(o))
+
+        vm.skip()
+        awaitUntil(message = "friction prompt again") { vm.friction.value != null }
+        vm.confirmFriction(FrictionEvidence.Confirmed)
+        awaitUi("closed") { it is ReveilleUiState.Closed }
+        assertEquals(OccurrenceState.SKIPPED, stateOf(o))
+    }
+
+    @Test
+    fun `safety silence needs no friction at the strictest setting`() {
+        val o = ringing(flexibility = Flexibility.RIGID, lock = LockPolicy.RECOVERY_OFFER)
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+
+        vm.silence()
+
+        awaitUi("silenced") { it is ReveilleUiState.Silenced }
+        assertEquals(OccurrenceState.SAFETY_SILENCED, stateOf(o))
+        assertNull(vm.friction.value)
+    }
 }

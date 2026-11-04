@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -30,7 +31,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -62,6 +65,11 @@ object ReveilleTags {
     const val DELAY = "reveille_delay"
     const val RESUME = "reveille_resume"
     const val ACCESSIBLE = "reveille_accessible_confirm"
+    const val ESCAPE = "reveille_escape"
+    const val ESCAPE_SILENCE = "reveille_escape_silence"
+    const val ESCAPE_SKIP = "reveille_escape_skip"
+    const val ESCAPE_KEEP = "reveille_escape_keep"
+    fun escapeDelay(minutes: Int) = "reveille_escape_delay_$minutes"
 }
 
 /** Everything the screens can ask for, so they can be tested without a view model. */
@@ -87,8 +95,10 @@ fun ReveilleContent(
     onFrictionConfirm: (FrictionEvidence) -> Unit,
     onFrictionDismiss: () -> Unit,
 ) {
-    // Back does nothing while the alarm rings: Safety silence is the one way out of this screen that is recorded as such.
-    BackHandler(enabled = state is ReveilleUiState.Firing) { }
+    // Back is not an exit while the alarm rings. It opens the way out that tells the truth: silence, delay or skip, each recorded as what
+    // it is, never as a start. Safety silence stays on the screen itself, one tap, whatever happens here.
+    var escapeOpen by rememberSaveable { mutableStateOf(false) }
+    BackHandler(enabled = state is ReveilleUiState.Firing) { escapeOpen = true }
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         when (state) {
             is ReveilleUiState.Firing -> Firing(state, actions)
@@ -108,7 +118,50 @@ fun ReveilleContent(
             }
         }
     }
+    // Once the alarm is answered the sheet has nothing to offer; a fixed commitment's questions (friction) come up over it.
+    if (escapeOpen && state is ReveilleUiState.Firing) EscapeSheet(actions, onDismiss = { escapeOpen = false })
     if (friction != null) FrictionDialog(friction.required, reasons, onFrictionConfirm, onFrictionDismiss)
+}
+
+/**
+ * What Back offers while the alarm rings. Silence needs nothing from the person. Delay and Skip are answered by the mission's own Mission
+ * Lock: a fixed commitment asks for a confirmation or a reason first (the friction dialog opens over this one), a flexible one does not.
+ */
+@Composable
+private fun EscapeSheet(actions: ReveilleActions, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag(ReveilleTags.ESCAPE),
+        title = { Text(stringResource(R.string.reveille_escape_title)) },
+        text = {
+            // It scrolls, so that a very large font cannot push the buttons out of reach.
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(stringResource(R.string.reveille_escape_body), style = MaterialTheme.typography.bodyMedium)
+                OutlinedButton(
+                    onClick = actions.onSilence,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(ReveilleTags.ESCAPE_SILENCE),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text(stringResource(R.string.reveille_escape_silence), style = MaterialTheme.typography.labelLarge) }
+                Text(stringResource(R.string.reveille_escape_delay_title), style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    for (minutes in ESCAPE_DELAYS) {
+                        FilledTonalButton(
+                            onClick = { actions.onDelay(minutes) },
+                            modifier = Modifier.weight(1f).heightIn(min = 56.dp).testTag(ReveilleTags.escapeDelay(minutes)),
+                        ) { Text(stringResource(R.string.reveille_escape_delay_minutes, minutes)) }
+                    }
+                }
+                OutlinedButton(onClick = actions.onSkip, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(ReveilleTags.ESCAPE_SKIP)) {
+                    Text(stringResource(R.string.reveille_escape_skip), style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.heightIn(min = 48.dp).testTag(ReveilleTags.ESCAPE_KEEP)) {
+                Text(stringResource(R.string.reveille_escape_keep))
+            }
+        },
+    )
 }
 
 @Composable
@@ -321,4 +374,7 @@ private fun reasonLabel(reason: SkipReasonCode): String = stringResource(
 )
 
 private const val DELAY_MINUTES = 10
+
+/** The delays Back offers while it rings. */
+private val ESCAPE_DELAYS = listOf(10, 30, 60)
 
