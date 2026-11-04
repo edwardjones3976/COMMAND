@@ -3,18 +3,23 @@ package com.command.data
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.command.data.db.OccurrenceRow
+import com.command.data.db.SettingRow
 import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
 import com.command.domain.alarm.CheckInPoster
 import com.command.domain.alarm.CheckInPrompt
+import com.command.domain.dials.ChainOp
 import com.command.domain.dials.Dials
 import com.command.domain.dials.Flexibility
 import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.HandshakeMode
 import com.command.domain.dials.LockPolicy
+import com.command.domain.dials.Personality
+import com.command.domain.handshake.Attempt
 import com.command.domain.model.ChallengeOutcome
 import com.command.domain.model.CheckInAnswer
 import com.command.domain.model.EventSource
+import com.command.domain.model.SettingKeys
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.EventType
 import com.command.domain.occurrence.MissReason
@@ -141,6 +146,119 @@ class OccurrenceRepositoryTest {
         assertTrue(f.scheduler.armed.values.none { it.kind == AlarmKind.CYCLE_END })
         val rows = f.db.challenges().forOccurrence(o.id)
         assertEquals(listOf(ChallengeOutcome.FAILED, ChallengeOutcome.SUCCESS), rows.map { it.outcome })
+    }
+
+    // --- what a ring asks of the person, and what it has been told so far -------------------------------------------------
+
+    @Test
+    fun `the handshake an occurrence asks for is the default chain of its profile's difficulty, in the words of its personality`() = run {
+        val expected = mapOf(
+            "builtin_nudge" to Triple(ChainOp.OR, listOf(HandshakeMode.HOLD), Personality.SUPPORTIVE_COACH),
+            "builtin_steady" to Triple(ChainOp.OR, listOf(HandshakeMode.HOLD), Personality.EXECUTIVE_DIRECTOR),
+            "builtin_command" to Triple(ChainOp.OR, listOf(HandshakeMode.TYPING), Personality.ACCOUNTABILITY_PARTNER),
+            "builtin_reveille_max" to Triple(ChainOp.AND, listOf(HandshakeMode.CONFIRM_SEQUENCE, HandshakeMode.TYPING), Personality.DRILL_SERGEANT),
+        )
+        for ((profile, want) in expected) {
+            val m = f.mission(profileId = profile)
+            val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+            val plan = f.repo.handshakeOf(o)
+            assertEquals("$profile: how the steps combine", want.first, plan.chain.op)
+            assertEquals("$profile: which steps", want.second, plan.chain.steps.map { it.mode })
+            assertEquals("$profile: whose words", want.third, plan.personality)
+        }
+    }
+
+    @Test
+    fun `a mission with no profile of its own gets the active one's handshake`() = run {
+        f.db.settings().put(SettingRow(SettingKeys.ACTIVE_PROFILE_ID, "\"builtin_command\""))
+        val m = f.mission()
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        val plan = f.repo.handshakeOf(o)
+        assertEquals(listOf(HandshakeMode.TYPING), plan.chain.steps.map { it.mode })
+        assertEquals(Personality.ACCOUNTABILITY_PARTNER, plan.personality)
+    }
+
+    @Test
+    fun `the handshake is pinned when the alarm fires, so a profile edited while it sounds changes nothing for the person in the middle of it`() = run {
+        val m = f.mission(profileId = "builtin_command") // typing, in the accountability partner's words
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+
+        f.db.profiles().upsert(f.db.profiles().get("builtin_command")!!.copy(handshakeDifficulty = 1, personality = Personality.MINIMALIST))
+
+        val plan = f.repo.handshakeOf(f.repo.get(o.id)!!)
+        assertEquals("still the typing it was fired with", listOf(HandshakeMode.TYPING), plan.chain.steps.map { it.mode })
+        assertEquals("and in the same words", Personality.ACCOUNTABILITY_PARTNER, plan.personality)
+        assertEquals("it was the profile that was edited", 1, f.db.profiles().get("builtin_command")!!.handshakeDifficulty)
+    }
+
+    @Test
+    fun `an alarm that has not fired follows its profile as it is, and one that fires later is pinned to what the profile was then`() = run {
+        val m = f.mission(profileId = "builtin_command")
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        f.db.profiles().upsert(f.db.profiles().get("builtin_command")!!.copy(handshakeDifficulty = 1, personality = Personality.MINIMALIST))
+
+        val before = f.repo.handshakeOf(o)
+        assertEquals("not fired: the profile as it is", listOf(HandshakeMode.HOLD), before.chain.steps.map { it.mode })
+        assertEquals(Personality.MINIMALIST, before.personality)
+
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+        f.db.profiles().upsert(f.db.profiles().get("builtin_command")!!.copy(handshakeDifficulty = 3, personality = Personality.DRILL_SERGEANT))
+
+        val after = f.repo.handshakeOf(f.repo.get(o.id)!!)
+        assertEquals("fired: what the profile was when it fired", listOf(HandshakeMode.HOLD), after.chain.steps.map { it.mode })
+        assertEquals(Personality.MINIMALIST, after.personality)
+    }
+
+    @Test
+    fun `a pinned personality this version does not know gives way to the profile's, and a pinned difficulty still holds`() = run {
+        val m = f.mission(profileId = "builtin_command")
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        val row = f.repo.get(o.id)!!
+        f.db.occurrences().compareAndSet(
+            id = row.id, expectedVersion = row.stateVersion, state = row.state,
+            sessionJson = Codec.encodeSession(SessionData(handshakeDifficulty = 1, handshakePersonality = "ROBOT")),
+            skipReason = row.skipReason, missReason = row.missReason, armMode = row.armMode, ringMode = row.ringMode,
+        )
+
+        val plan = f.repo.handshakeOf(f.repo.get(o.id)!!)
+        assertEquals(listOf(HandshakeMode.HOLD), plan.chain.steps.map { it.mode })
+        assertEquals(Personality.ACCOUNTABILITY_PARTNER, plan.personality)
+    }
+
+    @Test
+    fun `the tries of a ring come back in the order they were written, as the engine reads them`() = run {
+        val o = scheduled()
+        f.repo.recordChallenge(o.id, ChallengeRecord(0, HandshakeMode.TYPING, 1, ChallengeOutcome.FAILED, f.t0, f.t0 + 1_000))
+        f.repo.recordChallenges(
+            o.id,
+            listOf(
+                ChallengeRecord(0, HandshakeMode.TYPING, 2, ChallengeOutcome.TIMEOUT, f.t0 + 1_000, f.t0 + 2_000),
+                ChallengeRecord(0, HandshakeMode.TYPING, 2, ChallengeOutcome.FALLBACK, f.t0 + 2_000, f.t0 + 2_000),
+            ),
+        )
+        assertEquals(
+            listOf(
+                Attempt(0, HandshakeMode.TYPING, 1, ChallengeOutcome.FAILED),
+                Attempt(0, HandshakeMode.TYPING, 2, ChallengeOutcome.TIMEOUT),
+                Attempt(0, HandshakeMode.TYPING, 2, ChallengeOutcome.FALLBACK),
+            ),
+            f.repo.attemptsOf(o.id),
+        )
+        assertEquals("another ring's tries are not this one's", emptyList<Attempt>(), f.repo.attemptsOf(scheduled("Another").id))
+    }
+
+    @Test
+    fun `a write for an occurrence that does not exist is refused, and an empty one writes nothing`() = run {
+        val o = scheduled()
+        val good = ChallengeRecord(0, HandshakeMode.CONFIRM_SEQUENCE, 3, ChallengeOutcome.FAILED, f.t0, f.t0 + 1_000)
+        val orphan = ChallengeRecord(0, HandshakeMode.CONFIRM_SEQUENCE, 3, ChallengeOutcome.FALLBACK, f.t0, f.t0 + 1_000)
+        val failed = runCatching { f.repo.recordChallenges("no-such-occurrence", listOf(good, orphan)) }.isFailure
+        assertTrue("a row for an occurrence that does not exist is refused", failed)
+        assertEquals(emptyList<Attempt>(), f.repo.attemptsOf("no-such-occurrence"))
+
+        f.repo.recordChallenges(o.id, emptyList())
+        assertEquals("no rows is no write", emptyList<Attempt>(), f.repo.attemptsOf(o.id))
     }
 
     @Test

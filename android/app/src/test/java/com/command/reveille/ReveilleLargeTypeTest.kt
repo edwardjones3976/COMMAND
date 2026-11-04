@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.text.TextLayoutResult
 import com.command.domain.dials.LockPolicy
 import com.command.domain.dials.SkipReasonCode
+import com.command.domain.handshake.TryId
 import com.command.ui.theme.CommandTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -37,10 +38,10 @@ class ReveilleLargeTypeTest {
 
     @get:Rule val compose = createComposeRule()
 
-    private val firing = ReveilleUiState.Firing("occ-1", "Write the report", holdSeconds = 3, earlyRelease = false, offerAccessibleConfirm = false)
+    private val firing = ReveilleUiState.Firing("occ-1", "Write the report", Challenge.Hold(TryId(0, 1), 3, earlyRelease = false, assistive = false, acknowledging = false))
 
     private fun actions() = ReveilleActions(
-        onHoldCompleted = { _, _ -> }, onHoldReleasedEarly = { _, _ -> }, onAccessibleConfirm = {}, onSilence = {},
+        onHoldCompleted = { _, _, _ -> }, onHoldReleasedEarly = { _, _, _ -> }, onAssistiveConfirmed = {}, onSilence = {},
         onResume = {}, onStarted = {}, onDelay = {}, onSkip = {}, onClose = {},
     )
 

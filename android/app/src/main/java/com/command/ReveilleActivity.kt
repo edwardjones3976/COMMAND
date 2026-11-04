@@ -1,12 +1,14 @@
 package com.command
 
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -30,9 +32,11 @@ class ReveilleActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The window is drawn behind the system bars on every version (Android 15 does it for an app that targets it), so that the insets are
+        // the same everywhere and the screens give way to them: Safety silence, at the bottom, is never under a bar or behind the keyboard.
+        enableEdgeToEdge()
         showOverLockScreen()
-        val touchExploration = getSystemService(AccessibilityManager::class.java)?.isTouchExplorationEnabled == true
-        viewModel.accessibilityTouchExploration = touchExploration
+        viewModel.offerAccessibleConfirm = needsAnotherWayThanHolding()
         handle(intent)
 
         setContent {
@@ -47,7 +51,11 @@ class ReveilleActivity : ComponentActivity() {
                         onHoldStarted = viewModel::holdStarted,
                         onHoldCompleted = viewModel::holdCompleted,
                         onHoldReleasedEarly = viewModel::holdReleasedEarly,
-                        onAccessibleConfirm = viewModel::accessibleConfirm,
+                        onAssistiveConfirmed = viewModel::assistiveConfirmed,
+                        onTypingChanged = viewModel::typingChanged,
+                        onTypingSubmitted = viewModel::typingSubmitted,
+                        onSequenceTapped = viewModel::sequenceTapped,
+                        onTwoStepIndicated = viewModel::twoStepIndicated,
                         onSilence = viewModel::silence,
                         onResume = viewModel::resume,
                         onStarted = viewModel::started,
@@ -60,6 +68,34 @@ class ReveilleActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    /**
+     * Holding a finger down is not possible for everyone: a screen reader clicks, it does not press and hold, and a hardware keyboard has no
+     * finger at all. For either the three deliberate taps are on the screen from the start. (Not for every accessibility service: many are
+     * not about disability at all, and would soften the hold for everyone. Switch Access and Voice Access, which also click, find the same
+     * way through the hold target's own action.)
+     */
+    private fun needsAnotherWayThanHolding(): Boolean {
+        val manager = getSystemService(AccessibilityManager::class.java)
+        val keyboard = resources.configuration.keyboard != Configuration.KEYBOARD_NOKEYS
+        return manager?.isTouchExplorationEnabled == true || keyboard
+    }
+
+    /** A screen reader turned on (or off) while the alarm rings: the three taps appear (or go) at once, and not at the next ring. */
+    private val screenReader = AccessibilityManager.TouchExplorationStateChangeListener {
+        viewModel.offerAccessibleConfirm = needsAnotherWayThanHolding()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        getSystemService(AccessibilityManager::class.java)?.addTouchExplorationStateChangeListener(screenReader)
+        viewModel.offerAccessibleConfirm = needsAnotherWayThanHolding() // it may have changed while the activity was stopped
+    }
+
+    override fun onStop() {
+        getSystemService(AccessibilityManager::class.java)?.removeTouchExplorationStateChangeListener(screenReader)
+        super.onStop()
     }
 
     override fun onNewIntent(intent: Intent) {

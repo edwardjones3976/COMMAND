@@ -17,11 +17,13 @@ import com.command.domain.alarm.CheckInPrompt
 import com.command.domain.alarm.RingController
 import com.command.domain.alarm.WindowRoller
 import com.command.domain.alarm.WorkEnqueuer
+import com.command.domain.dials.ChainSpec
 import com.command.domain.dials.CheckInSchedule
 import com.command.domain.dials.DialEffects
 import com.command.domain.dials.Dials
 import com.command.domain.dials.LockPolicy
 import com.command.domain.dials.MissionLock
+import com.command.domain.dials.Personality
 import com.command.domain.dials.Presets
 import com.command.domain.dials.PresetOrigin
 import com.command.domain.model.CheckInAnswer
@@ -39,6 +41,7 @@ import com.command.domain.occurrence.OccurrenceSnapshot
 import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.OccurrenceStateMachine
 import com.command.domain.occurrence.SkipReason
+import com.command.domain.handshake.Attempt
 import com.command.domain.occurrence.TransitionResult
 import com.command.domain.schedule.RestWindow
 import com.command.domain.schedule.RestWindows
@@ -92,6 +95,9 @@ sealed interface ApplyResult {
 data class Created(val occurrence: OccurrenceRow, val isNew: Boolean)
 
 data class MissionBrief(val title: String, val firstAction: String, val starterMinutes: Int)
+
+/** What a ring asks of the person: the chain of challenges that the occurrence's profile calls for, and the personality whose words they are in. */
+data class HandshakePlan(val chain: ChainSpec, val personality: Personality)
 
 /**
  * The only writer of `occurrences.state`.
@@ -177,9 +183,36 @@ class OccurrenceRepository @Inject constructor(
     /** The seven dials in force for an occurrence: its mission's profile, else the active one. */
     suspend fun dialsOf(occurrence: OccurrenceRow): Dials = dialsFor(db.missions().get(occurrence.missionId)?.profileId)
 
+    /**
+     * The handshake an occurrence asks for: the default chain of a handshake difficulty (a profile that carries a chain of its own comes
+     * with M8c), and a personality, whose phrases the typing challenge uses. Both are the ones the ring was fired with, so that a profile
+     * edited while it sounds changes nothing for the person in front of it; a ring from before they were pinned follows the profile.
+     */
+    suspend fun handshakeOf(occurrence: OccurrenceRow): HandshakePlan {
+        val pinned = Codec.decodeSession(occurrence.sessionJson)
+        val profile = profileFor(db.missions().get(occurrence.missionId)?.profileId)
+        val difficulty = pinned.handshakeDifficulty ?: profile?.handshakeDifficulty ?: Presets.dialsFor(PresetOrigin.STEADY).handshakeDifficulty
+        val personality = pinned.handshakePersonality?.let { name -> Personality.values().firstOrNull { it.name == name } }
+            ?: profile?.personality
+            ?: Personality.CUSTOM
+        return HandshakePlan(DialEffects.defaultChain(difficulty), personality)
+    }
+
+    /** Every try recorded for [occurrenceId], oldest first: what a ring that is shown again is restored from. */
+    suspend fun attemptsOf(occurrenceId: String): List<Attempt> =
+        db.challenges().forOccurrence(occurrenceId).map { Attempt(it.chainPosition, it.mode, it.attemptNo, it.outcome) }
+
     /** Records a handshake attempt that did not change the occurrence's state (a hold released too early). */
     suspend fun recordChallenge(occurrenceId: String, record: ChallengeRecord) {
         db.challenges().insert(ChallengeRow(0, occurrenceId, record.chainPosition, record.mode, record.attemptNo, record.outcome, record.startedAt, record.endedAt))
+    }
+
+    /** The rows of one event, written together: a restart never finds a try without the change of mode that it caused. */
+    suspend fun recordChallenges(occurrenceId: String, records: List<ChallengeRecord>) {
+        if (records.isEmpty()) return
+        db.withTransaction {
+            for (r in records) db.challenges().insert(ChallengeRow(0, occurrenceId, r.chainPosition, r.mode, r.attemptNo, r.outcome, r.startedAt, r.endedAt))
+        }
     }
 
     /** Appends an audit event that no state transition produced (a degraded ring, a dismissed notification). */
@@ -297,6 +330,8 @@ class OccurrenceRepository @Inject constructor(
                         ringCycles = ring.cycles,
                         ringCycleMs = ring.cycleMs,
                         ringGapMs = ring.gapMs,
+                        handshakeDifficulty = dials.handshakeDifficulty,
+                        handshakePersonality = (profileFor(mission.profileId)?.personality ?: Personality.CUSTOM).name,
                     )
                 }
                 val armMode = r.effects.filterIsInstance<Effect.ArmAlarm>().firstOrNull()?.mode
@@ -438,9 +473,13 @@ class OccurrenceRepository @Inject constructor(
 
     // --- helpers -----------------------------------------------------------------------------------------------
 
-    private suspend fun dialsFor(profileId: String?): Dials {
-        val profile: ProfileRow? = profileId?.let { db.profiles().get(it) }
+    /** The profile in force: the one the mission names, else the active one. */
+    private suspend fun profileFor(profileId: String?): ProfileRow? =
+        profileId?.let { db.profiles().get(it) }
             ?: db.settings().get(SettingKeys.ACTIVE_PROFILE_ID)?.trim('"')?.let { db.profiles().get(it) }
+
+    private suspend fun dialsFor(profileId: String?): Dials {
+        val profile: ProfileRow? = profileFor(profileId)
         return profile?.let {
             Dials(it.firmness, it.obnoxiousness, it.alertIntensity, it.followUpPersistence, it.handshakeDifficulty, it.scheduleRigidity, it.recoveryStructure)
         } ?: Presets.dialsFor(PresetOrigin.STEADY)

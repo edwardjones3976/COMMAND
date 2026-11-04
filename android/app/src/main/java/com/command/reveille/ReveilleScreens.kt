@@ -4,7 +4,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -46,19 +49,22 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.LockPolicy
 import com.command.domain.dials.SkipReasonCode
+import com.command.domain.handshake.TryId
 import com.example.R
 
 object ReveilleTags {
@@ -74,15 +80,32 @@ object ReveilleTags {
     const val ESCAPE_SKIP = "reveille_escape_skip"
     const val ESCAPE_KEEP = "reveille_escape_keep"
     const val FRICTION_SILENCE = "reveille_friction_silence"
+    const val TYPING_PHRASE = "reveille_typing_phrase"
+    const val TYPING_FIELD = "reveille_typing_field"
+    const val TYPING_DONE = "reveille_typing_done"
+    const val SEQUENCE_PROGRESS = "reveille_sequence_progress"
+    const val TWO_STEP_INDICATE = "reveille_two_step_indicate"
+    const val OUT_OF_TRIES = "reveille_out_of_tries"
+    const val MISTAKEN = "reveille_mistaken"
+    const val PROGRESS = "reveille_progress"
+    const val ACKNOWLEDGING = "reveille_acknowledging"
+    const val HOLD_WORDS = "reveille_hold_words"
+    const val RING_AREA = "reveille_ring_area"
+    const val SCREEN_AREA = "reveille_screen_area"
     fun escapeDelay(minutes: Int) = "reveille_escape_delay_$minutes"
+    fun sequenceTarget(number: Int) = "reveille_sequence_target_$number"
 }
 
 /** Everything the screens can ask for, so they can be tested without a view model. */
 class ReveilleActions(
-    val onHoldStarted: () -> Unit = {},
-    val onHoldCompleted: (Long, Long) -> Unit,
-    val onHoldReleasedEarly: (Long, Long) -> Unit,
-    val onAccessibleConfirm: () -> Unit,
+    val onHoldStarted: (TryId) -> Unit = {},
+    val onHoldCompleted: (TryId, Long, Long) -> Unit,
+    val onHoldReleasedEarly: (TryId, Long, Long) -> Unit,
+    val onAssistiveConfirmed: (TryId) -> Unit,
+    val onTypingChanged: (TryId, String) -> Unit = { _, _ -> },
+    val onTypingSubmitted: (TryId, String) -> Unit = { _, _ -> },
+    val onSequenceTapped: (TryId, Int) -> Unit = { _, _ -> },
+    val onTwoStepIndicated: (TryId) -> Unit = {},
     val onSilence: () -> Unit,
     val onResume: () -> Unit,
     val onStarted: () -> Unit,
@@ -114,7 +137,7 @@ fun ReveilleContent(
             // A ring is a new screen: a press that began on the hold target of the one before it cannot finish on this one.
             is ReveilleUiState.Firing -> key(state.occurrenceId) { Firing(state, actions) }
             else -> Column(
-                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 32.dp),
+                modifier = Modifier.fillMaxSize().safeDrawingPadding().testTag(ReveilleTags.SCREEN_AREA).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
@@ -203,37 +226,165 @@ private fun closedText(outcome: ClosedOutcome): String = stringResource(
 
 @Composable
 private fun Firing(state: ReveilleUiState.Firing, actions: ReveilleActions) {
-    // Only the title area may scroll (a very large font). The hold target and Safety silence stay put, so a finger resting
-    // on the target can never be taken over by a scroll gesture, and silence is always one tap away.
-    Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
-            Text(state.title, style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-        }
-        HoldButton(state.holdSeconds, actions.onHoldCompleted, actions.onHoldReleasedEarly, actions.onAccessibleConfirm, onStarted = actions.onHoldStarted)
-        Box(modifier = Modifier.height(56.dp), contentAlignment = Alignment.Center) {
-            if (state.earlyRelease) {
-                Text(stringResource(R.string.reveille_hold_released, state.holdSeconds), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
+    // Safety silence is the last thing on the screen and never scrolls: it is always in view and one tap, whatever is being asked. It is the
+    // one child of the column that has a size of its own; everything else is given the weight that is left, so that no layout, however much it
+    // asks for, can squeeze it (a column that runs out of room squeezes its last child to a sliver, and that was once the silence). A hold
+    // keeps its target out of anything that scrolls, so that a finger resting on it can never be taken over by a scroll gesture. The title,
+    // and typing, the numbers or the two-step, scroll in the space above. The window gives way to the system bars, the notch and the
+    // keyboard (safe drawing); in a short window, and with the keyboard up, the margins are tighter.
+    BoxWithConstraints(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+        val tight = maxHeight < TIGHT_WINDOW
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = if (tight) 8.dp else 24.dp).testTag(ReveilleTags.RING_AREA),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when (val challenge = state.challenge) {
+                    is Challenge.Hold -> HoldArea(state, challenge, actions)
+                    else -> Column(
+                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+                    ) {
+                        TitleBlock(state)
+                        when (challenge) {
+                            is Challenge.Typing -> key(challenge.tryId) {
+                                TypingChallenge(
+                                    challenge,
+                                    onChanged = { actions.onTypingChanged(challenge.tryId, it) },
+                                    onSubmitted = { actions.onTypingSubmitted(challenge.tryId, it) },
+                                )
+                            }
+                            is Challenge.Sequence -> SequenceChallenge(challenge) { actions.onSequenceTapped(challenge.tryId, it) }
+                            is Challenge.TwoStep -> TwoStepChallenge(challenge) { actions.onTwoStepIndicated(challenge.tryId) }
+                            Challenge.OutOfTries -> OutOfTriesNote()
+                            is Challenge.Hold -> Unit
+                        }
+                    }
+                }
             }
+            Spacer(Modifier.height(if (tight) 4.dp else 12.dp))
+            SilenceButton(actions.onSilence, tight)
         }
-        if (state.offerAccessibleConfirm) {
-            TextButton(onClick = actions.onAccessibleConfirm, modifier = Modifier.testTag(ReveilleTags.ACCESSIBLE)) {
-                Text(stringResource(R.string.reveille_hold_accessible_button), style = MaterialTheme.typography.labelLarge)
-            }
-        }
-        SilenceButton(actions.onSilence)
     }
+}
+
+// What the hold's layout is made of, in dp: the room the words (and the hint) are meant to have, the room the three taps under the target are
+// meant to have, the target's full and least size, and when the window counts as short (tighter margins) or as short and wide (the target
+// beside the words). The words give way first, then the target shrinks to its least; nothing else is ever squeezed.
+private val TIGHT_WINDOW = 420.dp
+private val WORDS_MIN = 128.dp
+private val CONFIRM_SPACE = 56.dp
+private val HOLD_SIZE = 240.dp
+private val HOLD_MIN = 96.dp
+private val SIDE_BY_SIDE_MAX_HEIGHT = 360.dp
+private const val SIDE_BY_SIDE_RATIO = 1.5f
+
+/** The title, and "Step 1 of 2" under it when several steps are all needed. */
+@Composable
+private fun TitleBlock(state: ReveilleUiState.Firing, caption: String? = null) {
+    Text(state.title, style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+    state.progress?.let {
+        Text(
+            stringResource(R.string.handshake_progress, it.step, it.steps),
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.testTag(ReveilleTags.PROGRESS),
+        )
+    }
+    if (caption != null) {
+        Text(caption, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center, modifier = Modifier.testTag(ReveilleTags.ACKNOWLEDGING))
+    }
+}
+
+/**
+ * The hold: the target (or, when its tries are used up, the three taps in its place), kept out of anything that scrolls. It is sized by the
+ * room it is actually given, measured here and not guessed from the window: in a short, wide area ([sideBySide]) the target is beside the
+ * words, otherwise it is under them, and in any area it is as big as the room allows (never more than its full size), so that a small window
+ * shrinks the target and squeezes nothing else.
+ */
+@Composable
+private fun HoldArea(state: ReveilleUiState.Firing, hold: Challenge.Hold, actions: ReveilleActions) {
+    val caption = if (hold.acknowledging) stringResource(R.string.handshake_two_hold_first) else null
+    val released = hold.earlyRelease && !hold.assistive
+    // The three taps are there from the start for a screen reader and a hardware keyboard (the activity says so), and for anyone whose
+    // assistive technology clicks instead of pressing (Switch Access, Voice Access) through the hold target's own action: it shows them,
+    // it never passes the hold.
+    var revealed by rememberSaveable { mutableStateOf(false) }
+    val offerConfirm = state.offerAccessibleConfirm || revealed
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val sideBySide = !hold.assistive && maxWidth >= maxHeight * SIDE_BY_SIDE_RATIO && maxHeight < SIDE_BY_SIDE_MAX_HEIGHT
+        val confirmSpace = if (offerConfirm && !hold.assistive) CONFIRM_SPACE else 0.dp
+        val holdSize = (if (sideBySide) minOf(HOLD_SIZE, maxHeight) else (maxHeight - WORDS_MIN - confirmSpace).coerceIn(HOLD_MIN, HOLD_SIZE)).coerceAtMost(maxWidth)
+        // A press belongs to a try: when the try changes (a wrong one, a change of mode) the target is a new one, so that a press that began on
+        // the old one cannot finish on this one, and the callbacks it holds are always the current try's.
+        val target: @Composable () -> Unit = {
+            key(hold.tryId) {
+                if (hold.assistive) {
+                    AssistiveConfirm(hold.tryId, primary = true) { actions.onAssistiveConfirmed(hold.tryId) }
+                } else {
+                    HoldButton(
+                        hold.seconds,
+                        onCompleted = { started, ended -> actions.onHoldCompleted(hold.tryId, started, ended) },
+                        onReleasedEarly = { started, ended -> actions.onHoldReleasedEarly(hold.tryId, started, ended) },
+                        onStarted = { actions.onHoldStarted(hold.tryId) },
+                        size = holdSize,
+                        onCannotHold = { revealed = true },
+                    )
+                }
+            }
+        }
+        if (sideBySide) {
+            Row(
+                modifier = Modifier.fillMaxSize(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TitleBlock(state, caption)
+                    if (released) ReleasedHint(hold)
+                    if (offerConfirm) AssistiveConfirm(hold.tryId, primary = false) { actions.onAssistiveConfirmed(hold.tryId) }
+                }
+                target()
+            }
+        } else {
+            // The words, and the hint about a press let go too early, are what gives way: they take the room that is left and scroll in it.
+            // The target is above nothing that moves, so a finger on it is not shifted when the hint comes and goes.
+            Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(modifier = Modifier.weight(1f).fillMaxWidth().testTag(ReveilleTags.HOLD_WORDS).verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TitleBlock(state, caption)
+                        if (released) ReleasedHint(hold)
+                    }
+                }
+                target()
+                if (offerConfirm && !hold.assistive) AssistiveConfirm(hold.tryId, primary = false) { actions.onAssistiveConfirmed(hold.tryId) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReleasedHint(hold: Challenge.Hold) {
+    Text(
+        stringResource(R.string.reveille_hold_released, hold.seconds),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.primary,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    )
 }
 
 /** Always on screen while ringing, never behind a challenge. A dialog that covers it (the way out, a Mission Lock question) carries a silence of its own. */
 @Composable
-private fun SilenceButton(onSilence: () -> Unit) {
+private fun SilenceButton(onSilence: () -> Unit, tight: Boolean = false) {
     val description = stringResource(R.string.reveille_silence_description)
     OutlinedButton(
         onClick = onSilence,
-        modifier = Modifier.fillMaxWidth().height(64.dp).testTag(ReveilleTags.SILENCE).semantics { contentDescription = description },
+        modifier = Modifier.fillMaxWidth().height(if (tight) 56.dp else 64.dp).testTag(ReveilleTags.SILENCE).semantics { contentDescription = description },
         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
     ) {
         Text(stringResource(R.string.reveille_silence), style = MaterialTheme.typography.labelLarge)
@@ -242,32 +393,41 @@ private fun SilenceButton(onSilence: () -> Unit) {
 
 /**
  * Press and hold for [seconds]. The ring fills while a finger stays down; letting go early starts over and is reported as a
- * failed attempt. Each press is its own coroutine, so overlapping or repeated touches can never share state. For TalkBack
- * users the control exposes a custom action that confirms without holding.
+ * failed attempt. Each press is its own coroutine, so overlapping or repeated touches can never share state. A person who cannot
+ * hold has the assistive confirm (three deliberate taps) under it, from the start for a screen reader and otherwise once the tries
+ * on the press are used up.
  */
 @Composable
 fun HoldButton(
     seconds: Int,
     onCompleted: (Long, Long) -> Unit,
     onReleasedEarly: (Long, Long) -> Unit,
-    onAccessibleConfirm: () -> Unit,
     now: () -> Long = System::currentTimeMillis,
     onStarted: () -> Unit = {},
+    size: Dp = HOLD_SIZE,
+    onCannotHold: (() -> Unit)? = null,
 ) {
     var progress by remember { mutableFloatStateOf(0f) }
     val description = stringResource(R.string.reveille_hold_description, seconds)
-    val confirmLabel = stringResource(R.string.reveille_hold_confirm_action)
+    val cannotHold = stringResource(R.string.reveille_hold_accessible_button)
 
     Box(
         modifier = Modifier
-            .size(240.dp)
+            .size(size)
             .clip(CircleShape)
             .background(MaterialTheme.colorScheme.surface)
             .testTag(ReveilleTags.HOLD)
             .semantics {
                 role = Role.Button
                 contentDescription = description
-                customActions = listOf(CustomAccessibilityAction(confirmLabel) { onAccessibleConfirm(); true })
+                // For assistive technology that clicks (Switch Access, Voice Access, a screen reader's action menu): a click cannot hold, so
+                // the action shows the three taps that stand in for the hold. A finger on the target is not affected by it.
+                if (onCannotHold != null) {
+                    onClick(label = cannotHold) {
+                        onCannotHold()
+                        true
+                    }
+                }
             }
             .pointerInput(seconds) {
                 detectTapGestures(

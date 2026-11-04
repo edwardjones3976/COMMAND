@@ -15,6 +15,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.down
@@ -24,6 +25,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.LockPolicy
 import com.command.domain.dials.SkipReasonCode
+import com.command.domain.handshake.TryId
 import com.command.ui.theme.CommandTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -42,10 +44,10 @@ class ReveilleScreenTest {
     @get:Rule val compose = createComposeRule()
 
     private class Recorder {
-        var holdStarted = 0
+        val holdStarted = ArrayList<TryId>()
         val completed = ArrayList<Pair<Long, Long>>()
         val early = ArrayList<Pair<Long, Long>>()
-        var accessible = 0
+        val assistive = ArrayList<TryId>()
         var silenced = 0
         var resumed = 0
         var started = 0
@@ -56,10 +58,10 @@ class ReveilleScreenTest {
         var frictionDismissed = 0
 
         fun actions() = ReveilleActions(
-            onHoldStarted = { holdStarted++ },
-            onHoldCompleted = { a, b -> completed += a to b },
-            onHoldReleasedEarly = { a, b -> early += a to b },
-            onAccessibleConfirm = { accessible++ },
+            onHoldStarted = { holdStarted += it },
+            onHoldCompleted = { _, a, b -> completed += a to b },
+            onHoldReleasedEarly = { _, a, b -> early += a to b },
+            onAssistiveConfirmed = { assistive += it },
             onSilence = { silenced++ },
             onResume = { resumed++ },
             onStarted = { started++ },
@@ -69,7 +71,10 @@ class ReveilleScreenTest {
         )
     }
 
-    private val firing = ReveilleUiState.Firing("occ-1", "Write the report", holdSeconds = 3, earlyRelease = false, offerAccessibleConfirm = false)
+    private fun hold(tryNo: Int = 1, earlyRelease: Boolean = false, assistive: Boolean = false, acknowledging: Boolean = false) =
+        Challenge.Hold(TryId(0, tryNo), 3, earlyRelease, assistive, acknowledging)
+
+    private val firing = ReveilleUiState.Firing("occ-1", "Write the report", hold())
 
     private fun show(state: ReveilleUiState, r: Recorder, friction: FrictionPrompt? = null) {
         compose.setContent {
@@ -106,7 +111,7 @@ class ReveilleScreenTest {
         compose.mainClock.advanceTimeBy(3_300)
         compose.onNodeWithTag(ReveilleTags.HOLD).performTouchInput { up() }
         compose.mainClock.advanceTimeBy(500)
-        assertEquals(1, r.holdStarted)
+        assertEquals(listOf(TryId(0, 1)), r.holdStarted)
         assertEquals(1, r.completed.size)
         assertTrue("a completed hold is not also an early release", r.early.isEmpty())
     }
@@ -132,13 +137,9 @@ class ReveilleScreenTest {
     }
 
     @Test
-    fun `a screen reader can confirm without holding`() {
-        val r = Recorder()
-        show(firing, r)
-        val actions = compose.onNodeWithTag(ReveilleTags.HOLD).fetchSemanticsNode().config[SemanticsActions.CustomActions]
-        assertEquals("Confirm without holding", actions.single().label)
-        compose.runOnUiThread { actions.single().action() }
-        assertEquals(1, r.accessible)
+    fun `the hold target has no one-tap confirm of its own, the assistive confirm is three deliberate taps`() {
+        show(firing, Recorder())
+        assertFalse(SemanticsActions.CustomActions in compose.onNodeWithTag(ReveilleTags.HOLD).fetchSemanticsNode().config)
     }
 
     @Test
@@ -152,12 +153,75 @@ class ReveilleScreenTest {
         val r = Recorder()
         show(firing.copy(offerAccessibleConfirm = true), r)
         compose.onNodeWithTag(ReveilleTags.ACCESSIBLE).performClick()
-        assertEquals(1, r.accessible)
+        compose.onNodeWithTag(ReveilleTags.ACCESSIBLE).performClick()
+        assertTrue("two taps are not enough", r.assistive.isEmpty())
+        compose.onNodeWithTag(ReveilleTags.ACCESSIBLE).performClick()
+        assertEquals("the third confirms, and says which try it was about", listOf(TryId(0, 1)), r.assistive)
+    }
+
+    @Test
+    fun `assistive technology that clicks gets an action on the hold target that shows the three taps, and it does not pass the hold`() {
+        val r = Recorder()
+        show(firing, r)
+        compose.onNodeWithTag(ReveilleTags.ACCESSIBLE).assertDoesNotExist()
+        val action = compose.onNodeWithTag(ReveilleTags.HOLD).fetchSemanticsNode().config[SemanticsActions.OnClick]
+        assertEquals("I cannot hold: confirm instead", action.label)
+
+        compose.onNodeWithTag(ReveilleTags.HOLD).performSemanticsAction(SemanticsActions.OnClick)
+
+        compose.onNodeWithTag(ReveilleTags.ACCESSIBLE).assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.HOLD).assertIsDisplayed()
+        assertTrue("showing the alternative passes nothing", r.assistive.isEmpty() && r.completed.isEmpty() && r.early.isEmpty())
+        repeat(3) { compose.onNodeWithTag(ReveilleTags.ACCESSIBLE).performClick() }
+        assertEquals("three deliberate taps pass it, and say which try", listOf(TryId(0, 1)), r.assistive)
+    }
+
+    @Test
+    fun `a finger on the hold target is not affected by that action, a quick tap is an early release and shows nothing`() {
+        val r = Recorder()
+        compose.mainClock.autoAdvance = false
+        show(firing, r)
+
+        compose.onNodeWithTag(ReveilleTags.HOLD).performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(300)
+        compose.onNodeWithTag(ReveilleTags.HOLD).performTouchInput { up() }
+        compose.mainClock.advanceTimeBy(500)
+
+        assertEquals(1, r.early.size)
+        assertTrue(r.completed.isEmpty() && r.assistive.isEmpty())
+        compose.onNodeWithTag(ReveilleTags.ACCESSIBLE).assertDoesNotExist()
+    }
+
+    @Test
+    fun `the three taps that were asked for are still there when the screen is recreated`() {
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            CommandTheme(darkTheme = true) { ReveilleContent(firing, null, emptyList(), Recorder().actions(), {}, {}) }
+        }
+        compose.onNodeWithTag(ReveilleTags.HOLD).performSemanticsAction(SemanticsActions.OnClick)
+
+        restoration.emulateSavedInstanceStateRestore()
+
+        compose.onNodeWithTag(ReveilleTags.ACCESSIBLE).assertIsDisplayed()
+    }
+
+    @Test
+    fun `a plain hold does not say that it is the first of two parts`() {
+        show(firing, Recorder())
+        compose.onNodeWithTag(ReveilleTags.ACKNOWLEDGING).assertDoesNotExist()
+        compose.onNodeWithText("First, hold to show you are up").assertDoesNotExist()
+    }
+
+    @Test
+    fun `the hint about letting go early is not shown beside the three taps that stand in for the press`() {
+        show(firing.copy(challenge = hold(earlyRelease = true, assistive = true)), Recorder())
+        compose.onNodeWithText("Released early. Hold the full 3 seconds.").assertDoesNotExist()
+        compose.onNodeWithTag(ReveilleTags.ACCESSIBLE).assertIsDisplayed()
     }
 
     @Test
     fun `the early-release hint names the seconds`() {
-        show(firing.copy(earlyRelease = true), Recorder())
+        show(firing.copy(challenge = hold(earlyRelease = true)), Recorder())
         compose.onNodeWithText("Released early. Hold the full 3 seconds.").assertIsDisplayed()
     }
 
@@ -473,7 +537,7 @@ class ReveilleScreenTest {
         }
         compose.runOnIdle { dispatcher!!.onBackPressed() }
 
-        state = firing.copy(earlyRelease = true) // a failed hold redraws the ring screen; it is still the same alarm
+        state = firing.copy(challenge = hold(tryNo = 2, earlyRelease = true)) // a failed hold redraws the ring screen; it is still the same alarm
 
         compose.onNodeWithTag(ReveilleTags.ESCAPE).assertIsDisplayed()
     }

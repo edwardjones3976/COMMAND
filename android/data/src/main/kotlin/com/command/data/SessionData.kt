@@ -25,6 +25,13 @@ data class SessionData(
     val ringCycles: Int = 1,
     val ringCycleMs: Long = 0,
     val ringGapMs: Long = 0,
+    /**
+     * The handshake the ring was fired with: its difficulty and the personality whose phrases it asks for. A profile edited while it sounds
+     * (or a process restarted in the middle) must not change what the person is in the middle of; a ring fired before this was pinned (null)
+     * follows the profile.
+     */
+    val handshakeDifficulty: Int? = null,
+    val handshakePersonality: String? = null,
 )
 
 internal object Codec {

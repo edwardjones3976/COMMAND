@@ -42,9 +42,30 @@ class TypedPhraseTest {
         assertFalse("a wrong letter", TypedPhrase.matches("i am up and starting nov", phrase))
         assertFalse("a missing word", TypedPhrase.matches("i am up starting now", phrase))
         assertFalse("an extra word", TypedPhrase.matches("i am up and starting now please", phrase))
-        assertFalse("punctuation is part of what is typed", TypedPhrase.matches("i am up and starting now.", phrase))
+        assertFalse("punctuation in the middle is part of what is typed", TypedPhrase.matches("i am up, and starting now", phrase))
+        assertFalse("a comma at the end is a character typed", TypedPhrase.matches("i am up and starting now,", phrase))
         assertFalse("a different order", TypedPhrase.matches("starting now i am up and", phrase))
         assertFalse("letters run together", TypedPhrase.matches("iamupandstartingnow", phrase))
+    }
+
+    @Test
+    fun `a full stop, an exclamation or a question mark at the end is forgiven, because a keyboard puts one there for a doubled space`() {
+        assertTrue(TypedPhrase.matches("i am up and starting now.", phrase))
+        assertTrue(TypedPhrase.matches("I am up and starting now!", phrase))
+        assertTrue(TypedPhrase.matches("i am up and starting now?", phrase))
+        assertTrue(TypedPhrase.matches("i am up and starting now...", phrase))
+        assertTrue(TypedPhrase.matches("i am up and starting now…", phrase))
+        assertTrue("and the space after it", TypedPhrase.matches("i am up and starting now.  ", phrase))
+        assertTrue("and a phrase that carries its own", TypedPhrase.matches("i am up and starting now", "I am up and starting now."))
+        assertEquals("i am up and starting now", TypedPhrase.normalize("I am up and starting now. "))
+    }
+
+    @Test
+    fun `only the end is forgiven, and punctuation alone is still nothing`() {
+        assertFalse("a full stop in the middle", TypedPhrase.matches("i am up. and starting now", phrase))
+        assertFalse(TypedPhrase.matches(".", phrase))
+        assertFalse(TypedPhrase.matches("?!", phrase))
+        assertFalse("nothing at all is never right, even for a phrase that is only a stop", TypedPhrase.matches("...", "..."))
     }
 
     @Test
