@@ -90,6 +90,15 @@ class GeminiTimeoutTest {
     }
 
     @Test
+    fun `a reply just past 8 seconds is already too late`() = runTest {
+        // Pins the cutoff: with the limit loosened to 8_500 ms this 8_100 ms reply would wrongly be used.
+        val gemini = FakeGemini(delayMs = 8_100)
+        val e = engine(gemini)
+        assertNull(e.renderWithGemini(stoneDirector(e), "prompt"))
+        assertEquals(1, gemini.cancelled)
+    }
+
+    @Test
     fun `a reply after 8 seconds is cancelled, dropped and backs the voice off`() = runTest {
         val gemini = FakeGemini(delayMs = 9_000)
         val e = engine(gemini)

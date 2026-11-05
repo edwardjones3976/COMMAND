@@ -17,3 +17,7 @@ local.properties
 .env
 debug.keystore
 app/google-services.json
+
+# AI Studio working files
+.aistudio/
+.tempmediaStorage/

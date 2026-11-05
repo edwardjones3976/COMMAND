@@ -1,0 +1,87 @@
+name: android
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests and lint
+        run: ./gradlew --no-daemon testDebugUnitTest lint
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-reports
+          path: |
+            android/**/build/reports/tests
+            android/**/build/reports/lint-results-*.html
+          if-no-files-found: ignore
+
+  publication-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Publication-safety scanner (git-tracked files)
+        working-directory: android
+        run: ./gradlew --no-daemon :app:testDebugUnitTest --tests com.example.PublicationSafetyTest
+
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Assemble debug and unsigned release APKs
+        run: ./gradlew --no-daemon assembleDebug assembleRelease
+      - name: Record APK digests
+        run: |
+          {
+            echo "### APK SHA-256"
+            echo '```'
+            sha256sum app/build/outputs/apk/debug/*.apk app/build/outputs/apk/release/*.apk
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apks
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk

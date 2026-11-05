@@ -1,3 +1,4 @@
+import java.util.Properties
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 
 plugins {
@@ -20,17 +21,23 @@ android {
     versionName = "3.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // reCAPTCHA Enterprise site key for release App Check. Never tracked: set RECAPTCHA_SITE_KEY in the
+    // environment or in the git-ignored local.properties.
+    buildConfigField("String", "RECAPTCHA_SITE_KEY", "\"${localSecret("RECAPTCHA_SITE_KEY")}\"")
   }
 
-  // Do not remove or modify these signingConfigs. They are necessary for building, installing,
-  // and updating Android apps in AI Studio.
+  // The release config exists only when KEYSTORE_PATH points at a keystore; otherwise release builds are
+  // unsigned (CI) and the owner signs them with apksigner.
+  val releaseKeystore = System.getenv("KEYSTORE_PATH")?.takeIf { file(it).isFile }
   signingConfigs {
-    create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+    if (releaseKeystore != null) {
+      create("release") {
+        storeFile = file(releaseKeystore)
+        storePassword = System.getenv("STORE_PASSWORD")
+        keyAlias = "upload"
+        keyPassword = System.getenv("KEY_PASSWORD")
+      }
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -45,9 +52,7 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
-      // AI Studio.
-      signingConfig = signingConfigs.getByName("release")
+      signingConfig = signingConfigs.findByName("release")
     }
     debug {
       // Local test build: AI Studio's debug.keystore isn't in the export, so AGP's default debug key is used.
@@ -82,6 +87,15 @@ secrets {
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
 
+fun localSecret(name: String): String {
+  System.getenv(name)?.let { return it }
+  val file = rootProject.file("local.properties")
+  if (!file.isFile) return ""
+  val props = Properties()
+  file.inputStream().use { props.load(it) }
+  return props.getProperty(name, "")
+}
+
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
@@ -111,7 +125,6 @@ dependencies {
   // implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
   implementation(libs.firebase.appcheck.recaptcha)
-  implementation(libs.firebase.appcheck.debug)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
   // implementation(libs.logging.interceptor)
@@ -130,6 +143,7 @@ dependencies {
   androidTestImplementation(libs.androidx.espresso.core)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.runner)
+  debugImplementation(libs.firebase.appcheck.debug)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
