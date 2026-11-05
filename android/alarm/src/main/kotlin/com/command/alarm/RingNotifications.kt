@@ -111,6 +111,16 @@ object RingNotifications {
         setVibrate(VIBRATION)
     }
 
+    /** The notification of the background check that puts alarms back after a reboot (shown only before Android 12). */
+    fun checking(context: Context): Notification {
+        ensureChannels(context)
+        return NotificationCompat.Builder(context, AlarmContract.CHANNEL_STATUS)
+            .setSmallIcon(R.drawable.ic_stat_command)
+            .setContentTitle(context.getString(R.string.reconcile_title))
+            .setOngoing(true)
+            .build()
+    }
+
     /** The notification of a service start that has nothing to ring for; it exists only to answer the foreground-start contract. */
     fun starting(context: Context): Notification {
         ensureChannels(context)

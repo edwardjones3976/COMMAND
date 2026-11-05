@@ -107,7 +107,7 @@ object OccurrenceStateMachine {
                     applied()
                 } else illegal()
 
-                is Miss -> miss(cmd.reason)
+                is Miss -> miss(cmd.reason, cmd.lateMs)
                 StartGuidance -> if (from == ACKNOWLEDGED) enterGuidance() else illegal()
                 Resume -> if (from == MISSED || from == SAFETY_SILENCED) enterGuidance() else illegal()
                 ReportStarted -> if (from == GUIDED_START || from == BLOCKED || from == UNCONFIRMED) answer(STARTED_SELF_REPORTED) else illegal()
@@ -140,7 +140,7 @@ object OccurrenceStateMachine {
             effects = effects,
         )
 
-        private fun miss(reason: MissReason): TransitionResult {
+        private fun miss(reason: MissReason, lateMs: Long?): TransitionResult {
             val from = s.state
             val legal = when (reason) {
                 MissReason.TIMEOUT -> from == FIRING
@@ -154,7 +154,9 @@ object OccurrenceStateMachine {
                 effects += Effect.StopRinging
             }
             if (reason != MissReason.TIMEOUT && from == ARMED) effects += Effect.DisarmAlarm
-            if (reason == MissReason.DOWNTIME) events += DomainEvent(EventType.MISSED_WHILE_OFF)
+            if (reason == MissReason.DOWNTIME) {
+                events += DomainEvent(EventType.MISSED_WHILE_OFF, if (lateMs == null) EventPayload.EMPTY else EventPayload.of("late_s" to lateMs / 1000))
+            }
             return applied()
         }
 

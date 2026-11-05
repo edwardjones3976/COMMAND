@@ -10,6 +10,7 @@
     <string name="channel_status_description">Quiet notes about missed alarms and pauses.</string>
 
     <string name="ring_title_generic">Reveille</string>
+    <string name="reconcile_title">Checking your alarms</string>
     <string name="ring_text">Time to start. Tap to open, or silence the alarm.</string>
     <string name="action_open">Open</string>
     <string name="action_silence">Safety silence</string>

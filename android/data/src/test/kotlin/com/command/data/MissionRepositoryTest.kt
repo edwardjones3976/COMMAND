@@ -300,7 +300,7 @@ class MissionRepositoryTest {
         val occurrence = occurrencesOf(id).single()
         f.scheduler.armed.clear() // a reboot or a force-stop
 
-        missions.refreshWindow()
+        missions.reconcile(ReconcileTrigger.OPEN)
 
         assertNotNull(f.scheduler.armed[fireIdentity(occurrence.id)])
         assertEquals("nothing was duplicated", 1, occurrencesOf(id).size)
@@ -312,7 +312,7 @@ class MissionRepositoryTest {
         assertEquals(7, occurrencesOf(id).size)
         f.clock.advance(day)
 
-        missions.refreshWindow()
+        missions.reconcile(ReconcileTrigger.OPEN)
 
         val all = occurrencesOf(id)
         assertEquals("a new day was added at the far end", 8, all.size)
@@ -325,7 +325,7 @@ class MissionRepositoryTest {
         val occurrence = occurrencesOf(id).single()
         f.clock.advance(5 * hour) // the alarm was at +2 h; it is now three hours overdue
 
-        missions.refreshWindow()
+        missions.reconcile(ReconcileTrigger.OPEN)
 
         val after = f.db.occurrences().get(occurrence.id)!!
         assertEquals(OccurrenceState.MISSED, after.state)
@@ -339,7 +339,7 @@ class MissionRepositoryTest {
         f.clock.advance(2 * hour + 5 * 60_000) // five minutes late: inside the grace period
         f.scheduler.armed.clear()
 
-        missions.refreshWindow()
+        missions.reconcile(ReconcileTrigger.OPEN)
 
         assertEquals(OccurrenceState.ARMED, f.db.occurrences().get(occurrence.id)!!.state)
         assertNotNull("it is armed for its original time, which is already past, so it rings at once", f.scheduler.armed[fireIdentity(occurrence.id)])
@@ -392,10 +392,29 @@ class MissionRepositoryTest {
         val occurrence = f.repo.createOccurrence(mission.id, f.t0 + 2 * hour, "UTC").occurrence // the app stopped before arming it
         f.clock.advance(2 * hour + 5 * 60_000)
 
-        missions.refreshWindow()
+        val report = missions.reconcile(ReconcileTrigger.OPEN)
 
         assertEquals(OccurrenceState.ARMED, f.db.occurrences().get(occurrence.id)!!.state)
         assertNotNull("so it rings now instead of never", f.scheduler.armed[fireIdentity(occurrence.id)])
+        assertEquals("a repair is a change, so even an open says so", 1, report.repaired)
+        val summary = f.db.events().ofType(EventType.BOOT_RECONCILE).single()
+        assertTrue(summary.payloadJson.contains("\"repaired\":\"1\""))
+    }
+
+    @Test
+    fun `an occurrence stored but never armed, not yet due, is armed and counted as a repair too`() = run {
+        val mission = Fixture.missionRow(startAt = f.t0 + 2 * hour)
+        f.db.missions().insert(mission)
+        val occurrence = f.repo.createOccurrence(mission.id, f.t0 + 2 * hour, "UTC").occurrence // the app stopped before arming it
+        assertEquals(OccurrenceState.SCHEDULED, occurrence.state)
+
+        val report = missions.reconcile(ReconcileTrigger.OPEN)
+
+        assertEquals(OccurrenceState.ARMED, f.db.occurrences().get(occurrence.id)!!.state)
+        assertEquals(1, report.repaired)
+        assertEquals("it already existed, so it was not created", 0, report.created)
+        assertEquals(1, f.db.events().ofType(EventType.BOOT_RECONCILE).size)
+        assertFalse("and the next open has nothing left to say", missions.reconcile(ReconcileTrigger.OPEN).changedAnything)
     }
 
     @Test
@@ -404,7 +423,7 @@ class MissionRepositoryTest {
         assertEquals(7, occurrencesOf(id).size)
 
         f.clock.zone = java.time.ZoneId.of("America/New_York")
-        missions.refreshWindow()
+        missions.reconcile(ReconcileTrigger.OPEN)
 
         val local = occurrencesOf(id).map { Instant.ofEpochMilli(it.scheduledAtUtc).atZone(f.clock.zone).toLocalTime() }
         assertEquals("seven days, every one at 10:00 where the phone now is, and nothing left over", List(7) { LocalTime.of(10, 0) }, local)
@@ -429,5 +448,125 @@ class MissionRepositoryTest {
         assertEquals("the list is capped, soonest first, not cut off at an arbitrary place", 200, snapshot.upcoming.size)
         assertEquals(snapshot.upcoming.sortedBy { it.scheduledAtUtc }.map { it.occurrenceId }, snapshot.upcoming.map { it.occurrenceId })
         assertTrue(snapshot.recent.isEmpty())
+    }
+
+    // --- reconciling after something disturbed the platform's alarms ------------------------------------------
+
+    @Test
+    fun `after a reboot every armed alarm that the system dropped is logged as lost and put back, with one summary line`() = run {
+        val a = saved(draft(title = "First", schedule = ScheduleDraft.Once(at(2 * hour))))
+        val b = saved(draft(title = "Second", schedule = ScheduleDraft.Once(at(3 * hour))))
+        f.scheduler.armed.clear()
+
+        val report = missions.reconcile(ReconcileTrigger.BOOT)
+
+        assertEquals(2, report.lost)
+        assertEquals(2, report.rearmed)
+        assertEquals(0, report.created)
+        assertEquals(2, f.db.events().ofType(EventType.ALARM_LOST).size)
+        for (id in listOf(a, b)) assertNotNull(f.scheduler.armed[fireIdentity(occurrencesOf(id).single().id)])
+        val summary = f.db.events().ofType(EventType.BOOT_RECONCILE).single()
+        assertTrue(summary.payloadJson.contains("BOOT") && summary.payloadJson.contains("\"lost\":\"2\""))
+    }
+
+    @Test
+    fun `opening the app when nothing is wrong leaves the audit log alone, but a boot always leaves its line`() = run {
+        saved(draft())
+        val before = f.db.events().all().size
+
+        val quiet = missions.reconcile(ReconcileTrigger.OPEN)
+        assertFalse(quiet.changedAnything)
+        assertEquals("a quiet open writes nothing", before, f.db.events().all().size)
+
+        missions.reconcile(ReconcileTrigger.BOOT)
+        assertEquals("a boot says it ran", 1, f.db.events().ofType(EventType.BOOT_RECONCILE).size)
+    }
+
+    @Test
+    fun `an exact alarm that can no longer be exact comes back inexact, and the log says so, once`() = run {
+        val id = saved(draft(schedule = ScheduleDraft.Once(at(2 * hour))))
+        val occurrence = occurrencesOf(id).single()
+        assertEquals(ArmMode.EXACT, occurrence.armMode)
+
+        f.scheduler.exactAllowed = false
+        val report = missions.reconcile(ReconcileTrigger.OPEN)
+
+        assertEquals(1, report.precisionChanged)
+        assertEquals(ArmMode.INEXACT, f.db.occurrences().get(occurrence.id)!!.armMode)
+        val summary = f.db.events().ofType(EventType.BOOT_RECONCILE).single()
+        assertTrue(summary.payloadJson.contains("\"precision_changed\":\"1\""))
+
+        assertFalse("nothing else changed, so the next open is quiet", missions.reconcile(ReconcileTrigger.OPEN).changedAnything)
+        assertEquals(1, f.db.events().ofType(EventType.BOOT_RECONCILE).size)
+
+        f.scheduler.exactAllowed = true
+        assertEquals("and it is exact again once the permission is back", 1, missions.reconcile(ReconcileTrigger.EXACT_ALARM_CHANGED).precisionChanged)
+        assertEquals(ArmMode.EXACT, f.db.occurrences().get(occurrence.id)!!.armMode)
+    }
+
+    @Test
+    fun `a time zone change keeps a daily mission at the same local time`() = run {
+        val id = saved(draft(schedule = daily(LocalTime.of(10, 0))))
+        assertEquals(7, occurrencesOf(id).size)
+
+        f.clock.zone = java.time.ZoneId.of("America/New_York")
+        val report = missions.reconcile(ReconcileTrigger.ZONE_CHANGED)
+
+        val local = occurrencesOf(id).map { Instant.ofEpochMilli(it.scheduledAtUtc).atZone(f.clock.zone).toLocalTime() }
+        assertEquals("seven days, every one at 10:00 where the phone now is", List(7) { LocalTime.of(10, 0) }, local)
+        assertTrue("the ones at the old zone's 10:00 are gone", report.discarded > 0)
+        assertEquals(7, occurrencesOf(id).count { it.state == OccurrenceState.ARMED })
+    }
+
+    @Test
+    fun `a one-off is an instant, so a zone change does not move it`() = run {
+        val id = saved(draft())
+        val before = occurrencesOf(id).single()
+
+        f.clock.zone = java.time.ZoneId.of("Asia/Tokyo")
+        missions.reconcile(ReconcileTrigger.ZONE_CHANGED)
+
+        val after = occurrencesOf(id).single()
+        assertEquals(before.id, after.id)
+        assertEquals(before.scheduledAtUtc, after.scheduledAtUtc)
+    }
+
+    @Test
+    fun `a delayed alarm is left alone by a reconcile`() = run {
+        val id = saved(draft())
+        val parent = occurrencesOf(id).single()
+        f.repo.apply(parent.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+        f.repo.apply(parent.id, OccurrenceCommand.Delay(15), EventSource.USER)
+        val child = occurrencesOf(id).single { it.parentOccurrenceId == parent.id }
+
+        missions.reconcile(ReconcileTrigger.TIME_CHANGED)
+
+        assertEquals(OccurrenceState.ARMED, f.db.occurrences().get(child.id)!!.state)
+    }
+
+    @Test
+    fun `an alarm that came due while the phone was off says how late it was`() = run {
+        val id = saved(draft())
+        val occurrence = occurrencesOf(id).single()
+        f.clock.advance(5 * hour) // due at +2 h, so three hours late
+
+        val report = missions.reconcile(ReconcileTrigger.BOOT)
+
+        assertEquals(1, report.missed)
+        val event = f.db.events().ofType(EventType.MISSED_WHILE_OFF).single()
+        assertEquals(occurrence.id, event.occurrenceId)
+        assertTrue(event.payloadJson.contains("\"late_s\":\"10800\""))
+    }
+
+    @Test
+    fun `a test ring that was never answered is cleaned up too, without ever showing`() = run {
+        val occurrenceId = missions.testRing()
+        f.clock.advance(20 * 60_000)
+
+        missions.reconcile(ReconcileTrigger.OPEN)
+
+        assertEquals(OccurrenceState.MISSED, f.db.occurrences().get(occurrenceId)!!.state)
+        val schedule = missions.observeSchedule().first()
+        assertTrue(schedule.upcoming.isEmpty() && schedule.recent.isEmpty())
     }
 }

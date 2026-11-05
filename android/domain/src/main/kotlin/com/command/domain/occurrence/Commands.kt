@@ -20,7 +20,8 @@ sealed class OccurrenceCommand(val label: String) {
     /** Always legal while ringing and never behind friction; it is not success. */
     data object SafetySilence : OccurrenceCommand("SAFETY_SILENCE")
 
-    data class Miss(val reason: MissReason) : OccurrenceCommand("MISS")
+    /** [lateMs] is how long after its time an alarm that was missed while the phone was off is being recorded; it goes in the event. */
+    data class Miss(val reason: MissReason, val lateMs: Long? = null) : OccurrenceCommand("MISS")
 
     data object StartGuidance : OccurrenceCommand("START_GUIDANCE")
 

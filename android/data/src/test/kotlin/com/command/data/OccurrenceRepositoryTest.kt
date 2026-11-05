@@ -342,4 +342,20 @@ class OccurrenceRepositoryTest {
         val c1 = AlarmRequest("occ", 7, AlarmKind.CHECK_IN, 0, index = 1)
         assertEquals(4, setOf(a.identity, b.identity, c0.identity, c1.identity).size)
     }
+
+    @Test
+    fun `rearm puts back an armed alarm and leaves anything that has moved on alone`() = run {
+        val o = scheduled()
+        assertNull("not armed yet", f.repo.rearm(o.id))
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT))
+        val afterArm = f.scheduler.calls.size
+
+        assertEquals(ArmMode.EXACT, f.repo.rearm(o.id))
+        assertEquals("one more arm call", afterArm + 1, f.scheduler.calls.size)
+
+        apply(o, OccurrenceCommand.Fire)
+        val afterFire = f.scheduler.calls.size
+        assertNull("it is ringing: a reconcile that read the row a moment earlier must not touch it", f.repo.rearm(o.id))
+        assertEquals(afterFire, f.scheduler.calls.size)
+    }
 }

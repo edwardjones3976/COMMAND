@@ -3,6 +3,8 @@ package com.command.alarm
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import androidx.core.net.toUri
 import androidx.test.core.app.ApplicationProvider
 import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
@@ -142,5 +144,55 @@ class AlarmSchedulerTest {
         val saved = shadowOf(scheduled().single().operation!!).savedIntent
         assertEquals(ReveilleAlarmReceiver::class.java.name, saved.component!!.className)
         assertEquals("command://occurrence/occ-1", saved.dataString)
+    }
+
+    @Test
+    fun `an armed alarm is found by the probe, a cancelled one is not, and asking never arms one`() {
+        assertFalse("nothing is armed yet", scheduler.isArmed(request()))
+        assertFalse("and asking did not arm it", scheduler.isArmed(request()))
+        assertTrue(scheduled().isEmpty())
+
+        scheduler.arm(request())
+        assertTrue(scheduler.isArmed(request()))
+        assertEquals(1, scheduled().size)
+
+        scheduler.cancel(request())
+        assertFalse(scheduler.isArmed(request()))
+    }
+
+    @Test
+    fun `the probe tells the three kinds of alarm apart, and one occurrence from another`() {
+        scheduler.arm(request(AlarmKind.CHECK_IN, index = 1))
+        assertFalse("a check-in is not the ring", scheduler.isArmed(request(AlarmKind.FIRE)))
+        assertFalse(scheduler.isArmed(request(AlarmKind.CYCLE_END)))
+        assertTrue(scheduler.isArmed(request(AlarmKind.CHECK_IN, index = 1)))
+        assertFalse("the second check-in is not the first", scheduler.isArmed(request(AlarmKind.CHECK_IN, index = 2)))
+
+        scheduler.arm(request(AlarmKind.FIRE, occurrence = "occ-1", code = 7))
+        assertTrue(scheduler.isArmed(request(AlarmKind.FIRE, occurrence = "occ-1", code = 7)))
+        assertFalse("another occurrence", scheduler.isArmed(request(AlarmKind.FIRE, occurrence = "occ-2", code = 8)))
+    }
+
+    @Test
+    fun `arming the same alarm again replaces it instead of adding a second`() {
+        scheduler.arm(request())
+        scheduler.arm(request())
+        assertEquals(1, scheduled().size)
+        assertTrue(scheduler.isArmed(request()))
+    }
+
+    @Test
+    fun `the probe sees the PendingIntent and not the registration, which is why reconcile arms either way`() {
+        scheduler.arm(request())
+        val token = PendingIntent.getBroadcast(
+            context, 7,
+            Intent(context, ReveilleAlarmReceiver::class.java).setAction(AlarmContract.ACTION_FIRE).setData(request().identity.toUri()),
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+        )
+        assertNotNull(token)
+
+        alarms.cancel(token!!) // removes the registration and leaves the token, as a revocation does on Android 12
+        assertTrue(scheduled().isEmpty())
+        assertTrue("a known limit of the platform: true is not proof, false is", scheduler.isArmed(request()))
     }
 }

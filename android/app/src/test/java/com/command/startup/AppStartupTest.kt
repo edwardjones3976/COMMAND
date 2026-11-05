@@ -3,7 +3,10 @@ package com.command.startup
 import android.app.NotificationManager
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import androidx.work.WorkManager
+import androidx.work.testing.WorkManagerTestInitHelper
 import com.command.alarm.AlarmContract
+import com.command.alarm.ReconcileAlarmsWorker
 import com.command.data.MissionDraft
 import com.command.data.MissionRepository
 import com.command.data.SaveResult
@@ -41,7 +44,10 @@ class AppStartupTest {
     @Inject lateinit var scheduler: FakeAlarmScheduler
 
     @Before
-    fun setUp() = hilt.inject()
+    fun setUp() {
+        hilt.inject()
+        WorkManagerTestInitHelper.initializeTestWorkManager(ApplicationProvider.getApplicationContext())
+    }
 
     @Test
     fun `opening the app sets everything up, puts back dropped alarms, and is safe to repeat`() = runBlocking {
@@ -61,6 +67,8 @@ class AppStartupTest {
         assertEquals("the previous version's data was looked for, once", "true", db.settings().get(SettingKeys.LEGACY_IMPORT_DONE))
         assertEquals("and its dead alarms were taken down, once", "true", db.settings().get(SettingKeys.LEGACY_ALARMS_CANCELLED))
         assertTrue("the alarm is back", scheduler.armed.keys.any { it.startsWith("command://occurrence/") })
+        assertNotNull("what the platform allows was written down", db.settings().get(SettingKeys.PERMISSION_SNAPSHOT))
+        assertEquals("the six-hourly backstop is queued", 1, WorkManager.getInstance(context).getWorkInfosForUniqueWork(ReconcileAlarmsWorker.NAME_PERIODIC).get().size)
 
         startup.run()
         assertEquals("nothing was duplicated", 1, db.occurrences().forMission(id).size)

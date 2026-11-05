@@ -223,6 +223,8 @@ class OccurrenceStateMachineTest {
         assertEquals(MISSED, armed.state)
         assertTrue(armed.events.any { it.type == EventType.MISSED_WHILE_OFF })
         assertTrue(Effect.DisarmAlarm in armed.effects)
+        val late = applied(snap(ARMED), Miss(MissReason.DOWNTIME, lateMs = 10_800_000))
+        assertEquals("10800", late.events.single { it.type == EventType.MISSED_WHILE_OFF }.payload.values["late_s"])
         assertEquals(MISSED, applied(snap(SCHEDULED), Miss(MissReason.PAUSED)).state)
         assertTrue(run(snap(ARMED), Miss(MissReason.PAUSED)) is TransitionResult.Illegal)
     }
