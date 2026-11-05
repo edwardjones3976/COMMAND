@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import com.command.domain.dials.Personality
 import com.command.domain.dials.Flexibility
 import com.command.domain.model.CheckInAnswer
 import com.command.domain.model.ConsentKey
@@ -388,6 +389,18 @@ interface DirectiveCacheDao {
 
     @Query("SELECT COUNT(*) FROM directive_cache")
     suspend fun count(): Int
+}
+
+@Dao
+interface TemplateOverrideDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(row: TemplateOverrideRow)
+
+    @Query("SELECT * FROM template_overrides")
+    suspend fun all(): List<TemplateOverrideRow>
+
+    @Query("DELETE FROM template_overrides WHERE personality = :personality AND phase = :phase AND variant = :variant")
+    suspend fun delete(personality: Personality, phase: String, variant: Int)
 }
 
 @Dao

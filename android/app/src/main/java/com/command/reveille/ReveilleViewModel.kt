@@ -8,6 +8,7 @@ import com.command.data.ChallengeRecord
 import com.command.data.MissionBrief
 import com.command.data.OccurrenceRepository
 import com.command.data.db.OccurrenceRow
+import com.command.domain.coaching.CoachingPhase
 import com.command.domain.dials.ChainOp
 import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.HandshakeMode
@@ -65,7 +66,7 @@ sealed interface ReveilleUiState {
     data class Silenced(val title: String, val missed: Boolean = false) : ReveilleUiState
 
     /** Acknowledged: the one concrete first step, and the one-tap answers. */
-    data class Direction(val title: String, val firstAction: String, val starterMinutes: Int) : ReveilleUiState
+    data class Direction(val title: String, val firstAction: String, val starterMinutes: Int, val coaching: String = "") : ReveilleUiState
 
     data class Closed(val title: String, val outcome: ClosedOutcome) : ReveilleUiState
 }
@@ -210,7 +211,9 @@ class ReveilleViewModel @Inject constructor(
             OccurrenceState.FIRING -> engine.withLock { firingOf(row, brief) }
             OccurrenceState.SAFETY_SILENCED -> ReveilleUiState.Silenced(brief.title)
             OccurrenceState.MISSED -> ReveilleUiState.Silenced(brief.title, missed = true)
-            OccurrenceState.ACKNOWLEDGED, OccurrenceState.GUIDED_START,
+            // Only right after the handshake: someone blocked, unanswered or offered a recovery gets the plain screen, no "well done, now move".
+            OccurrenceState.ACKNOWLEDGED, OccurrenceState.GUIDED_START ->
+                ReveilleUiState.Direction(brief.title, brief.firstAction, brief.starterMinutes, repository.lineFor(row, CoachingPhase.DIRECTION, withMissionWords = false).text)
             OccurrenceState.UNCONFIRMED, OccurrenceState.BLOCKED, OccurrenceState.RECOVERY_OFFERED ->
                 ReveilleUiState.Direction(brief.title, brief.firstAction, brief.starterMinutes)
             OccurrenceState.STARTED_SELF_REPORTED, OccurrenceState.WORKING_SELF_REPORTED -> ReveilleUiState.Closed(brief.title, ClosedOutcome.STARTED)

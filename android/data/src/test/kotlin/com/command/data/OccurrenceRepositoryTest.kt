@@ -8,6 +8,7 @@ import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
 import com.command.domain.alarm.CheckInPoster
 import com.command.domain.alarm.CheckInPrompt
+import com.command.domain.coaching.CoachingPhase
 import com.command.domain.dials.AlertPlan
 import com.command.domain.dials.ChainOp
 import com.command.domain.dials.ChainSpec
@@ -566,6 +567,32 @@ class OccurrenceRepositoryTest {
         assertEquals(CheckInAnswer.STARTED, rows.single().answer)
         assertNotNull(rows.single().answeredAt)
         assertEquals(OccurrenceState.STARTED_SELF_REPORTED, state(o))
+    }
+
+    @Test
+    fun `a follow-up question carries a coaching line without the mission's words, and no words reach the events`() = run {
+        val o = scheduled()
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+        apply(o, OccurrenceCommand.Acknowledge()); apply(o, OccurrenceCommand.StartGuidance)
+        apply(o, OccurrenceCommand.CheckInDue(0))
+        val line = f.poster.posted.single().line!!
+        assertFalse(line.isEmpty)
+        assertFalse(line.text, line.text.contains("Write the report"))
+        val spoken = f.repo.lineFor(f.repo.get(o.id)!!, CoachingPhase.REVEILLE)
+        assertTrue(spoken.segments.any { it.carriesUserText && it.text == "Write the report." })
+        for (event in f.db.events().forOccurrence(o.id)) {
+            assertFalse(event.payloadJson, event.payloadJson.contains("Write the report") || event.payloadJson.contains(line.text) || event.payloadJson.contains(spoken.text))
+        }
+    }
+
+    @Test
+    fun `an override row that cannot be read costs the wording, and the question is still asked`() = run {
+        f.db.openHelper.writableDatabase.execSQL("INSERT INTO template_overrides (personality, phase, variant, text) VALUES ('FROM_THE_FUTURE', 'CHECK_IN', 0, 'Go.')")
+        val o = scheduled()
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+        apply(o, OccurrenceCommand.Acknowledge()); apply(o, OccurrenceCommand.StartGuidance)
+        apply(o, OccurrenceCommand.CheckInDue(0))
+        assertFalse(f.poster.posted.single().line!!.isEmpty)
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.command.followup
 import com.command.data.OccurrenceRepository
 import com.command.data.db.CommandDb
 import com.command.data.db.OccurrenceRow
+import com.command.domain.coaching.CoachingPhase
 import com.command.domain.dials.Flexibility
 import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.LockPolicy
@@ -170,6 +171,39 @@ class FollowUpViewModelTest {
         awaitUi("ask") { it is FollowUpUiState.Ask }
         vm.started()
         awaitUntil(message = "started") { stateOf(o) == OccurrenceState.STARTED_SELF_REPORTED }
+    }
+
+    @Test
+    fun `an unconfirmed one carries the unconfirmed line, without the mission's words`() {
+        val o = guided()
+        runBlocking { repo.apply(o.id, OccurrenceCommand.NoResponse, EventSource.WORKER) }
+        vm.show(o.id)
+        awaitUi("unconfirmed") { (it as? FollowUpUiState.Ask)?.unconfirmed == true }
+        val expected = runBlocking { repo.lineFor(repo.get(o.id)!!, CoachingPhase.UNCONFIRMED, withMissionWords = false) }
+        assertEquals(expected.text, (vm.state.value as FollowUpUiState.Ask).coaching)
+        assertTrue(expected.text.isNotBlank() && !expected.text.contains("Write the report"))
+    }
+
+    @Test
+    fun `the recovery line matches the first option on the screen, which never shows Smaller`() {
+        val reset = guided()
+        vm.show(reset.id)
+        awaitUi("ask") { it is FollowUpUiState.Ask }
+        vm.needReset()
+        awaitUi("menu") { it is FollowUpUiState.Recovery }
+        val line = runBlocking { repo.lineFor(repo.get(reset.id)!!, CoachingPhase.RECOVERY_RESET, withMissionWords = false) }
+        assertEquals(line.text, (vm.state.value as FollowUpUiState.Recovery).coaching)
+
+        db.openHelper.writableDatabase.execSQL("UPDATE execution_profiles SET recovery_structure = 5 WHERE id = 'builtin_steady'")
+        val smaller = guided()
+        val second = FollowUpViewModel(repo)
+        second.show(smaller.id)
+        awaitUntil(message = "ask") { second.state.value is FollowUpUiState.Ask }
+        second.needReset()
+        awaitUntil(message = "menu") { second.state.value is FollowUpUiState.Recovery }
+        val first = runBlocking { repo.lineFor(repo.get(smaller.id)!!, CoachingPhase.RECOVERY_RESET, withMissionWords = false) }
+        assertEquals(RecoveryOption.SMALLER, (second.state.value as FollowUpUiState.Recovery).options.first())
+        assertEquals(first.text, (second.state.value as FollowUpUiState.Recovery).coaching)
     }
 
     @Test

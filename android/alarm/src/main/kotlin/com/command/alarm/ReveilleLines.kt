@@ -8,10 +8,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 
 /**
- * What a ring says when it starts. Short on purpose: it is heard over an alarm tone, by someone who has just woken, and the full
- * words are on the screen. The mission's own words (its title, its first step) are kept in segments of their own, because they are
- * the person's text and are only ever spoken by the phone's own voice. The coaching engine replaces this with lines that follow the
- * person's dials. The words themselves are string resources, like every other text.
+ * The plain words a ring falls back on when the coaching line cannot be read (`OccurrenceRepository.lineFor`). Short on purpose: it is heard
+ * over an alarm tone, by someone who has just woken, and the full words are on the screen. The mission's own words (its title, its first
+ * step) are kept in segments of their own, because they are the person's text and are only ever spoken by the phone's own voice.
  */
 class ReveilleLines @Inject constructor(@ApplicationContext private val context: Context) {
 

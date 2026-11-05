@@ -17,6 +17,11 @@ import com.command.domain.alarm.CheckInPrompt
 import com.command.domain.alarm.RingController
 import com.command.domain.alarm.WindowRoller
 import com.command.domain.alarm.WorkEnqueuer
+import com.command.domain.coaching.CoachingContext
+import com.command.domain.coaching.CoachingEngine
+import com.command.domain.coaching.CoachingPhase
+import com.command.domain.coaching.TemplateOverrides
+import com.command.domain.voice.Line
 import com.command.domain.dials.ChainSpec
 import com.command.domain.dials.CheckInSchedule
 import com.command.domain.dials.DialEffects
@@ -46,6 +51,7 @@ import com.command.domain.occurrence.TransitionResult
 import com.command.domain.schedule.RestWindow
 import com.command.domain.schedule.RestWindows
 import com.command.domain.time.Clock
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -196,6 +202,39 @@ class OccurrenceRepository @Inject constructor(
     /** What the screens show about a mission while one of its occurrences is being handled. */
     suspend fun missionBrief(missionId: String): MissionBrief? =
         db.missions().get(missionId)?.let { MissionBrief(it.title, it.firstAction, it.starterMinutes) }
+
+    /**
+     * What the coaching engine says for [occurrence] at [phase], in the personality the ring was fired with and the dials now in force. It reads
+     * the mission's title, first step and starter length and nothing else. [withMissionWords] false leaves the mission's words out, for a
+     * place that already shows them.
+     */
+    suspend fun lineFor(occurrence: OccurrenceRow, phase: CoachingPhase, attempt: Int = 0, withMissionWords: Boolean = true): Line {
+        val brief = missionBrief(occurrence.missionId)
+        val ctx = CoachingContext(
+            title = if (withMissionWords) brief?.title.orEmpty() else "",
+            firstAction = if (withMissionWords) brief?.firstAction.orEmpty() else "",
+            minutes = brief?.starterMinutes ?: 0,
+        )
+        return CoachingEngine.compose(handshakeOf(occurrence).personality, phase, dialsOf(occurrence), ctx, attempt, occurrence.id, overrides())
+    }
+
+    /** A row that cannot be read (from a newer version, say) costs the person's own wording, never the line. */
+    private suspend fun overrides(): TemplateOverrides = try {
+        db.templateOverrides().all().toOverrides()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        TemplateOverrides()
+    }
+
+    /** The question is asked whatever happens to its wording: without a line it is the plain one, and the effects after it still run. */
+    private suspend fun checkInLine(occ: OccurrenceRow, index: Int): Line? = try {
+        lineFor(occ, CoachingPhase.CHECK_IN, index, withMissionWords = false)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
 
     /** The seven dials in force for an occurrence: its mission's profile, else the active one. */
     suspend fun dialsOf(occurrence: OccurrenceRow): Dials = dialsFor(db.missions().get(occurrence.missionId)?.profileId)
@@ -574,7 +613,7 @@ class OccurrenceRepository @Inject constructor(
                 is Effect.ScheduleCheckIn -> scheduler.arm(request(AlarmKind.CHECK_IN, at = e.atUtcMs, index = e.index))
                 is Effect.PostCheckIn -> {
                     val title = missionBrief(occ.missionId)?.title.orEmpty()
-                    poster.post(CheckInPrompt(occ.id, occ.requestCode, e.index, title, started = occ.state != OccurrenceState.GUIDED_START))
+                    poster.post(CheckInPrompt(occ.id, occ.requestCode, e.index, title, started = occ.state != OccurrenceState.GUIDED_START, line = checkInLine(occ, e.index)))
                 }
                 // Index == count is the final-timeout alarm, so the highest index in use is MAX_COUNT itself.
                 Effect.CancelCheckIns -> {
