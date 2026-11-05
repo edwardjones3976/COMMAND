@@ -2,6 +2,7 @@ package com.command.alarm
 
 import android.content.Context
 import androidx.core.app.NotificationManagerCompat
+import com.command.data.ApplyExtras
 import com.command.data.ApplyResult
 import com.command.data.OccurrenceRepository
 import com.command.data.SessionPlan
@@ -22,6 +23,9 @@ import javax.inject.Singleton
  * times itself out when the ring plan ends, the state change that answers the ring takes it down, and the backstop records
  * the miss, so this path is bounded exactly like the service's.
  *
+ * The alarm's own time goes with its Fire, as in the service. If the occurrence has moved since, Fire is rejected and the alarm set for the new
+ * time, and because nothing is posted until Fire has answered, a refused alarm makes no sound here at all.
+ *
  * Known limit: the sound belongs to the notification, so if the user has not allowed notifications this path is silent.
  * The event it records says so (`notified=false`), and the reliability screen of a later milestone warns about the
  * combination before it can happen.
@@ -33,10 +37,11 @@ class RingModeResolver @Inject constructor(
     private val clock: Clock,
     private val latch: ErasureLatch,
 ) {
-    suspend fun degrade(occurrenceId: String, requestCode: Int, reason: String) {
+    suspend fun degrade(occurrenceId: String, requestCode: Int, reason: String, setFor: Long) {
         // Everything is being erased: no ring, not even this one, may start behind the erase.
         if (latch.sealed) return
-        val fired = repository.apply(occurrenceId, OccurrenceCommand.Fire, EventSource.RECEIVER)
+        val time = ApplyExtras(setForUtc = setFor.takeIf { it != AlarmContract.NO_TIME })
+        val fired = repository.apply(occurrenceId, OccurrenceCommand.Fire, EventSource.RECEIVER, time)
         val row = (fired as? ApplyResult.Applied)?.occurrence
             ?: repository.get(occurrenceId)?.takeIf { it.state == OccurrenceState.FIRING }
             ?: return // stale: nothing to ring for

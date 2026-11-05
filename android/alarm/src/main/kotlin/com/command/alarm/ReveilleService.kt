@@ -165,6 +165,7 @@ class ReveilleService : Service() {
             return
         }
         val ringing = active
+        val setFor = intent?.getLongExtra(AlarmContract.EXTRA_AT, AlarmContract.NO_TIME) ?: AlarmContract.NO_TIME
         try {
             // First: become a foreground service (a deadline of a few seconds). Everything else comes after. If something is
             // ringing already, its notification stays the foreground one until this delivery has proved itself.
@@ -178,7 +179,7 @@ class ReveilleService : Service() {
             // Not allowed to run as a foreground service right now. Still answer the start if the platform will let us (its
             // deadline is a few seconds and the fallback needs the database), then ring from a full-screen notification.
             runCatching { ServiceCompat.startForeground(this, FALLBACK_ID, RingNotifications.starting(this), FGS_TYPE) }
-            queue(null) { resolver.degrade(id, code, reasonOf(e)) }
+            queue(null) { resolver.degrade(id, code, reasonOf(e), setFor) }
             return
         }
         if (ringing == null) {
@@ -190,7 +191,6 @@ class ReveilleService : Service() {
             // next, and not when the first line is asked for.
             runCatching { speaker.prepare() }
         }
-        val setFor = intent?.getLongExtra(AlarmContract.EXTRA_AT, AlarmContract.NO_TIME) ?: AlarmContract.NO_TIME
         queue(id) { deliver(id, code, setFor) }
     }
 

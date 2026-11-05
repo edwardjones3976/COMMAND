@@ -487,7 +487,7 @@ class ReveilleServiceTest {
     @Test
     fun `the degraded ring fires the occurrence, logs why, and rings from a full-screen notification that times itself out`() {
         val o = armed()
-        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
         assertEquals(OccurrenceState.FIRING, stateOf(o))
         assertTrue(EventType.RING_DEGRADED in eventTypes(o))
         assertEquals("the same backstop bounds this path", 1, scheduler.armed.keys.count { it.startsWith("command://cycle-end/") })
@@ -505,7 +505,7 @@ class ReveilleServiceTest {
         val o = armed()
         latch.seal()
 
-        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
 
         assertEquals("the occurrence was not fired", OccurrenceState.ARMED, stateOf(o))
         assertTrue("and nothing was posted", notifications().allNotifications.isEmpty())
@@ -521,7 +521,7 @@ class ReveilleServiceTest {
             override val sealed: Boolean get() = ++looks > 1
         }
 
-        runBlocking { RingModeResolver(context, repo, clock, closesMeanwhile).degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+        runBlocking { RingModeResolver(context, repo, clock, closesMeanwhile).degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
 
         assertTrue("nothing sounds behind the erase", notifications().allNotifications.isEmpty())
     }
@@ -534,7 +534,7 @@ class ReveilleServiceTest {
             override val sealed: Boolean get() = ++looks > 2
         }
 
-        runBlocking { RingModeResolver(context, repo, clock, closesAfterPosting).degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+        runBlocking { RingModeResolver(context, repo, clock, closesAfterPosting).degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
 
         assertTrue("it was posted and then taken down, so nothing is left to sound", notifications().allNotifications.isEmpty())
         assertTrue("and it was looked at after the post", closesAfterPosting.looks >= 3)
@@ -544,7 +544,7 @@ class ReveilleServiceTest {
     fun `without notification permission the ring still fires and nothing is posted or thrown`() {
         shadowOf(context as android.app.Application).denyPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
         val o = armed()
-        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
         assertEquals("the occurrence is still fired and bounded", OccurrenceState.FIRING, stateOf(o))
         assertTrue(EventType.RING_DEGRADED in eventTypes(o))
         assertEquals(1, scheduler.armed.keys.count { it.startsWith("command://cycle-end/") })
@@ -556,7 +556,7 @@ class ReveilleServiceTest {
     @Test
     fun `answering a degraded ring takes its notification down`() {
         val o = armed()
-        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
         assertNotNull(notifications().getNotification(o.id, AlarmContract.ID_FALLBACK))
         AndroidRingController(context, session).stop(o.id, o.requestCode)
         assertNull("its sound is the notification, so it must go with the ring", notifications().getNotification(o.id, AlarmContract.ID_FALLBACK))
@@ -567,7 +567,7 @@ class ReveilleServiceTest {
         val o = armed()
         runBlocking { repo.apply(o.id, OccurrenceCommand.Fire, EventSource.SERVICE) }
         clock.advance(10 * 60_000)
-        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
         assertEquals(OccurrenceState.MISSED, stateOf(o))
         assertNull("no alarm notification", notifications().getNotification(o.id, AlarmContract.ID_FALLBACK))
         assertNotNull("only the quiet missed note", notifications().getNotification(o.id, AlarmContract.ID_MISSED))
@@ -576,7 +576,7 @@ class ReveilleServiceTest {
     @Test
     fun `degrading a stale alarm does nothing`() {
         val o = scheduledOnly()
-        runBlocking { resolver.degrade(o.id, o.requestCode, "Whatever") }
+        runBlocking { resolver.degrade(o.id, o.requestCode, "Whatever", o.scheduledAtUtc) }
         assertEquals(OccurrenceState.SCHEDULED, stateOf(o))
         assertTrue(shadowOf(context.getSystemService(NotificationManager::class.java)).allNotifications.isEmpty())
     }
@@ -631,5 +631,105 @@ class ReveilleServiceTest {
         assertFalse(EventType.ALARM_FIRED in eventTypes(o))
         assertTrue(EventType.ALARM_FIRED_STALE in eventTypes(o))
         assertEquals(moved, scheduler.armed.getValue("command://occurrence/${o.id}").atUtcMs)
+    }
+
+    // --- the degraded path, entered as the platform enters it: by refusing the foreground service ---------------
+
+    /** What the platform says when an app in the background may not start a foreground service. */
+    private fun refusal() = IllegalStateException("ForegroundServiceStartNotAllowedException")
+
+    /** The alarm receiver, on a phone where the platform refuses to start the service. */
+    private fun deliverRefusedToReceiver(intent: Intent) {
+        val refusing = object : android.content.ContextWrapper(context) {
+            override fun startForegroundService(service: Intent): android.content.ComponentName = throw refusal()
+        }
+        ReveilleAlarmReceiver().onReceive(refusing, intent)
+    }
+
+    /** The service, started, and then refused the foreground it has to become. */
+    private fun deliverRefusedToService(intent: Intent): ReveilleService {
+        val controller = Robolectric.buildService(ReveilleService::class.java, intent).create()
+        shadowOf(controller.get()).setThrowInStartForeground(refusal())
+        return controller.startCommand(0, 1).get()
+    }
+
+    private fun alarmIntent(o: OccurrenceRow) = Intent(context, ReveilleAlarmReceiver::class.java)
+        .setAction(AlarmContract.ACTION_FIRE)
+        .setData(Uri.parse("command://occurrence/${o.id}"))
+        .putExtra(AlarmContract.EXTRA_OCCURRENCE_ID, o.id)
+        .putExtra(AlarmContract.EXTRA_REQUEST_CODE, o.requestCode)
+        .putExtra(AlarmContract.EXTRA_AT, o.scheduledAtUtc)
+
+    /** An occurrence moved after its alarm was set, with that alarm used up by being delivered and no other put back. */
+    private fun movedWithItsAlarmUsedUp(o: OccurrenceRow): Long = runBlocking {
+        val moved = o.scheduledAtUtc + 3_600_000L
+        repo.reschedule(o.id, moved, "UTC")
+        // The fake keeps what it was given and the platform does not: only an arm after this point can bring an alarm back.
+        scheduler.armed.clear()
+        moved
+    }
+
+    private fun assertNothingRangAndSetFor(o: OccurrenceRow, moved: Long) {
+        assertEquals("the occurrence was not used up", OccurrenceState.ARMED, stateOf(o))
+        assertFalse(EventType.ALARM_FIRED in eventTypes(o))
+        assertFalse("there was no fallback ring to record", EventType.RING_DEGRADED in eventTypes(o))
+        assertNull("nothing sounds from the fallback notification", notifications().getNotification(o.id, AlarmContract.ID_FALLBACK))
+        assertEquals("and the tone never started", 0, output.starts)
+        assertEquals(moved, scheduler.armed.getValue("command://occurrence/${o.id}").atUtcMs)
+    }
+
+    private fun assertRangFromTheFallback(o: OccurrenceRow) {
+        assertEquals(OccurrenceState.FIRING, stateOf(o))
+        assertNotNull(notifications().getNotification(o.id, AlarmContract.ID_FALLBACK))
+    }
+
+    @Test
+    fun `refused at the receiver, an alarm from before its occurrence moved rings nothing and is set again for the new time`() {
+        val o = armed()
+        val moved = movedWithItsAlarmUsedUp(o)
+        deliverRefusedToReceiver(alarmIntent(o))
+        awaitUntil(message = "the alarm comes back") { "command://occurrence/${o.id}" in scheduler.armed || stateOf(o) != OccurrenceState.ARMED }
+        assertNothingRangAndSetFor(o, moved)
+    }
+
+    @Test
+    fun `refused at the service, an alarm from before its occurrence moved rings nothing and is set again for the new time`() {
+        val o = armed()
+        val moved = movedWithItsAlarmUsedUp(o)
+        val service = deliverRefusedToService(fireIntent(o))
+        awaitUntil(message = "stop") { shadowOf(service).isStoppedBySelf }
+        assertNothingRangAndSetFor(o, moved)
+    }
+
+    @Test
+    fun `refused at the receiver, an alarm whose time matches its occurrence still rings`() {
+        val o = armed()
+        deliverRefusedToReceiver(alarmIntent(o))
+        awaitUntil(message = "fallback") { EventType.RING_DEGRADED in eventTypes(o) }
+        assertRangFromTheFallback(o)
+    }
+
+    @Test
+    fun `refused at the service, an alarm whose time matches its occurrence still rings`() {
+        val o = armed()
+        val service = deliverRefusedToService(fireIntent(o))
+        awaitUntil(message = "stop") { shadowOf(service).isStoppedBySelf }
+        assertRangFromTheFallback(o)
+    }
+
+    @Test
+    fun `refused at the receiver, an alarm that does not say its time still rings`() {
+        val o = armed()
+        deliverRefusedToReceiver(alarmIntent(o).apply { removeExtra(AlarmContract.EXTRA_AT) })
+        awaitUntil(message = "fallback") { EventType.RING_DEGRADED in eventTypes(o) }
+        assertRangFromTheFallback(o)
+    }
+
+    @Test
+    fun `refused at the service, an alarm that does not say its time still rings`() {
+        val o = armed()
+        val service = deliverRefusedToService(fireIntent(o).apply { removeExtra(AlarmContract.EXTRA_AT) })
+        awaitUntil(message = "stop") { shadowOf(service).isStoppedBySelf }
+        assertRangFromTheFallback(o)
     }
 }
