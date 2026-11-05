@@ -245,6 +245,34 @@ class OccurrenceStateMachineTest {
     }
 
     @Test
+    fun `saying what comes first is its own event, and still only acknowledges`() {
+        val plain = applied(snap(FIRING), Acknowledge())
+        assertTrue(plain.events.none { it.type == EventType.FIRST_ACTION_INDICATED })
+
+        val said = applied(snap(FIRING), Acknowledge(firstActionIndicated = true))
+        assertEquals(ACKNOWLEDGED, said.state)
+        assertEquals(listOf(EventType.STATE_CHANGED, EventType.FIRST_ACTION_INDICATED), said.events.map { it.type })
+        assertEquals(EventPayload.EMPTY, said.events.last().payload)
+        assertEquals(plain.effects, said.effects)
+
+        // The accessible alternative alone is not saying what comes first.
+        val assistive = applied(snap(FIRING), Acknowledge(accessibleAlternative = true))
+        assertTrue(assistive.events.none { it.type == EventType.FIRST_ACTION_INDICATED })
+
+        // It is independent of the accessible alternative, and neither of them makes the acknowledgement a start.
+        val both = applied(snap(FIRING), Acknowledge(accessibleAlternative = true, firstActionIndicated = true))
+        assertEquals(ACKNOWLEDGED, both.state)
+        assertEquals(1, both.events.count { it.type == EventType.FIRST_ACTION_INDICATED })
+        assertTrue(run(said.snapshot, ReportStarted) is TransitionResult.Illegal)
+        assertFalse(applied(said.snapshot, StartGuidance).state.hasSelfReportedStart)
+
+        // Only a ringing alarm can be acknowledged, whatever was said.
+        for (state in listOf(ARMED, ACKNOWLEDGED, GUIDED_START, SAFETY_SILENCED, MISSED)) {
+            assertTrue("$state", run(snap(state), Acknowledge(firstActionIndicated = true)) is TransitionResult.Illegal)
+        }
+    }
+
+    @Test
     fun `safety silence is always one tap, never friction, never success`() {
         for (lock in LockPolicy.values()) {
             val r = applied(snap(FIRING, lock = lock), SafetySilence)

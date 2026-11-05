@@ -21,7 +21,7 @@ object DialEffects {
 
     fun checkIns(followUpPersistence: Int): CheckInSchedule = CheckInSchedule.forPersistence(followUpPersistence)
 
-    /** Maximum attempts per step: 5, 4, 3, 3, 2 for difficulty 1..5. */
+    /** Tries allowed on each way of doing a step (a mode, and the one that takes its place when they are used up): 5, 4, 3, 3, 2 for difficulty 1..5. */
     fun maxRetries(handshakeDifficulty: Int): Int = intArrayOf(5, 4, 3, 3, 2)[handshakeDifficulty.coerceIn(1, 5) - 1]
 
     /** Default chain: 1 hold 2 s; 2 hold 3 s; 3 typing; 4 AND(confirm sequence, typing); 5 SEQUENCE(typing, two-step). */

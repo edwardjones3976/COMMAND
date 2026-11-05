@@ -103,6 +103,7 @@ object OccurrenceStateMachine {
 
                 is Acknowledge -> if (from == FIRING) {
                     go(ACKNOWLEDGED)
+                    if (cmd.firstActionIndicated) events += DomainEvent(EventType.FIRST_ACTION_INDICATED)
                     effects += Effect.CancelCycleEnd
                     effects += Effect.StopRinging
                     applied()
