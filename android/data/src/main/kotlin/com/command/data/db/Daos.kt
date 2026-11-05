@@ -49,6 +49,16 @@ private const val SCHEDULE_SELECT = """SELECT o.id AS occurrenceId, o.mission_id
            o.skip_reason AS skipReason, o.miss_reason AS missReason
            FROM occurrences o JOIN missions m ON m.id = o.mission_id"""
 
+/** What the audit log knows about one alarm that rang or was lost: when it rang, or when it was found to have been missed. */
+data class AlarmFactRow(
+    val occurrenceId: String,
+    val title: String,
+    val category: String,
+    val scheduledAtUtc: Long,
+    val firedAtUtc: Long?,
+    val missedAtUtc: Long?,
+)
+
 /** One line of the schedule: an occurrence with the facts about its mission that a list needs. */
 data class ScheduleRow(
     val occurrenceId: String,
@@ -135,6 +145,23 @@ interface OccurrenceDao {
     )
     fun observeUpcoming(limit: Int): Flow<List<ScheduleRow>>
 
+    /**
+     * The latest alarms (by the time they were due) that rang or were lost while the phone was off, newest first, with the times
+     * the audit log recorded. Missions the person deleted are left out, like on every other list; the hidden mission behind a test
+     * alarm is marked deleted so that it never shows on the schedule, and its alarms are kept because how a test went is the point.
+     */
+    @Query(
+        """SELECT * FROM (
+             SELECT o.id AS occurrenceId, m.title AS title, m.category AS category, o.scheduled_at_utc AS scheduledAtUtc,
+                    (SELECT MIN(e.at_utc) FROM events e WHERE e.occurrence_id = o.id AND e.type = 'ALARM_FIRED') AS firedAtUtc,
+                    (SELECT MIN(e.at_utc) FROM events e WHERE e.occurrence_id = o.id AND e.type = 'MISSED_WHILE_OFF') AS missedAtUtc
+             FROM occurrences o JOIN missions m ON m.id = o.mission_id
+             WHERE m.deleted_at IS NULL OR m.category = 'TEST')
+           WHERE firedAtUtc IS NOT NULL OR missedAtUtc IS NOT NULL
+           ORDER BY scheduledAtUtc DESC LIMIT :limit""",
+    )
+    fun observeAlarmFacts(limit: Int): Flow<List<AlarmFactRow>>
+
     /** What has happened since [fromUtc] (so the recent past shows what was just missed), newest first. */
     @Query(
         SCHEDULE_SELECT + """ WHERE m.deleted_at IS NULL AND o.state NOT IN ('SCHEDULED', 'ARMED', 'FIRING') AND o.scheduled_at_utc >= :fromUtc
@@ -203,6 +230,9 @@ interface ConsentDao {
 
     @Query("SELECT * FROM consents ORDER BY seq")
     suspend fun all(): List<ConsentRow>
+
+    @Query("SELECT * FROM consents ORDER BY seq")
+    fun observeAll(): Flow<List<ConsentRow>>
 }
 
 @Dao

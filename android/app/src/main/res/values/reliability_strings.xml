@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="reliability_title">Reliability</string>
+    <string name="reliability_back">Back</string>
+    <string name="reliability_intro">This page asks the phone for its real settings each time it opens, so it shows what an alarm can count on right now.</string>
+
+    <string name="reliability_summary_healthy_title">Your alarms are set up to ring</string>
+    <string name="reliability_summary_healthy_body">Android allows everything COMMAND needs.</string>
+    <plurals name="reliability_summary_problems_title">
+        <item quantity="one">%1$d thing can stop an alarm</item>
+        <item quantity="other">%1$d things can stop an alarm</item>
+    </plurals>
+    <string name="reliability_summary_problems_body">Fix these first. Each one says what it costs and opens the right Android screen.</string>
+    <string name="reliability_summary_warnings_title">Your alarms should ring, with some risk</string>
+    <string name="reliability_summary_warnings_body">Nothing blocks an alarm, but Android is limiting COMMAND in ways that can make one late or lost.</string>
+
+    <string name="reliability_section_problems">Needs attention</string>
+    <string name="reliability_section_warnings">Worth knowing</string>
+    <string name="reliability_section_advice">For your information</string>
+    <string name="reliability_section_ok">Working</string>
+    <string name="reliability_section_recent">Recent alarms</string>
+    <string name="reliability_section_maker">Phone maker settings</string>
+
+    <string name="reliability_item_description">%1$s: %2$s</string>
+
+    <!-- Exact alarms -->
+    <string name="reliability_exact_title">Exact alarms</string>
+    <string name="reliability_exact_ok">Allowed</string>
+    <string name="reliability_exact_problem">Not allowed</string>
+    <string name="reliability_exact_body">Android may deliver an alarm minutes late. Allow exact alarms so a ring arrives on the second.</string>
+    <string name="reliability_exact_action">Allow exact alarms</string>
+
+    <!-- Notifications -->
+    <string name="reliability_notifications_title">Notifications</string>
+    <string name="reliability_notifications_ok">Allowed</string>
+    <string name="reliability_notifications_problem">Off</string>
+    <string name="reliability_notifications_body">Without them an alarm cannot appear over the lock screen and a missed alarm leaves no note. The sound normally still plays, but not if Android refuses to run the alarm in the background.</string>
+    <string name="reliability_notifications_action_ask">Allow notifications</string>
+    <string name="reliability_notifications_action_settings">Open notification settings</string>
+
+    <!-- Full-screen alarms -->
+    <string name="reliability_fullscreen_title">Full-screen alarms</string>
+    <string name="reliability_fullscreen_ok">Allowed</string>
+    <string name="reliability_fullscreen_problem">Not allowed</string>
+    <string name="reliability_fullscreen_body">Without this a ringing alarm cannot take over a locked screen. It appears as a notification instead.</string>
+    <string name="reliability_fullscreen_action">Allow full-screen alarms</string>
+
+    <!-- The alarm notification channel -->
+    <string name="reliability_channel_title">Alarm notification channel</string>
+    <string name="reliability_channel_ok">High priority</string>
+    <string name="reliability_channel_problem">Set too low (%1$s)</string>
+    <string name="reliability_channel_level_default">default</string>
+    <string name="reliability_channel_level_low">low</string>
+    <string name="reliability_channel_level_min">minimum</string>
+    <string name="reliability_channel_level_none">off</string>
+    <string name="reliability_channel_level_missing">missing</string>
+    <string name="reliability_channel_body">At this level an alarm cannot pop up over what you are doing. Set it back to high.</string>
+    <string name="reliability_channel_action">Open channel settings</string>
+
+    <!-- Alarm volume -->
+    <string name="reliability_volume_title">Alarm volume</string>
+    <string name="reliability_volume_ok">Audible</string>
+    <string name="reliability_volume_problem">Silent</string>
+    <string name="reliability_volume_body">The alarm volume is muted or at its lowest, so a ring would make no sound. COMMAND never changes your volume on its own.</string>
+    <string name="reliability_volume_action">Open sound settings</string>
+
+    <!-- Battery optimization -->
+    <string name="reliability_battery_title">Battery optimization</string>
+    <string name="reliability_battery_ok">Not applied to COMMAND</string>
+    <string name="reliability_battery_info">On for COMMAND</string>
+    <string name="reliability_battery_body">Alarms still ring. If your phone has ever dropped one, letting COMMAND run without battery limits makes that less likely.</string>
+    <string name="reliability_battery_action">Open battery settings</string>
+
+    <!-- Background activity -->
+    <string name="reliability_background_title">Background activity</string>
+    <string name="reliability_background_ok">Allowed</string>
+    <string name="reliability_background_problem">Restricted by Android</string>
+    <string name="reliability_background_body">Alarms can be dropped or late while Android limits what COMMAND may do in the background. Remove the restriction in the app\'s battery settings.</string>
+    <string name="reliability_background_action">Open app settings</string>
+
+    <!-- Standby bucket -->
+    <string name="reliability_standby_title">Standby bucket</string>
+    <string name="reliability_standby_active">Active</string>
+    <string name="reliability_standby_working_set">Working set</string>
+    <string name="reliability_standby_frequent">Frequent</string>
+    <string name="reliability_standby_exempted">Exempted</string>
+    <string name="reliability_standby_rare">Rarely used</string>
+    <string name="reliability_standby_restricted">Restricted</string>
+    <string name="reliability_standby_unknown">Unknown</string>
+    <string name="reliability_standby_body">Android gives an app it considers rarely used fewer chances to run in the background, which can delay an alarm. Opening COMMAND from time to time moves it up.</string>
+
+    <!-- Recent alarms -->
+    <string name="reliability_recent_empty">No alarm has rung yet. Use Test this alarm now in the mission editor to see how one arrives.</string>
+    <string name="reliability_recent_on_time">Rang on time</string>
+    <string name="reliability_recent_late">Rang %1$s late</string>
+    <string name="reliability_recent_missed">Missed: the phone was off or Android dropped it</string>
+    <string name="reliability_recent_missed_found">Missed: the phone was off or Android dropped it (found %1$s after its time)</string>
+    <string name="reliability_recent_test_title">Test alarm: %1$s</string>
+    <string name="reliability_recent_row_description">%1$s, %2$s, %3$s</string>
+    <string name="reliability_duration_seconds">%1$d s</string>
+    <string name="reliability_duration_minutes">%1$d min</string>
+    <string name="reliability_duration_hours">%1$d h</string>
+
+    <!-- Phone maker -->
+    <string name="reliability_maker_body">Some phone makers stop an app from starting after a restart unless it is allowed here, so alarms can vanish after a reboot. If that happens, allow COMMAND. This is a shortcut on a best-effort basis: the page may look different on your model.</string>
+    <string name="reliability_maker_action">Open autostart settings</string>
+</resources>

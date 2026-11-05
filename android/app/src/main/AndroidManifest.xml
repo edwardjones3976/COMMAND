@@ -11,6 +11,13 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+
+        <!-- The pages where some phone makers let an app start after a restart (see OemAutostart); only looked up, never started silently. -->
+        <package android:name="com.miui.securitycenter" />
+        <package android:name="com.huawei.systemmanager" />
+        <package android:name="com.coloros.safecenter" />
+        <package android:name="com.oppo.safe" />
+        <package android:name="com.vivo.permissionmanager" />
     </queries>
 
     <application

@@ -47,20 +47,19 @@ class ScheduleScreenTest {
     private class Recorder {
         var added = 0
         val opened = ArrayList<String>()
-        var notificationSettings = 0
-        var exactAlarms = 0
+        var reliability = 0
+        var consents = 0
     }
 
-    private fun show(state: ScheduleUiState, r: Recorder = Recorder(), notificationsOff: Boolean = false) {
+    private fun show(state: ScheduleUiState, r: Recorder = Recorder()) {
         compose.setContent {
             CommandTheme(darkTheme = true) {
                 ScheduleScreen(
                     state = state,
-                    notificationsOff = notificationsOff,
                     onAdd = { r.added++ },
                     onOpen = { r.opened += it },
-                    onOpenNotificationSettings = { r.notificationSettings++ },
-                    onAllowExactAlarms = { r.exactAlarms++ },
+                    onOpenReliability = { r.reliability++ },
+                    onOpenConsents = { r.consents++ },
                     zone = ZoneOffset.UTC,
                     today = today,
                 )
@@ -68,8 +67,8 @@ class ScheduleScreenTest {
         }
     }
 
-    private fun ready(upcoming: List<ScheduleRow> = emptyList(), recent: List<ScheduleRow> = emptyList(), exact: Boolean = true) =
-        ScheduleUiState.Ready(upcoming, recent, exact)
+    private fun ready(upcoming: List<ScheduleRow> = emptyList(), recent: List<ScheduleRow> = emptyList(), problems: Int = 0) =
+        ScheduleUiState.Ready(upcoming, recent, problems)
 
     @Test
     fun `with nothing scheduled it invites the first mission and the button adds one`() {
@@ -135,28 +134,34 @@ class ScheduleScreenTest {
     }
 
     @Test
-    fun `the notification warning appears when notifications are off and opens settings`() {
+    fun `when something can stop an alarm one banner says how many and opens the reliability page`() {
         val r = Recorder()
-        show(ready(), r, notificationsOff = true)
-        compose.onNodeWithTag(ScheduleTags.NOTIFICATIONS_BANNER).assertIsDisplayed()
-        compose.onNodeWithText("Open settings").performClick()
-        assertEquals(1, r.notificationSettings)
+        show(ready(problems = 2), r)
+        compose.onNodeWithTag(ScheduleTags.ATTENTION_BANNER).assertIsDisplayed()
+        compose.onNodeWithText("2 things can stop an alarm").assertIsDisplayed()
+        compose.onNodeWithTag(ScheduleTags.ATTENTION_ACTION).performClick()
+        assertEquals(1, r.reliability)
     }
 
     @Test
-    fun `the exact alarm warning appears when exact alarms are not allowed and asks for them`() {
-        val r = Recorder()
-        show(ready(exact = false), r)
-        compose.onNodeWithTag(ScheduleTags.EXACT_BANNER).assertIsDisplayed()
-        compose.onNodeWithText("Allow exact alarms").performClick()
-        assertEquals(1, r.exactAlarms)
+    fun `one problem says thing, not things`() {
+        show(ready(problems = 1))
+        compose.onNodeWithText("1 thing can stop an alarm").assertIsDisplayed()
     }
 
     @Test
-    fun `with everything fine there are no warnings`() {
+    fun `with everything fine there is no banner`() {
         show(ready())
-        compose.onNodeWithTag(ScheduleTags.NOTIFICATIONS_BANNER).assertDoesNotExist()
-        compose.onNodeWithTag(ScheduleTags.EXACT_BANNER).assertDoesNotExist()
+        compose.onNodeWithTag(ScheduleTags.ATTENTION_BANNER).assertDoesNotExist()
+    }
+
+    @Test
+    fun `the schedule links to the reliability page and to the permissions and privacy page`() {
+        val r = Recorder()
+        show(ready(), r)
+        compose.onNodeWithTag(ScheduleTags.LINK_RELIABILITY).performClick()
+        compose.onNodeWithTag(ScheduleTags.LINK_CONSENTS).performClick()
+        assertEquals(1, r.reliability)
+        assertEquals(1, r.consents)
     }
 }
-

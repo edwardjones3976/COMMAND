@@ -21,28 +21,28 @@ object PreconditionValue {
 /**
  * Things the platform decides that decide whether an alarm rings the way the person expects: the permissions it needs, the
  * volume it plays at, and the power management that can stop it from running at all. The app never changes these; it reads
- * them, tells the truth about them, and sends the person to the right system screen.
+ * them, tells the truth about them, and sends the person to the right system screen ([fix], when there is one to send them to).
  */
-enum class Precondition(val consent: ConsentKey?) {
+enum class Precondition(val consent: ConsentKey?, val fix: Fix?) {
     /** Without it an alarm can arrive minutes late. */
-    EXACT_ALARMS(ConsentKey.EXACT_ALARM),
+    EXACT_ALARMS(ConsentKey.EXACT_ALARM, Fix.OPEN_EXACT_ALARM_SETTINGS),
 
     /** Without it there is no lock-screen ring and no note when an alarm is missed; the sound still plays. */
-    NOTIFICATIONS(ConsentKey.NOTIFICATIONS),
+    NOTIFICATIONS(ConsentKey.NOTIFICATIONS, Fix.ASK_NOTIFICATIONS),
 
     /** Without it the ring cannot take over a locked screen. */
-    FULL_SCREEN_INTENT(ConsentKey.FULL_SCREEN),
+    FULL_SCREEN_INTENT(ConsentKey.FULL_SCREEN, Fix.OPEN_FULL_SCREEN_SETTINGS),
 
     /** The importance of the ring's notification channel; below high it cannot take over the screen. */
-    ALARM_CHANNEL(null),
+    ALARM_CHANNEL(null, Fix.OPEN_ALARM_CHANNEL_SETTINGS),
 
     /** The alarm stream is muted or at zero: an alarm that makes no sound is the failure this app exists to prevent. */
-    ALARM_VOLUME(null),
-    BATTERY_OPTIMIZATION(null),
-    BACKGROUND_RESTRICTED(null),
+    ALARM_VOLUME(null, Fix.OPEN_SOUND_SETTINGS),
+    BATTERY_OPTIMIZATION(null, Fix.OPEN_BATTERY_SETTINGS),
+    BACKGROUND_RESTRICTED(null, Fix.OPEN_APP_SETTINGS),
 
     /** Android's standby bucket for the app; a rarely used app is given fewer chances to run. */
-    STANDBY_BUCKET(null);
+    STANDBY_BUCKET(null, null);
 
     /** Granted or denied by the person (or by the system on their behalf); a change is worth a PERMISSION_CHANGED event. */
     val isPermission: Boolean get() = consent != null

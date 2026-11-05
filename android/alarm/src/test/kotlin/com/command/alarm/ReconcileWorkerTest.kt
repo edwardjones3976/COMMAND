@@ -1,7 +1,6 @@
 package com.command.alarm
 
 import android.content.Context
-import android.media.AudioManager
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.ListenableWorker
 import androidx.work.WorkManager
@@ -74,9 +73,6 @@ class ReconcileWorkerTest {
 
     private fun events(type: EventType) = runBlocking { db.events().ofType(type) }
 
-    /** A fresh Robolectric device has its alarm stream at zero, which is itself a thing worth recording; these tests are about a healthy one. */
-    private fun makeAlarmAudible() = context.getSystemService(AudioManager::class.java).setStreamVolume(AudioManager.STREAM_ALARM, 5, 0)
-
     @Test
     fun `after a boot the worker puts back the alarm the reboot dropped and says it ran`() {
         saveStandup()
@@ -104,7 +100,6 @@ class ReconcileWorkerTest {
 
     @Test
     fun `without a trigger it runs as the periodic backstop, which is silent when nothing was wrong`() {
-        makeAlarmAudible()
         saveStandup()
         val before = runBlocking { db.events().all() }.size
 

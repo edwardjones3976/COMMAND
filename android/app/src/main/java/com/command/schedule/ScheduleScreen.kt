@@ -1,18 +1,17 @@
 package com.command.schedule
 
-import android.content.Context
-import android.content.Intent
-import android.os.Build
-import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,20 +28,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationManagerCompat
-import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -52,18 +46,18 @@ import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.MissReason
 import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.SkipReason
+import com.command.ui.whenLabel
 import com.example.R
-import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
 
 object ScheduleTags {
     const val ADD = "schedule_add"
     const val EMPTY = "schedule_empty"
-    const val NOTIFICATIONS_BANNER = "schedule_banner_notifications"
-    const val EXACT_BANNER = "schedule_banner_exact"
+    const val ATTENTION_BANNER = "schedule_banner_attention"
+    const val ATTENTION_ACTION = "schedule_banner_attention_action"
+    const val LINK_RELIABILITY = "schedule_link_reliability"
+    const val LINK_CONSENTS = "schedule_link_consents"
     fun row(occurrenceId: String) = "schedule_row_$occurrenceId"
 }
 
@@ -71,38 +65,30 @@ object ScheduleTags {
 fun ScheduleRoute(
     onAdd: () -> Unit,
     onOpen: (String) -> Unit,
+    onOpenReliability: () -> Unit,
+    onOpenConsents: () -> Unit,
     viewModel: ScheduleViewModel = hiltViewModel(),
 ) {
-    val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var notificationsOff by remember { mutableStateOf(!notificationsEnabled(context)) }
 
-    // Both can be changed in system settings, so look again whenever the screen comes back.
+    // The person can change what alarms depend on in Android's own screens, so look again whenever this one comes back.
     LifecycleResumeEffect(Unit) {
-        notificationsOff = !notificationsEnabled(context)
         viewModel.onResume()
         onPauseOrDispose { }
     }
 
-    ScheduleScreen(
-        state = state,
-        notificationsOff = notificationsOff,
-        onAdd = onAdd,
-        onOpen = onOpen,
-        onOpenNotificationSettings = { openNotificationSettings(context) },
-        onAllowExactAlarms = { requestExactAlarms(context) },
-    )
+    ScheduleScreen(state = state, onAdd = onAdd, onOpen = onOpen, onOpenReliability = onOpenReliability, onOpenConsents = onOpenConsents)
 }
 
 /** Stateless, so it can be shown in tests without a view model. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ScheduleScreen(
     state: ScheduleUiState,
-    notificationsOff: Boolean,
     onAdd: () -> Unit,
     onOpen: (String) -> Unit,
-    onOpenNotificationSettings: () -> Unit,
-    onAllowExactAlarms: () -> Unit,
+    onOpenReliability: () -> Unit,
+    onOpenConsents: () -> Unit,
     zone: ZoneId = ZoneId.systemDefault(),
     today: LocalDate = LocalDate.now(zone),
 ) {
@@ -132,27 +118,18 @@ fun ScheduleScreen(
                         modifier = Modifier.semantics { heading() },
                     )
                 }
-                if (notificationsOff) {
-                    item {
-                        Banner(
-                            tag = ScheduleTags.NOTIFICATIONS_BANNER,
-                            title = stringResource(R.string.schedule_banner_notifications_title),
-                            body = stringResource(R.string.schedule_banner_notifications_body),
-                            action = stringResource(R.string.schedule_banner_notifications_action),
-                            onAction = onOpenNotificationSettings,
-                        )
+                item {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = onOpenReliability, modifier = Modifier.heightIn(min = 48.dp).testTag(ScheduleTags.LINK_RELIABILITY)) {
+                            Text(stringResource(R.string.schedule_link_reliability), style = MaterialTheme.typography.labelLarge)
+                        }
+                        TextButton(onClick = onOpenConsents, modifier = Modifier.heightIn(min = 48.dp).testTag(ScheduleTags.LINK_CONSENTS)) {
+                            Text(stringResource(R.string.schedule_link_consents), style = MaterialTheme.typography.labelLarge)
+                        }
                     }
                 }
-                if (!state.exactAlarmsAvailable) {
-                    item {
-                        Banner(
-                            tag = ScheduleTags.EXACT_BANNER,
-                            title = stringResource(R.string.schedule_banner_exact_title),
-                            body = stringResource(R.string.schedule_banner_exact_body),
-                            action = stringResource(R.string.schedule_banner_exact_action),
-                            onAction = onAllowExactAlarms,
-                        )
-                    }
+                if (state.problems > 0) {
+                    item { AttentionBanner(problems = state.problems, onAction = onOpenReliability) }
                 }
                 if (state.upcoming.isEmpty() && state.recent.isEmpty()) {
                     item { Empty() }
@@ -186,24 +163,26 @@ private fun Empty() {
 }
 
 @Composable
-private fun Banner(tag: String, title: String, body: String, action: String, onAction: () -> Unit) {
+private fun AttentionBanner(problems: Int, onAction: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth().testTag(tag),
+        modifier = Modifier.fillMaxWidth().testTag(ScheduleTags.ATTENTION_BANNER),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleLarge)
-            Text(body, style = MaterialTheme.typography.bodyLarge)
-            TextButton(onClick = onAction) { Text(action, style = MaterialTheme.typography.labelLarge) }
+            Text(pluralStringResource(R.plurals.reliability_summary_problems_title, problems, problems), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.schedule_banner_attention_body), style = MaterialTheme.typography.bodyLarge)
+            TextButton(onClick = onAction, modifier = Modifier.heightIn(min = 48.dp).testTag(ScheduleTags.ATTENTION_ACTION)) {
+                Text(stringResource(R.string.schedule_banner_attention_action), style = MaterialTheme.typography.labelLarge)
+            }
         }
     }
 }
 
 @Composable
 private fun RowCard(row: ScheduleRow, zone: ZoneId, today: LocalDate, onOpen: (String) -> Unit) {
-    val whenLabel = whenText(row.scheduledAtUtc, zone, today)
+    val whenText = whenLabel(row.scheduledAtUtc, zone, today)
     val state = stateLabel(row)
-    val description = stringResource(R.string.schedule_row_description, row.title, whenLabel, state)
+    val description = stringResource(R.string.schedule_row_description, row.title, whenText, state)
     Card(
         onClick = { onOpen(row.missionId) },
         modifier = Modifier.fillMaxWidth().testTag(ScheduleTags.row(row.occurrenceId)).semantics(mergeDescendants = true) { contentDescription = description },
@@ -218,20 +197,9 @@ private fun RowCard(row: ScheduleRow, zone: ZoneId, today: LocalDate, onOpen: (S
                     modifier = Modifier.padding(start = 12.dp),
                 )
             }
-            Text(whenLabel, style = MaterialTheme.typography.bodyLarge)
+            Text(whenText, style = MaterialTheme.typography.bodyLarge)
             Text(state, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.secondary)
         }
-    }
-}
-
-@Composable
-private fun whenText(atUtcMs: Long, zone: ZoneId, today: LocalDate): String {
-    val local = Instant.ofEpochMilli(atUtcMs).atZone(zone)
-    val time = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).format(local)
-    return when (local.toLocalDate()) {
-        today -> stringResource(R.string.schedule_when_today, time)
-        today.plusDays(1) -> stringResource(R.string.schedule_when_tomorrow, time)
-        else -> stringResource(R.string.schedule_when_other, DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).format(local), time)
     }
 }
 
@@ -260,22 +228,3 @@ private fun stateLabel(row: ScheduleRow): String = stringResource(
         OccurrenceState.RECOVERY_OFFERED -> R.string.schedule_state_reset
     },
 )
-
-private fun notificationsEnabled(context: Context): Boolean = NotificationManagerCompat.from(context).areNotificationsEnabled()
-
-private fun openNotificationSettings(context: Context) {
-    val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-    } else {
-        // Before Android 8 there is no page for an app's notifications; the app's own page has the switch.
-        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, "package:${context.packageName}".toUri())
-    }
-    runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-}
-
-private fun requestExactAlarms(context: Context) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-    val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, "package:${context.packageName}".toUri())
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    runCatching { context.startActivity(intent) }
-}

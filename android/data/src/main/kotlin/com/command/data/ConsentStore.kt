@@ -42,6 +42,9 @@ class ConsentStore @Inject constructor(
 
     suspend fun history(key: ConsentKey): List<ConsentRow> = db.consents().history(key)
 
+    /** Every row of every consent, oldest first; the consent center reads the current state and the history from it. */
+    fun observeAll(): Flow<List<ConsentRow>> = db.consents().observeAll()
+
     suspend fun grant(
         key: ConsentKey,
         source: ConsentSource = ConsentSource.USER,
