@@ -1,19 +1,12 @@
-package com.example
+package com.command.voice
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.Voice
 import androidx.test.core.app.ApplicationProvider
-import com.example.data.LegacyVoicePacks
-import com.example.data.VoiceModelType
-import com.example.data.VoicePackEntity
-import com.example.service.DirectorBriefs
-import com.example.service.DirectorVoice
-import com.example.service.GeminiAudio
-import com.example.service.GeminiSpeechSource
-import com.example.service.VoiceDirectorEngine
-import com.command.voice.VoiceMastering
-import com.example.service.VoicePlaybackState
+import com.command.testing.VoicePackFixtures
+import com.command.domain.voice.VoiceModelType
+import com.command.domain.voice.VoicePackEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.After
@@ -50,7 +43,7 @@ import kotlin.random.Random
 class StoneVoiceVerificationTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
-    private val packs = LegacyVoicePacks.defaultVoicePacks().associateBy { it.id }
+    private val packs = VoicePackFixtures.defaultVoicePacks().associateBy { it.id }
     private val stone = packs.getValue("pack_major_stone")
     private val sampleRate = 24_000
     private val ceiling = (32767 * VoiceMastering.dbToLin(VoiceMastering.PEAK_CEILING_DBFS)).toInt() + 1

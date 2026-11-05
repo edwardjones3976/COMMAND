@@ -18,5 +18,8 @@ android {
 
 dependencies {
   coreLibraryDesugaring(libs.desugar.jdk.libs)
+  implementation(project(":voice"))
+  implementation(platform(libs.firebase.bom))
+  implementation(libs.firebase.ai)
   testImplementation(libs.junit)
 }

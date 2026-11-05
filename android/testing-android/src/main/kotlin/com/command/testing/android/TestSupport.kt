@@ -33,6 +33,7 @@ import com.command.domain.voice.Line
 import com.command.domain.voice.RoutePolicy
 import com.command.domain.voice.SpeakResult
 import com.command.domain.voice.Speaker
+import com.command.domain.voice.SpeechLevel
 import com.command.domain.voice.SpeechUsage
 import com.command.testing.FakeAlarmScheduler
 import com.command.testing.FakeClock
@@ -109,6 +110,9 @@ class FakeSpeaker : Speaker {
 
     /** The route each line was asked to be heard on, in the order the lines were asked for. */
     val routes = ArrayList<RoutePolicy>()
+
+    /** How loud each line was asked to be. */
+    val levels = ArrayList<SpeechLevel>()
     var result: SpeakResult = SpeakResult.Spoken(1_000)
 
     /** When set, speaking throws it, as a broken engine might. */
@@ -122,9 +126,10 @@ class FakeSpeaker : Speaker {
         private set
     private var held: CancellableContinuation<Unit>? = null
 
-    override suspend fun speak(line: Line, usage: SpeechUsage, route: RoutePolicy, onAudible: () -> Unit): SpeakResult {
+    override suspend fun speak(line: Line, usage: SpeechUsage, route: RoutePolicy, level: SpeechLevel, onAudible: () -> Unit): SpeakResult {
         spoken += line to usage
         routes += route
+        levels += level
         failWith?.let { throw it }
         // A phone that cannot speak makes no sound, so nobody is told to make room for it.
         if (result !is SpeakResult.Unavailable) onAudible()

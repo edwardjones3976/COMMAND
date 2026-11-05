@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M9 Listening Note</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:44rem;margin:2rem auto;padding:0 1rem}</style>
+</head>
+<body>
+<h1>M9 listening note</h1>
+<p>The tests measure the alarm line's loudness and its peaks. They cannot say whether it is loud enough to get you up. That is your sign-off, and it has not been given.</p>
+<h2>What to do</h2>
+<ol>
+<li>Install the debug build of this branch on a phone with an offline speech voice, or on your emulator.</li>
+<li>Put the phone's alarm volume at maximum.</li>
+<li>No screen can choose a profile yet, so start the ring from a computer. For alert intensity 5, run this and wait 20 seconds:<br><code>adb shell am broadcast -a com.command.debug.RING -p com.aistudio.command.vtxrpl --ei seconds 20 --es title Stand --es profile builtin_reveille_max</code><br>Listen to the spoken line over the tone, on the phone's own speaker.</li>
+<li>Repeat with <code>--es profile builtin_steady</code> for a lower intensity (Steady is 2). "Test this alarm now" in the mission editor also works, and uses the app's default profile.</li>
+</ol>
+<h2>What to listen for</h2>
+<ul>
+<li>Is the spoken line clearly louder than before this change, and loud enough at intensity 5?</li>
+<li>Is it still clean? Listen for crackle, pumping, or breaths and hiss brought up between words.</li>
+<li>Is intensity 5 audibly louder than intensity 1 to 3? The difference is only 2 LU by design, so it may be subtle.</li>
+</ul>
+<h2>What the targets are</h2>
+<p>-16 LUFS at intensity 1 to 3, -15 at 4, -14 at 5, peaks no higher than -1 dBTP. If it is too quiet, say so: the targets are one small table and can be raised, though dense speech runs into the ceiling at about -11 LUFS.</p>
+<h2>What you will not hear yet</h2>
+<p>The per-voice loudness trim has no effect in the app, because no voice packs are stored yet. Studio (Gemini) voices arrive in M14.</p>
+</body>
+</html>

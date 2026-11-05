@@ -1,8 +1,6 @@
-package com.example
+package com.command.voice
 
-import com.example.oldchain.OldClonedSpectralDsp
-import com.example.service.VoiceDirectorEngine
-import com.command.voice.VoiceMastering
+import com.command.voice.oldchain.OldClonedSpectralDsp
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File

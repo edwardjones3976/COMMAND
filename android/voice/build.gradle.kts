@@ -21,6 +21,10 @@ dependencies {
   api(project(":domain"))
   implementation(libs.kotlinx.coroutines.android)
 
+  testImplementation(project(":testing-jvm"))
+  testImplementation(libs.androidx.core)
+  testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
+  testImplementation(libs.robolectric)
 }

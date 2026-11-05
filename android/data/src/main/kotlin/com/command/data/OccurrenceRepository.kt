@@ -47,6 +47,7 @@ import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.OccurrenceStateMachine
 import com.command.domain.occurrence.SkipReason
 import com.command.domain.handshake.Attempt
+import com.command.domain.voice.SpeechLevel
 import com.command.domain.occurrence.TransitionResult
 import com.command.domain.schedule.RestWindow
 import com.command.domain.schedule.RestWindows
@@ -257,6 +258,26 @@ class OccurrenceRepository @Inject constructor(
         return HandshakePlan(ChainJson.decode(saved) ?: DialEffects.defaultChain(difficulty), personality)
     }
 
+    /**
+     * How loud an occurrence's spoken line is: what the ring was fired with, so that a profile edited while it sounds changes nothing. A ring
+     * from before these were pinned follows the profile. A level that cannot be read costs the setting, never the line: it is the louder choice.
+     */
+    suspend fun speechLevelOf(occurrence: OccurrenceRow): SpeechLevel = try {
+        val pinned = Codec.decodeSession(occurrence.sessionJson)
+        val mission = db.missions().get(occurrence.missionId)
+        val intensity = pinned.alertIntensity ?: dialsFor(mission?.profileId).alertIntensity
+        val trim = pinned.voiceTrimDb ?: voiceTrimOf(profileFor(mission?.profileId))
+        SpeechLevel(intensity, trim)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        SpeechLevel.LOUDEST
+    }
+
+    /** The loudness trim of the profile's voice pack; none when it has no pack, or one that is gone. */
+    private suspend fun voiceTrimOf(profile: ProfileRow?): Float =
+        profile?.voicePackId?.let { id -> db.voicePacks().all().firstOrNull { it.id == id } }?.loudnessTrimDb ?: 0f
+
     /** Every try recorded for [occurrenceId], oldest first: what a ring that is shown again is restored from. */
     suspend fun attemptsOf(occurrenceId: String): List<Attempt> =
         db.challenges().forOccurrence(occurrenceId).map { Attempt(it.chainPosition, it.mode, it.attemptNo, it.outcome) }
@@ -404,6 +425,8 @@ class OccurrenceRepository @Inject constructor(
                         handshakeDifficulty = dials.handshakeDifficulty,
                         handshakePersonality = (profileFor(mission.profileId)?.personality ?: Personality.CUSTOM).name,
                         handshakeChainJson = profileFor(mission.profileId)?.handshakeChainJson,
+                        alertIntensity = dials.alertIntensity,
+                        voiceTrimDb = voiceTrimOf(profileFor(mission.profileId)),
                     )
                 }
                 val armMode = r.effects.filterIsInstance<Effect.ArmAlarm>().firstOrNull()?.mode

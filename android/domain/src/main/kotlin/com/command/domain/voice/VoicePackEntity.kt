@@ -1,9 +1,9 @@
-package com.example.data
+package com.command.domain.voice
 
 /*
- * Kept only until the voice pipeline moves into :voice (milestone M9). A plain data class now: the database that stored it
- * is gone. The licence, attribution, quality-tier and recorded-voice fields of the previous version are removed on purpose:
- * they were claims no recording ever backed.
+ * A voice pack as the voice engine reads it: a plain data class (the database rows are VoicePackRow). It is here and not in :voice because
+ * the JVM test module, which an Android library cannot be a dependency of, holds the fixtures. The licence, attribution, quality-tier and
+ * recorded-voice fields of the previous version are removed on purpose: they were claims no recording ever backed.
  */
 
 enum class EmotionalTone(val label: String, val badgeColorHex: Long) {
