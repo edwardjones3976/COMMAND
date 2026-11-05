@@ -313,6 +313,31 @@ class CalendarSyncTest {
         assertOneArmedAt(b)
     }
 
+    /** The owner's decision: the event really is at a new time, and a missing alarm costs more than one more. */
+    @Test
+    fun `an event that has rung and is then moved later rings again at its new time, once`() = run {
+        switchOn()
+        val first = f.t0 + HOUR
+        val later = f.t0 + 5 * HOUR
+        reads(instance(begin = first))
+        sync.run()
+        val rung = rows().single()
+        f.repo.apply(rung.id, com.command.domain.occurrence.OccurrenceCommand.Fire, com.command.domain.model.EventSource.SERVICE)
+
+        sync.run()
+        assertEquals("unmoved, what has rung is not imported again", 1, rows().size)
+
+        reads(instance(begin = later))
+        repeat(2) { sync.run() }
+
+        assertEquals("what rang stays as it was", OccurrenceState.FIRING, f.db.occurrences().get(rung.id)!!.state)
+        assertEquals(first, f.db.occurrences().get(rung.id)!!.scheduledAtUtc)
+        val again = rows().filter { it.id != rung.id }
+        assertEquals(listOf(later), again.map { it.scheduledAtUtc })
+        assertEquals(OccurrenceState.ARMED, again.single().state)
+        assertEquals(later, f.scheduler.armed.getValue("command://occurrence/${again.single().id}").atUtcMs)
+    }
+
     @Test
     fun `a move onto a slot the person already answered gives no alarm at the old time`() = run {
         switchOn()
