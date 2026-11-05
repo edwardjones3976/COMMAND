@@ -862,4 +862,49 @@ class OccurrenceRepositoryTest {
         assertEquals(CheckInAnswer.STARTED, d.checkIns.single().answer)
         assertNull(f.repo.detail("no-such-occurrence"))
     }
+
+    private suspend fun armedAt(): OccurrenceRow {
+        val o = scheduled()
+        apply(o, com.command.domain.occurrence.OccurrenceCommand.Arm(ArmMode.EXACT))
+        return f.repo.get(o.id)!!
+    }
+
+    @Test
+    fun `a Fire for a time the occurrence has left is rejected and the alarm is set for the new time`() = run {
+        val o = armedAt()
+        val moved = o.scheduledAtUtc + 3_600_000L
+        f.repo.reschedule(o.id, moved, "UTC")
+        f.scheduler.armed.clear()
+        val r = apply(o, com.command.domain.occurrence.OccurrenceCommand.Fire, ApplyExtras(setForUtc = o.scheduledAtUtc))
+        assertTrue(r is ApplyResult.Rejected)
+        assertEquals(OccurrenceState.ARMED, state(o))
+        assertEquals(listOf(moved), f.scheduler.armed.values.map { it.atUtcMs })
+    }
+
+    @Test
+    fun `a Fire for the occurrence's own time, or that names no time, fires`() = run {
+        val a = armedAt()
+        assertTrue(apply(a, com.command.domain.occurrence.OccurrenceCommand.Fire, ApplyExtras(setForUtc = a.scheduledAtUtc)) is ApplyResult.Applied)
+        val b = scheduled(atOffsetMs = 120_000)
+        apply(b, com.command.domain.occurrence.OccurrenceCommand.Arm(ArmMode.EXACT))
+        assertTrue(apply(b, com.command.domain.occurrence.OccurrenceCommand.Fire) is ApplyResult.Applied)
+    }
+
+    @Test
+    fun `a Fire delivered again to a ring that is going sets no alarm, whatever time it names`() = run {
+        val o = armedAt()
+        apply(o, com.command.domain.occurrence.OccurrenceCommand.Fire)
+        f.scheduler.armed.keys.filter { it.startsWith("command://occurrence/") }.forEach { f.scheduler.armed.remove(it) }
+        val r = apply(o, com.command.domain.occurrence.OccurrenceCommand.Fire, ApplyExtras(setForUtc = o.scheduledAtUtc - 1))
+        assertTrue(r is ApplyResult.Rejected)
+        assertTrue(f.scheduler.armed.keys.none { it.startsWith("command://occurrence/") })
+    }
+
+    @Test
+    fun `a rejected Fire that is not about a moved time sets no alarm`() = run {
+        val o = scheduled()
+        val r = apply(o, com.command.domain.occurrence.OccurrenceCommand.Fire, ApplyExtras(setForUtc = o.scheduledAtUtc))
+        assertTrue(r is ApplyResult.Rejected)
+        assertTrue(f.scheduler.armed.isEmpty())
+    }
 }

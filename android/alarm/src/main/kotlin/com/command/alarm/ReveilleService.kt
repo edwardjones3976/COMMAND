@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import androidx.annotation.VisibleForTesting
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -15,6 +16,7 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import com.command.data.AppSettings
+import com.command.data.ApplyExtras
 import com.command.data.ApplyResult
 import com.command.data.MissionBrief
 import com.command.data.OccurrenceRepository
@@ -219,20 +221,12 @@ class ReveilleService : Service() {
     }
 
     private suspend fun deliver(id: String, code: Int, setFor: Long) {
-        // An armed occurrence whose time has moved since this alarm was set (the process died before the alarm could be put back): this is
-        // not its time. The alarm has been consumed, so the one for the right time is set here.
-        val moved = withContext(NonCancellable) {
-            repository.get(id)?.takeIf { setFor != AlarmContract.NO_TIME && it.state == OccurrenceState.ARMED && it.scheduledAtUtc != setFor }?.also {
-                repository.logEvent(EventType.ALARM_FIRED_STALE, it, EventSource.SERVICE, EventPayload.of("set_for" to setFor))
-                repository.rearm(id)
-            }
-        }
-        if (moved != null) {
-            if (active?.code != code) runCatching { NotificationManagerCompat.from(this).cancel(code) }
-            return
-        }
+        beforeFire?.invoke(id)
         // The database work is never cancelled half-way: an alarm that has been consumed must end up recorded.
-        val fire = withContext(NonCancellable) { repository.apply(id, OccurrenceCommand.Fire, EventSource.SERVICE) }
+        // Whether this alarm is still for the occurrence's time is decided in the transaction of the Fire. If it was moved meanwhile, Fire is
+        // rejected and the alarm for the new time set, and what follows treats it like any other stale alarm.
+        val time = ApplyExtras(setForUtc = setFor.takeIf { it != AlarmContract.NO_TIME })
+        val fire = withContext(NonCancellable) { repository.apply(id, OccurrenceCommand.Fire, EventSource.SERVICE, time) }
         val row: OccurrenceRow
         if (fire is ApplyResult.Applied) {
             row = fire.occurrence
@@ -429,6 +423,10 @@ class ReveilleService : Service() {
     }
 
     companion object {
+        /** A test's way in between the delivery of an alarm and its Fire, for what may commit in that gap. */
+        @VisibleForTesting
+        internal var beforeFire: (suspend (String) -> Unit)? = null
+
         /**
          * The foreground service type passed to the platform. Media playback is the honest description of an alarm tone and
          * needs no special permission; the manifest also declares systemExempted (for holders of an exact-alarm permission)

@@ -608,4 +608,28 @@ class ReveilleServiceTest {
         startService(fireIntent(o).apply { removeExtra(AlarmContract.EXTRA_AT) }).get()
         awaitUntil(message = "ringing") { stateOf(o) == OccurrenceState.FIRING }
     }
+
+    @Test
+    fun `a calendar move committing between the delivery and the Fire rings nothing and sets the new time`() {
+        val o = armed()
+        val moved = o.scheduledAtUtc + 3_600_000L
+        // The order is forced by the seam: the alarm was delivered for the old time, and the move commits before its Fire is decided.
+        ReveilleService.beforeFire = { id ->
+            ReveilleService.beforeFire = null
+            repo.reschedule(id, moved, "UTC")
+            // The platform has used the delivered alarm up; the sync that moved it has not put one back yet.
+            scheduler.armed.clear()
+        }
+        try {
+            val service = startService(fireIntent(o)).get()
+            awaitUntil(message = "stop") { shadowOf(service).isStoppedBySelf }
+        } finally {
+            ReveilleService.beforeFire = null
+        }
+        assertEquals("it did not ring at the old time", OccurrenceState.ARMED, stateOf(o))
+        assertFalse(output.ringing)
+        assertFalse(EventType.ALARM_FIRED in eventTypes(o))
+        assertTrue(EventType.ALARM_FIRED_STALE in eventTypes(o))
+        assertEquals(moved, scheduler.armed.getValue("command://occurrence/${o.id}").atUtcMs)
+    }
 }

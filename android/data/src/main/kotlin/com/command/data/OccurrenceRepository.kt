@@ -73,6 +73,12 @@ data class ChallengeRecord(
 data class ApplyExtras(
     val challenges: List<ChallengeRecord> = emptyList(),
     val ringMode: RingMode? = null,
+    /**
+     * The time the delivered alarm was set for, passed with a Fire. An armed occurrence that has moved since is not rung: Fire is rejected in
+     * its own transaction, so that no move can commit between this decision and the ring, and the used-up alarm is set for the new time.
+     * Null for an alarm that does not say.
+     */
+    val setForUtc: Long? = null,
 ) {
     companion object { val NONE = ApplyExtras() }
 }
@@ -298,7 +304,8 @@ class OccurrenceRepository @Inject constructor(
         lockOf(occurrenceId).withLock {
             val pending = ArrayList<Pending>()
             val result = db.withTransaction { applyInTx(occurrenceId, command, source, extras, pending) }
-            if (result is ApplyResult.Applied) runEffects(pending, source)
+            // What a rejected command queues is only the alarm of a Fire that came for a time since moved.
+            if (result is ApplyResult.Applied || pending.isNotEmpty()) runEffects(pending, source)
             result
         }
     }
@@ -313,6 +320,11 @@ class OccurrenceRepository @Inject constructor(
         val occ = db.occurrences().get(occurrenceId) ?: return ApplyResult.NotFound
         val mission = db.missions().get(occ.missionId) ?: return ApplyResult.NotFound
         val now = clock.nowMs()
+        if (extras.setForUtc != null && occ.state == OccurrenceState.ARMED && occ.scheduledAtUtc != extras.setForUtc) {
+            log(EventType.REJECTED_TRANSITION, occ, source, EventPayload.of("from" to occ.state, "command" to command.label, "why" to "MOVED", "set_for" to extras.setForUtc))
+            pending += Pending(occ, Effect.ArmAlarm(occ.armMode), now)
+            return ApplyResult.Rejected(occ.state, command.label)
+        }
         val dials = dialsFor(mission.profileId)
         val lock = MissionLock.effectivePolicy(mission.flexibility, mission.lockPolicy, dials.scheduleRigidity)
         val session = Codec.decodeSession(occ.sessionJson)
