@@ -14,8 +14,8 @@
 <ol>
 <li>Install the debug build of this branch on a phone with an offline speech voice, or on your emulator.</li>
 <li>Put the phone's alarm volume at maximum.</li>
-<li>Make Reveille Max the active profile (alert intensity 5) and use "Test this alarm now". Listen to the spoken line over the tone, on the phone's own speaker.</li>
-<li>Repeat with a profile at alert intensity 1 to 3, such as Steady.</li>
+<li>No screen can choose a profile yet, so start the ring from a computer. For alert intensity 5, run this and wait 20 seconds:<br><code>adb shell am broadcast -a com.command.debug.RING -p com.aistudio.command.vtxrpl --ei seconds 20 --es title Stand --es profile builtin_reveille_max</code><br>Listen to the spoken line over the tone, on the phone's own speaker.</li>
+<li>Repeat with <code>--es profile builtin_steady</code> for a lower intensity (Steady is 2). "Test this alarm now" in the mission editor also works, and uses the app's default profile.</li>
 </ol>
 <h2>What to listen for</h2>
 <ul>
