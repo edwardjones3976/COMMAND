@@ -188,7 +188,8 @@ class ReveilleService : Service() {
             // next, and not when the first line is asked for.
             runCatching { speaker.prepare() }
         }
-        queue(id) { deliver(id, code) }
+        val setFor = intent?.getLongExtra(AlarmContract.EXTRA_AT, AlarmContract.NO_TIME) ?: AlarmContract.NO_TIME
+        queue(id) { deliver(id, code, setFor) }
     }
 
     /**
@@ -217,7 +218,19 @@ class ReveilleService : Service() {
         if (active == null && pending == 0) shutDown()
     }
 
-    private suspend fun deliver(id: String, code: Int) {
+    private suspend fun deliver(id: String, code: Int, setFor: Long) {
+        // An armed occurrence whose time has moved since this alarm was set (the process died before the alarm could be put back): this is
+        // not its time. The alarm has been consumed, so the one for the right time is set here.
+        val moved = withContext(NonCancellable) {
+            repository.get(id)?.takeIf { setFor != AlarmContract.NO_TIME && it.state == OccurrenceState.ARMED && it.scheduledAtUtc != setFor }?.also {
+                repository.logEvent(EventType.ALARM_FIRED_STALE, it, EventSource.SERVICE, EventPayload.of("set_for" to setFor))
+                repository.rearm(id)
+            }
+        }
+        if (moved != null) {
+            if (active?.code != code) runCatching { NotificationManagerCompat.from(this).cancel(code) }
+            return
+        }
         // The database work is never cancelled half-way: an alarm that has been consumed must end up recorded.
         val fire = withContext(NonCancellable) { repository.apply(id, OccurrenceCommand.Fire, EventSource.SERVICE) }
         val row: OccurrenceRow

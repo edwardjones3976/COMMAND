@@ -117,7 +117,8 @@ class CalendarSync @Inject constructor(
                 if (read.calendars.isEmpty() && dao.sources().isNotEmpty()) {
                     readFailed(ReadFailure.NO_CALENDARS)
                 } else {
-                    apply(read, now)
+                    // The moved alarms first, so that none is left at its old time should the reconcile fail.
+                    for (id in apply(read, now)) occurrences.rearm(id)
                     missions.reconcile(ReconcileTrigger.CALENDAR_SYNC)
                     CalendarSyncOutcome.DONE
                 }
@@ -138,7 +139,9 @@ class CalendarSync @Inject constructor(
         return CalendarSyncOutcome.PERMISSION_LOST
     }
 
-    private suspend fun apply(read: CalendarRead.Ok, now: Long) {
+    /** Commits the plan and returns the occurrences it moved. */
+    private suspend fun apply(read: CalendarRead.Ok, now: Long): List<String> {
+        val moved = ArrayList<String>()
         val dao = db.calendarDao()
         occurrences.inTransaction(EventSource.WORKER) { tx ->
             // Consent withdrawn while the read ran: the cascade has already cleared everything, and nothing may come back behind it.
@@ -189,9 +192,12 @@ class CalendarSync @Inject constructor(
                 val blocked = pending.filter { move ->
                     val own = db.occurrences().get(move.occurrenceId)
                     if (own != null) freeSlot(own.missionId, move.instance.beginMs)
-                    val moved = tx.reschedule(move.occurrenceId, move.instance.beginMs, move.instance.eventTz ?: clock.zone().id)
-                    if (moved) dao.updateLink(rowOf(move.instance, move.occurrenceId, now))
-                    !moved
+                    val done = tx.reschedule(move.occurrenceId, move.instance.beginMs, move.instance.eventTz ?: clock.zone().id)
+                    if (done) {
+                        dao.updateLink(rowOf(move.instance, move.occurrenceId, now))
+                        moved += move.occurrenceId
+                    }
+                    !done
                 }
                 if (blocked.size == pending.size) {
                     // Blocked by something already rung or answered at that very time: that instant has had its say, and an alarm left at
@@ -229,6 +235,7 @@ class CalendarSync @Inject constructor(
                 )
             }
         }
+        return moved
     }
 
     /** A row the calendar took away only holds a time slot, and the calendar now wants that slot: its history is replaced by what follows. */

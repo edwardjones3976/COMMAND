@@ -578,4 +578,23 @@ class ReveilleServiceTest {
         assertEquals(OccurrenceState.SCHEDULED, stateOf(o))
         assertTrue(shadowOf(context.getSystemService(NotificationManager::class.java)).allNotifications.isEmpty())
     }
+
+    @Test
+    fun `an alarm from before its occurrence moved rings nothing and is set again for the new time`() {
+        val o = armed()
+        val service = startService(fireIntent(o).putExtra(AlarmContract.EXTRA_AT, o.scheduledAtUtc - 3_600_000L)).get()
+        awaitUntil(message = "stop") { shadowOf(service).isStoppedBySelf }
+        assertFalse(output.ringing)
+        assertEquals(OccurrenceState.ARMED, stateOf(o))
+        assertTrue(EventType.ALARM_FIRED_STALE in eventTypes(o))
+        assertFalse(EventType.ALARM_FIRED in eventTypes(o))
+        assertEquals(o.scheduledAtUtc, scheduler.armed.getValue("command://occurrence/${o.id}").atUtcMs)
+    }
+
+    @Test
+    fun `an alarm whose time matches its occurrence rings`() {
+        val o = armed()
+        startService(fireIntent(o).putExtra(AlarmContract.EXTRA_AT, o.scheduledAtUtc)).get()
+        awaitUntil(message = "ringing") { stateOf(o) == OccurrenceState.FIRING }
+    }
 }

@@ -28,6 +28,7 @@ class ReveilleAlarmReceiver : BroadcastReceiver() {
             .setData(intent.data)
             .putExtra(AlarmContract.EXTRA_OCCURRENCE_ID, id)
             .putExtra(AlarmContract.EXTRA_REQUEST_CODE, code)
+            .putExtra(AlarmContract.EXTRA_AT, intent.getLongExtra(AlarmContract.EXTRA_AT, AlarmContract.NO_TIME))
         try {
             ContextCompat.startForegroundService(context, serviceIntent)
         } catch (e: Exception) {

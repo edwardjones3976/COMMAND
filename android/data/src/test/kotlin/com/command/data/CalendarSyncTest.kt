@@ -415,4 +415,21 @@ class CalendarSyncTest {
         assertTrue(consents.isGranted(ConsentKey.CALENDAR_READ))
         assertEquals(listOf("Work"), f.db.calendarDao().sources().map { it.displayName })
     }
+
+    @Test
+    fun `a move reaches the alarm even if the reconcile after it fails`() = run {
+        switchOn()
+        reads(instance())
+        sync.run()
+        // A reconcile that dies when it asks the platform about an alarm; the sync's own repository still reaches the real one.
+        val failing = object : com.command.domain.alarm.AlarmScheduler by f.scheduler {
+            override fun isArmed(request: com.command.domain.alarm.AlarmRequest): Boolean = error("the platform went away")
+        }
+        val broken = CalendarSync(f.db, f.repo, MissionRepository(f.db, f.repo, failing, f.clock, f.pauseEffects), consents, reader, f.clock)
+        val moved = f.t0 + 3 * HOUR
+        reads(instance(begin = moved, event = 555, original = 100, originalAt = f.t0 + HOUR))
+        assertTrue(runCatching { broken.run() }.isFailure)
+        assertEquals(moved, rows().single().scheduledAtUtc)
+        assertEquals(moved, f.scheduler.armed.values.single().atUtcMs)
+    }
 }
