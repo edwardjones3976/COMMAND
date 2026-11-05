@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="reveille_hold_hint">Hold to start</string>
+    <string name="reveille_hold_hint">Hold to answer</string>
     <string name="reveille_hold_description">Press and hold for %1$d seconds to acknowledge the alarm</string>
     <string name="reveille_hold_progress">%1$d percent</string>
     <string name="reveille_hold_released">Released early. Hold the full %1$d seconds.</string>
-    <string name="reveille_hold_confirm_action">Confirm without holding</string>
     <string name="reveille_hold_accessible_button">I cannot hold: confirm instead</string>
     <string name="reveille_silence">Safety silence</string>
     <string name="reveille_silence_description">Silence the alarm now. This does not count as starting.</string>

@@ -44,7 +44,7 @@ class HoldWithoutAnimationsTest {
         val completed = ArrayList<Long>()
         val early = ArrayList<Long>()
         compose.mainClock.autoAdvance = false
-        compose.setContent { HoldButton(3, { a, _ -> completed += a }, { a, _ -> early += a }, {}) }
+        compose.setContent { HoldButton(3, { a, _ -> completed += a }, { a, _ -> early += a }) }
 
         compose.onNodeWithTag(ReveilleTags.HOLD).performTouchInput { down(center) }
         compose.mainClock.advanceTimeBy(200)

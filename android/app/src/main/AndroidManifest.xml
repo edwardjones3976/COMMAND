@@ -40,6 +40,7 @@
             android:showWhenLocked="true"
             android:taskAffinity=""
             android:turnScreenOn="true"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.MyApplication" />
 
         <!-- The app proper. It never shows over the lock screen. -->

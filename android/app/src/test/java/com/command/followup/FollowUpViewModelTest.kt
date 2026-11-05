@@ -12,16 +12,19 @@ import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.OccurrenceState
+import com.command.reveille.FrictionPrompt
 import com.command.testing.android.FakeAlarmModule
 import com.command.testing.android.awaitUntil
 import com.command.testing.android.testMission
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -243,17 +246,21 @@ class FollowUpViewModelTest {
         val o = guided(flexibility = Flexibility.RIGID, lock = LockPolicy.REASON)
         vm.show(o.id)
         awaitUi("ask") { it is FollowUpUiState.Ask }
+        // Every value the dialog takes, in order: a read of the value right after the tap cannot say that it went, because the answer to the
+        // command may be back by then; a collector on the main thread is told of the value at the moment it is set.
+        val shown = ArrayList<FrictionPrompt?>()
+        val collector = CoroutineScope(Dispatchers.Main.immediate).launch { vm.friction.collect { shown += it } }
         vm.skip()
         awaitUntil(message = "friction") { vm.friction.value != null }
         assertEquals(LockPolicy.REASON, vm.friction.value!!.required)
         val first = vm.friction.value
 
         vm.confirmFriction(FrictionEvidence.Confirmed)
-        assertNull("it is gone the moment it was answered", vm.friction.value)
-        awaitUntil(message = "asked again") { vm.friction.value != null }
-        assertNotSame(first, vm.friction.value)
+        awaitUntil(message = "asked again") { vm.friction.value != null && vm.friction.value !== first }
         assertEquals(LockPolicy.REASON, vm.friction.value!!.required)
         assertEquals("nothing changed", OccurrenceState.GUIDED_START, stateOf(o))
+        assertEquals("nothing, the dialog, nothing at the tap, and the dialog again", listOf(null, first, null, vm.friction.value), shown.toList())
+        collector.cancel()
 
         vm.confirmFriction(FrictionEvidence.Reason(SkipReasonCode.NOT_RELEVANT_TODAY))
         awaitUntil(message = "skipped") { stateOf(o) == OccurrenceState.SKIPPED }

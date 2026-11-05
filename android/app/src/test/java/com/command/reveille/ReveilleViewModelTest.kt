@@ -10,6 +10,7 @@ import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.HandshakeMode
 import com.command.domain.dials.LockPolicy
 import com.command.domain.dials.SkipReasonCode
+import com.command.domain.handshake.TryId
 import com.command.domain.model.ChallengeOutcome
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
@@ -53,12 +54,16 @@ class ReveilleViewModelTest {
     @Inject lateinit var ringer: FakeRingController
 
     private lateinit var vm: ReveilleViewModel
+    private val phrases = FixedPhrases(listOf("Starting now"))
 
     @Before
     fun setUp() {
         hilt.inject()
-        vm = ReveilleViewModel(repo, clock)
+        vm = ReveilleViewModel(repo, clock, phrases)
     }
+
+    /** The hold that is on screen: what a press of it reports itself as being about. */
+    private fun hold() = (vm.state.value as ReveilleUiState.Firing).challenge as Challenge.Hold
 
     private fun ringing(profile: String = "builtin_steady", flexibility: Flexibility = Flexibility.FLEXIBLE, lock: LockPolicy? = null): OccurrenceRow = runBlocking {
         val mission = testMission(profileId = profile).copy(flexibility = flexibility, lockPolicy = lock)
@@ -90,7 +95,9 @@ class ReveilleViewModelTest {
         awaitUi("firing") { it is ReveilleUiState.Firing }
         val s = vm.state.value as ReveilleUiState.Firing
         assertEquals("Write the report", s.title)
-        assertTrue("Steady asks for a hold, a few seconds long", s.holdSeconds in 2..5)
+        assertEquals("the screen knows which ring it is", o.id, s.occurrenceId)
+        assertTrue("Steady asks for a hold, a few seconds long", hold().seconds in 2..5)
+        assertNull("one step: no 'step 1 of 2'", s.progress)
     }
 
     @Test
@@ -142,7 +149,7 @@ class ReveilleViewModelTest {
         val o = ringing()
         vm.show(o.id)
         awaitUi("firing") { it is ReveilleUiState.Firing }
-        vm.holdCompleted(100, 3_100)
+        vm.holdCompleted(hold().tryId, 100, 3_100)
         awaitUi("direction") { it is ReveilleUiState.Direction }
         assertEquals(OccurrenceState.GUIDED_START, stateOf(o))
         val direction = vm.state.value as ReveilleUiState.Direction
@@ -158,13 +165,14 @@ class ReveilleViewModelTest {
         val o = ringing()
         vm.show(o.id)
         awaitUi("firing") { it is ReveilleUiState.Firing }
-        vm.holdReleasedEarly(100, 400)
-        awaitUntil(message = "challenge row") { challenges(o).isNotEmpty() }
+        val first = hold().tryId
+        vm.holdReleasedEarly(first, 100, 400)
+        awaitUi("the screen says why") { (it as? ReveilleUiState.Firing)?.challenge.let { c -> c is Challenge.Hold && c.earlyRelease } }
         assertEquals(ChallengeOutcome.FAILED, challenges(o).single().outcome)
         assertEquals(OccurrenceState.FIRING, stateOf(o))
-        assertTrue("the screen says why", (vm.state.value as ReveilleUiState.Firing).earlyRelease)
-        vm.holdStarted()
-        assertFalse("a new press clears the hint", (vm.state.value as ReveilleUiState.Firing).earlyRelease)
+        assertEquals("the next press is the next try", TryId(first.position, first.tryNo + 1), hold().tryId)
+        vm.holdStarted(hold().tryId)
+        awaitUi("a new press clears the hint") { (it as? ReveilleUiState.Firing)?.challenge.let { c -> c is Challenge.Hold && !c.earlyRelease } }
     }
 
     @Test
@@ -172,9 +180,10 @@ class ReveilleViewModelTest {
         val o = ringing()
         vm.show(o.id)
         awaitUi("firing") { it is ReveilleUiState.Firing }
-        vm.accessibleConfirm()
+        vm.assistiveConfirmed(hold().tryId)
         awaitUi("direction") { it is ReveilleUiState.Direction }
         assertEquals(ChallengeOutcome.ACCESSIBLE_ALT, challenges(o).single().outcome)
+        assertEquals(OccurrenceState.GUIDED_START, stateOf(o))
     }
 
     @Test
@@ -208,7 +217,7 @@ class ReveilleViewModelTest {
         val o = ringing()
         vm.show(o.id)
         awaitUi("firing") { it is ReveilleUiState.Firing }
-        vm.holdCompleted(0, 3_000)
+        vm.holdCompleted(hold().tryId, 0, 3_000)
         awaitUi("direction") { it is ReveilleUiState.Direction }
         vm.started()
         awaitUi("closed") { it is ReveilleUiState.Closed }
@@ -221,7 +230,7 @@ class ReveilleViewModelTest {
         val o = ringing()
         vm.show(o.id)
         awaitUi("firing") { it is ReveilleUiState.Firing }
-        vm.holdCompleted(0, 3_000)
+        vm.holdCompleted(hold().tryId, 0, 3_000)
         awaitUi("direction") { it is ReveilleUiState.Direction }
         vm.skip()
         awaitUi("closed") { it is ReveilleUiState.Closed }
@@ -235,7 +244,7 @@ class ReveilleViewModelTest {
         val o = ringing(flexibility = Flexibility.RIGID, lock = LockPolicy.REASON)
         vm.show(o.id)
         awaitUi("firing") { it is ReveilleUiState.Firing }
-        vm.holdCompleted(0, 3_000)
+        vm.holdCompleted(hold().tryId, 0, 3_000)
         awaitUi("direction") { it is ReveilleUiState.Direction }
 
         vm.skip()
@@ -258,7 +267,7 @@ class ReveilleViewModelTest {
         val o = ringing(flexibility = Flexibility.RIGID, lock = LockPolicy.CONFIRM)
         vm.show(o.id)
         awaitUi("firing") { it is ReveilleUiState.Firing }
-        vm.holdCompleted(0, 3_000)
+        vm.holdCompleted(hold().tryId, 0, 3_000)
         awaitUi("direction") { it is ReveilleUiState.Direction }
         vm.skip()
         awaitUntil(message = "prompt") { vm.friction.value != null }
@@ -272,7 +281,7 @@ class ReveilleViewModelTest {
         val o = ringing()
         vm.show(o.id)
         awaitUi("firing") { it is ReveilleUiState.Firing }
-        vm.holdCompleted(0, 3_000)
+        vm.holdCompleted(hold().tryId, 0, 3_000)
         awaitUi("direction") { it is ReveilleUiState.Direction }
         vm.delay(10)
         awaitUi("closed") { it is ReveilleUiState.Closed }
@@ -289,7 +298,7 @@ class ReveilleViewModelTest {
             repo.apply(o.id, OccurrenceCommand.Acknowledge(), EventSource.USER)
             repo.apply(o.id, OccurrenceCommand.StartGuidance, EventSource.USER)
         }
-        val fresh = ReveilleViewModel(repo, clock) // a new process, a new view model, the same stored occurrence
+        val fresh = ReveilleViewModel(repo, clock, phrases) // a new process, a new view model, the same stored occurrence
         fresh.show(o.id)
         awaitUntil(message = "direction") { fresh.state.value is ReveilleUiState.Direction }
     }

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        The phrases a person types to show they are up (the typing challenge). First person, a few words, letters and spaces only: nothing a
+        keyboard has to hunt for. They say that the person is awake and here, and nothing else: typing one is an acknowledgement, and the product
+        records it as exactly that, so a phrase never claims that the person has started. The check ignores capitals, the amount of space
+        between words and a full stop at the end. One is picked for each alarm by the occurrence's id, so that it does not change when the
+        screen is turned.
+    -->
+    <string-array name="handshake_phrases_drill_sergeant">
+        <item>Feet on the floor and awake</item>
+        <item>I am up and I am listening</item>
+        <item>No more waiting I am awake</item>
+        <item>On my feet and awake</item>
+    </string-array>
+    <string-array name="handshake_phrases_executive_director">
+        <item>I confirm I am awake</item>
+        <item>I am present and ready</item>
+        <item>Acknowledged and present</item>
+        <item>I am awake and ready</item>
+    </string-array>
+    <string-array name="handshake_phrases_supportive_coach">
+        <item>I am awake and here</item>
+        <item>I am ready for one small step</item>
+        <item>Here I am and ready</item>
+        <item>One step at a time I am here</item>
+    </string-array>
+    <string-array name="handshake_phrases_accountability_partner">
+        <item>I said I would show up and I am here</item>
+        <item>I am keeping my word and I am awake</item>
+        <item>I committed and I am here</item>
+        <item>My word is my word</item>
+    </string-array>
+    <string-array name="handshake_phrases_minimalist">
+        <item>Awake now</item>
+        <item>Up and awake</item>
+        <item>I am here</item>
+        <item>Awake and here</item>
+    </string-array>
+    <string-array name="handshake_phrases_custom">
+        <item>I am awake and ready</item>
+        <item>I am up and listening</item>
+        <item>I am awake and here</item>
+        <item>Awake and ready now</item>
+    </string-array>
+    <string name="handshake_phrase_fallback">I am awake and here</string>
+
+    <string name="handshake_progress">Step %1$d of %2$d</string>
+
+    <string name="handshake_typing_title">Type this to show you are up</string>
+    <string name="handshake_typing_field">Type the words above</string>
+    <string name="handshake_typing_done">Done</string>
+    <plurals name="handshake_typing_wrong">
+        <item quantity="one">That is not it. %d try left.</item>
+        <item quantity="other">That is not it. %d tries left.</item>
+    </plurals>
+
+    <string name="handshake_sequence_title">Tap the numbers in order, 1 to 4</string>
+    <string name="handshake_sequence_target">Number %1$d</string>
+    <plurals name="handshake_sequence_wrong">
+        <item quantity="one">Not that one. Start again from 1. %d try left.</item>
+        <item quantity="other">Not that one. Start again from 1. %d tries left.</item>
+    </plurals>
+    <plurals name="handshake_typing_slow">
+        <item quantity="one">Time ran out. %d try left.</item>
+        <item quantity="other">Time ran out. %d tries left.</item>
+    </plurals>
+    <plurals name="handshake_sequence_slow">
+        <item quantity="one">Time ran out. Start again from 1. %d try left.</item>
+        <item quantity="other">Time ran out. Start again from 1. %d tries left.</item>
+    </plurals>
+    <string name="handshake_sequence_progress">%1$d of 4 done</string>
+
+    <string name="handshake_two_title">Say what you will do first</string>
+    <string name="handshake_two_hold_first">First, hold to show you are up</string>
+    <string name="handshake_two_indicate">I am doing: %1$s</string>
+
+    <string name="handshake_assistive_tap">Tap to confirm (%1$d of %2$d)</string>
+
+    <string name="handshake_out_of_tries">No tries are left. The alarm keeps going until its time is up. You can silence it, or press Back to put it off or skip it.</string>
+</resources>
