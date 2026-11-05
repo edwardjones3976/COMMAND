@@ -2,12 +2,15 @@ package com.command.data
 
 import androidx.room.withTransaction
 import com.command.data.db.CommandDb
+import com.command.data.db.ConflictRow
 import com.command.data.db.MissionRow
 import com.command.data.db.ScheduleRow
 import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
 import com.command.domain.alarm.AlarmScheduler
 import com.command.domain.alarm.PauseEffects
+import com.command.domain.calendar.ConflictDetector
+import com.command.domain.calendar.TimeInterval
 import com.command.domain.dials.Flexibility
 import com.command.domain.model.EventSource
 import com.command.domain.model.MissionSource
@@ -26,8 +29,13 @@ import com.command.domain.schedule.RRuleParse
 import com.command.domain.schedule.RRuleParser
 import com.command.domain.schedule.StartRule
 import com.command.domain.time.Clock
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.DateTimeException
@@ -70,7 +78,8 @@ data class TestRingSpec(
 /** What the schedule shows: what is still to come, soonest first, and what happened recently, newest first. */
 data class ScheduleSnapshot(val upcoming: List<ScheduleRow>, val recent: List<ScheduleRow>)
 
-enum class DraftProblem { TITLE_EMPTY, FIRST_ACTION_EMPTY, IN_THE_PAST, NO_DAYS_SELECTED }
+/** [READ_ONLY]: the mission is a copy of a calendar event, which only the calendar can change. */
+enum class DraftProblem { TITLE_EMPTY, FIRST_ACTION_EMPTY, IN_THE_PAST, NO_DAYS_SELECTED, READ_ONLY }
 
 sealed interface SaveResult {
     /** The mission is stored; [scheduled] alarms exist for its coming week (a far-off one-off counts as one). */
@@ -145,6 +154,28 @@ class MissionRepository @Inject constructor(
         )
     }
 
+    /**
+     * The ids of the occurrences that overlap another one still to come. A delay or an answer changes what is coming without any mission
+     * being saved, so the overlaps are worked out again whenever what is coming changes, for as long as somebody is watching.
+     */
+    fun observeConflicted(): Flow<Set<String>> = channelFlow {
+        // Never on the collector's dispatcher, which is the main thread on the schedule screen: this holds [writes] across database calls, and
+        // a lock held by the main thread's queue is never let go if anything on that thread is waiting for the same lock.
+        launch(Dispatchers.Default) {
+            db.occurrences().observeFrom(listOf(OccurrenceState.SCHEDULED, OccurrenceState.ARMED), 0L, Int.MAX_VALUE)
+                .map { rows -> rows.map { it.id to it.scheduledAtUtc } }
+                .distinctUntilChanged()
+                .collect { writes.withLock { refreshConflicts(clock.nowMs()) } }
+        }
+        db.calendarDao().observeConflicts().collect { rows -> send(rows.flatMap { listOf(it.occA, it.occB) }.toSet()) }
+    }
+
+    /** How many of this mission's coming occurrences overlap another one. */
+    suspend fun conflictsOf(missionId: String): Int {
+        val conflicted = db.calendarDao().conflicts().flatMap { listOf(it.occA, it.occB) }.toSet()
+        return db.occurrences().forMission(missionId).count { it.id in conflicted }
+    }
+
     // --- writes -------------------------------------------------------------------------------------------------
 
     suspend fun save(draft: MissionDraft): SaveResult = writes.withLock {
@@ -154,6 +185,7 @@ class MissionRepository @Inject constructor(
         val zone = clock.zone()
         val now = clock.nowMs()
         val existing = draft.id?.let { db.missions().get(it) }?.takeIf { it.deletedAt == null }
+        if (existing != null && existing.source != MissionSource.MANUAL) return@withLock SaveResult.Invalid(setOf(DraftProblem.READ_ONLY))
         val row = rowOf(draft, existing, zone)
         val wanted = instantsOf(row, zone, now)
         // What to leave alone: occurrences at times the new rule still gives, including one that is only just overdue (an
@@ -175,6 +207,7 @@ class MissionRepository @Inject constructor(
         }
         occurrences.cancelAlarms(removed)
         createAndArm(row, zone, wanted, EventSource.USER, PauseStore.active(db, now))
+        refreshConflicts(now)
         SaveResult.Saved(row.id, wanted.size)
     }
 
@@ -187,6 +220,7 @@ class MissionRepository @Inject constructor(
             occurrences.removeUnfiredRows(unfiredIds(missionId, emptySet(), now, futureOnly = false, includeDelayed = true), EventSource.USER)
         }
         occurrences.cancelAlarms(removed)
+        refreshConflicts(now)
     }
 
     /**
@@ -284,6 +318,7 @@ class MissionRepository @Inject constructor(
                 if (occurrences.apply(occ.id, OccurrenceCommand.Arm(armModeNow()), EventSource.SYSTEM) is ApplyResult.Applied) repaired++
             }
         }
+        refreshConflicts(now)
         val report = ReconcileReport(created, discarded, rearmed, lost, missed, precisionChanged, repaired, paused, swallowed)
         if (trigger.alwaysLogged || report.changedAnything) {
             occurrences.logEvent(
@@ -296,6 +331,22 @@ class MissionRepository @Inject constructor(
             )
         }
         return report
+    }
+
+    /** Works the overlaps of what is still to come out again. The table is only written when they changed, so a quiet run wakes nobody. */
+    private suspend fun refreshConflicts(now: Long) {
+        val coming = db.occurrences().inStates(listOf(OccurrenceState.SCHEDULED, OccurrenceState.ARMED))
+            .filter { it.scheduledAtUtc >= now && it.missionId != TEST_MISSION_ID }
+        val minutes = HashMap<String, Int>()
+        for (occ in coming) if (occ.missionId !in minutes) minutes[occ.missionId] = db.missions().get(occ.missionId)?.durationMin ?: 0
+        val found = ConflictDetector.detect(coming.map { TimeInterval(it.id, it.scheduledAtUtc, it.scheduledAtUtc + minutes.getValue(it.missionId) * 60_000L) })
+            .map { ConflictRow(it.a, it.b, it.kind) }
+        val dao = db.calendarDao()
+        if (found.toSet() == dao.conflicts().toSet()) return
+        db.withTransaction {
+            dao.clearConflicts()
+            dao.insertConflicts(found)
+        }
     }
 
     // --- global pause -------------------------------------------------------------------------------------------

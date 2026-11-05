@@ -517,6 +517,10 @@ private fun Direction(state: ReveilleUiState.Direction, actions: ReveilleActions
     Text(stringResource(R.string.reveille_direction_label), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
     Spacer(Modifier.height(8.dp))
     Text(state.firstAction, style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 520.dp))
+    if (state.coaching.isNotBlank()) {
+        Spacer(Modifier.height(16.dp))
+        Text(state.coaching, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+    }
     Spacer(Modifier.height(40.dp))
     Button(onClick = actions.onStarted, modifier = Modifier.fillMaxWidth().height(72.dp).testTag(ReveilleTags.STARTED)) {
         Text(stringResource(R.string.reveille_starting), style = MaterialTheme.typography.titleLarge)

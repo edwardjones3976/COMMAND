@@ -87,10 +87,14 @@ class ReceiversTest {
     @Test
     fun `the alarm receiver starts the service at once and does no database work`() {
         val o = occurrence(OccurrenceCommand.Arm(ArmMode.EXACT))
-        ReveilleAlarmReceiver().onReceive(context, intent(o, AlarmContract.ACTION_FIRE, "command://occurrence/${o.id}", ReveilleAlarmReceiver::class.java))
+        ReveilleAlarmReceiver().onReceive(
+            context,
+            intent(o, AlarmContract.ACTION_FIRE, "command://occurrence/${o.id}", ReveilleAlarmReceiver::class.java).putExtra(AlarmContract.EXTRA_AT, 12_345L),
+        )
 
         val started = shadowOf(context as android.app.Application).nextStartedService
         assertNotNull(started)
+        assertEquals("the service must be able to tell an alarm from before a move", 12_345L, started.getLongExtra(AlarmContract.EXTRA_AT, 0))
         assertEquals(ReveilleService::class.java.name, started.component!!.className)
         assertEquals(o.id, started.getStringExtra(AlarmContract.EXTRA_OCCURRENCE_ID))
         assertEquals(o.requestCode, started.getIntExtra(AlarmContract.EXTRA_REQUEST_CODE, 0))

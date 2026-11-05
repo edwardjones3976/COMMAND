@@ -19,6 +19,13 @@ object DialEffects {
 
     fun alertPlan(alertIntensity: Int): AlertPlan = AlertPlan.forIntensity(alertIntensity)
 
+    /** The loudness a spoken alarm line is mastered to, in LUFS: -16 at intensity 1 to 3, -15 at 4, -14 at 5. */
+    fun loudnessTargetLufs(alertIntensity: Int): Int = when (alertIntensity.coerceIn(1, 5)) {
+        4 -> -15
+        5 -> -14
+        else -> -16
+    }
+
     fun checkIns(followUpPersistence: Int): CheckInSchedule = CheckInSchedule.forPersistence(followUpPersistence)
 
     /** Tries allowed on each way of doing a step (a mode, and the one that takes its place when they are used up): 5, 4, 3, 3, 2 for difficulty 1..5. */

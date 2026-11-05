@@ -17,6 +17,11 @@ import com.command.domain.alarm.CheckInPrompt
 import com.command.domain.alarm.RingController
 import com.command.domain.alarm.WindowRoller
 import com.command.domain.alarm.WorkEnqueuer
+import com.command.domain.coaching.CoachingContext
+import com.command.domain.coaching.CoachingEngine
+import com.command.domain.coaching.CoachingPhase
+import com.command.domain.coaching.TemplateOverrides
+import com.command.domain.voice.Line
 import com.command.domain.dials.ChainSpec
 import com.command.domain.dials.CheckInSchedule
 import com.command.domain.dials.DialEffects
@@ -47,6 +52,7 @@ import com.command.domain.occurrence.TransitionResult
 import com.command.domain.schedule.RestWindow
 import com.command.domain.schedule.RestWindows
 import com.command.domain.time.Clock
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -74,6 +80,12 @@ data class ChallengeRecord(
 data class ApplyExtras(
     val challenges: List<ChallengeRecord> = emptyList(),
     val ringMode: RingMode? = null,
+    /**
+     * The time the delivered alarm was set for, passed with a Fire. An armed occurrence that has moved since is not rung: Fire is rejected in
+     * its own transaction, so that no move can commit between this decision and the ring, and the used-up alarm is set for the new time.
+     * Null for an alarm that does not say.
+     */
+    val setForUtc: Long? = null,
 ) {
     companion object { val NONE = ApplyExtras() }
 }
@@ -139,6 +151,17 @@ class OccurrenceRepository @Inject constructor(
     class Tx internal constructor(private val repo: OccurrenceRepository, private val pending: MutableList<Pending>) {
         suspend fun apply(id: String, command: OccurrenceCommand, source: EventSource, extras: ApplyExtras = ApplyExtras.NONE): ApplyResult =
             repo.applyInTx(id, command, source, extras, pending)
+
+        /** [createOccurrence] inside this transaction. */
+        suspend fun create(missionId: String, scheduledAtUtc: Long, zoneId: String): Created =
+            repo.createInTx(missionId, scheduledAtUtc, zoneId, null, avoidCollision = false)
+
+        /**
+         * The row only, inside this transaction. The caller puts an armed alarm back afterwards with [OccurrenceRepository.rearm], which looks at
+         * the row as it then is: an effect queued here could re-arm something answered in between.
+         */
+        suspend fun reschedule(occurrenceId: String, newAtUtc: Long, zoneId: String): Boolean =
+            repo.rescheduleInTx(occurrenceId, newAtUtc, zoneId, EventSource.WORKER) != null
     }
 
     /**
@@ -180,6 +203,39 @@ class OccurrenceRepository @Inject constructor(
     /** What the screens show about a mission while one of its occurrences is being handled. */
     suspend fun missionBrief(missionId: String): MissionBrief? =
         db.missions().get(missionId)?.let { MissionBrief(it.title, it.firstAction, it.starterMinutes) }
+
+    /**
+     * What the coaching engine says for [occurrence] at [phase], in the personality the ring was fired with and the dials now in force. It reads
+     * the mission's title, first step and starter length and nothing else. [withMissionWords] false leaves the mission's words out, for a
+     * place that already shows them.
+     */
+    suspend fun lineFor(occurrence: OccurrenceRow, phase: CoachingPhase, attempt: Int = 0, withMissionWords: Boolean = true): Line {
+        val brief = missionBrief(occurrence.missionId)
+        val ctx = CoachingContext(
+            title = if (withMissionWords) brief?.title.orEmpty() else "",
+            firstAction = if (withMissionWords) brief?.firstAction.orEmpty() else "",
+            minutes = brief?.starterMinutes ?: 0,
+        )
+        return CoachingEngine.compose(handshakeOf(occurrence).personality, phase, dialsOf(occurrence), ctx, attempt, occurrence.id, overrides())
+    }
+
+    /** A row that cannot be read (from a newer version, say) costs the person's own wording, never the line. */
+    private suspend fun overrides(): TemplateOverrides = try {
+        db.templateOverrides().all().toOverrides()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        TemplateOverrides()
+    }
+
+    /** The question is asked whatever happens to its wording: without a line it is the plain one, and the effects after it still run. */
+    private suspend fun checkInLine(occ: OccurrenceRow, index: Int): Line? = try {
+        lineFor(occ, CoachingPhase.CHECK_IN, index, withMissionWords = false)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
 
     /** The seven dials in force for an occurrence: its mission's profile, else the active one. */
     suspend fun dialsOf(occurrence: OccurrenceRow): Dials = dialsFor(db.missions().get(occurrence.missionId)?.profileId)
@@ -304,7 +360,8 @@ class OccurrenceRepository @Inject constructor(
         lockOf(occurrenceId).withLock {
             val pending = ArrayList<Pending>()
             val result = db.withTransaction { applyInTx(occurrenceId, command, source, extras, pending) }
-            if (result is ApplyResult.Applied) runEffects(pending, source)
+            // What a rejected command queues is only the alarm of a Fire that came for a time since moved.
+            if (result is ApplyResult.Applied || pending.isNotEmpty()) runEffects(pending, source)
             result
         }
     }
@@ -319,6 +376,11 @@ class OccurrenceRepository @Inject constructor(
         val occ = db.occurrences().get(occurrenceId) ?: return ApplyResult.NotFound
         val mission = db.missions().get(occ.missionId) ?: return ApplyResult.NotFound
         val now = clock.nowMs()
+        if (extras.setForUtc != null && occ.state == OccurrenceState.ARMED && occ.scheduledAtUtc != extras.setForUtc) {
+            log(EventType.REJECTED_TRANSITION, occ, source, EventPayload.of("from" to occ.state, "command" to command.label, "why" to "MOVED", "set_for" to extras.setForUtc))
+            pending += Pending(occ, Effect.ArmAlarm(occ.armMode), now)
+            return ApplyResult.Rejected(occ.state, command.label)
+        }
         val dials = dialsFor(mission.profileId)
         val lock = MissionLock.effectivePolicy(mission.flexibility, mission.lockPolicy, dials.scheduleRigidity)
         val session = Codec.decodeSession(occ.sessionJson)
@@ -438,21 +500,21 @@ class OccurrenceRepository @Inject constructor(
      * is replaced in place. Returns false if it cannot be moved (already fired, or the slot is taken).
      */
     suspend fun reschedule(occurrenceId: String, newAtUtc: Long, zoneId: String, source: EventSource = EventSource.WORKER): Boolean {
-        var moved: OccurrenceRow? = null
-        db.withTransaction {
-            val occ = db.occurrences().get(occurrenceId) ?: return@withTransaction
-            if (occ.state != OccurrenceState.SCHEDULED && occ.state != OccurrenceState.ARMED) return@withTransaction
-            if (db.occurrences().find(occ.missionId, newAtUtc) != null) return@withTransaction
-            db.occurrences().reschedule(occ.id, newAtUtc, zoneId)
-            log(EventType.OCCURRENCE_MOVED, occ, source, EventPayload.of("from" to occ.scheduledAtUtc, "to" to newAtUtc))
-            moved = db.occurrences().get(occ.id)
-        }
-        val row = moved ?: return false
+        val row = db.withTransaction { rescheduleInTx(occurrenceId, newAtUtc, zoneId, source) } ?: return false
         if (row.state == OccurrenceState.ARMED) {
             val mode = scheduler.arm(AlarmRequest(row.id, row.requestCode, AlarmKind.FIRE, row.scheduledAtUtc))
             if (mode != row.armMode) db.occurrences().setArmMode(row.id, mode)
         }
         return true
+    }
+
+    private suspend fun rescheduleInTx(occurrenceId: String, newAtUtc: Long, zoneId: String, source: EventSource): OccurrenceRow? {
+        val occ = db.occurrences().get(occurrenceId) ?: return null
+        if (occ.state != OccurrenceState.SCHEDULED && occ.state != OccurrenceState.ARMED) return null
+        if (db.occurrences().find(occ.missionId, newAtUtc) != null) return null
+        db.occurrences().reschedule(occ.id, newAtUtc, zoneId)
+        log(EventType.OCCURRENCE_MOVED, occ, source, EventPayload.of("from" to occ.scheduledAtUtc, "to" to newAtUtc))
+        return db.occurrences().get(occ.id)
     }
 
     /**
@@ -570,7 +632,7 @@ class OccurrenceRepository @Inject constructor(
                 is Effect.ScheduleCheckIn -> scheduler.arm(request(AlarmKind.CHECK_IN, at = e.atUtcMs, index = e.index))
                 is Effect.PostCheckIn -> {
                     val title = missionBrief(occ.missionId)?.title.orEmpty()
-                    poster.post(CheckInPrompt(occ.id, occ.requestCode, e.index, title, started = occ.state != OccurrenceState.GUIDED_START))
+                    poster.post(CheckInPrompt(occ.id, occ.requestCode, e.index, title, started = occ.state != OccurrenceState.GUIDED_START, line = checkInLine(occ, e.index)))
                 }
                 // Index == count is the final-timeout alarm, so the highest index in use is MAX_COUNT itself.
                 Effect.CancelCheckIns -> {

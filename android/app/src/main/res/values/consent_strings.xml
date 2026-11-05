@@ -3,7 +3,7 @@
     <string name="consent_title">Permissions and privacy</string>
     <string name="consent_back">Back</string>
     <string name="consent_intro">Everything COMMAND asks your consent for is listed here, with when it last changed and who changed it. Nothing else is switched on.</string>
-    <string name="consent_footer">Optional features that need their own consent, such as calendar, camera or cloud voices, are not in this version. When one arrives it will be listed here before it can be used.</string>
+    <string name="consent_footer">Optional features that need their own consent, such as camera or cloud voices, are not in this version. When one arrives it will be listed here before it can be used.</string>
 
     <string name="consent_state_granted">Allowed</string>
     <string name="consent_state_off">Not allowed</string>
@@ -32,4 +32,7 @@
     <string name="consent_app_note">This is yours to change here, at any time.</string>
     <string name="consent_switch_on">On</string>
     <string name="consent_switch_off">Off</string>
+    <string name="consent_calendar_title">Calendar</string>
+    <string name="consent_calendar_allows">COMMAND reads the time and title of events in the calendars you choose, and sets an alarm for each.</string>
+    <string name="consent_calendar_not">It never changes your calendar, never reads event descriptions and sends nothing anywhere. Turning this off takes back the alarms for events that have not rung.</string>
 </resources>

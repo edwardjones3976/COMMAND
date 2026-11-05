@@ -37,6 +37,8 @@ sealed interface ScheduleUiState {
         val pausedUntilUtcMs: Long? = null,
         /** The clock's day, which the labels ("Today", "Tomorrow") are counted from; part of the state so that they follow it across midnight. */
         val today: LocalDate = LocalDate.now(),
+        /** The occurrences that overlap another one still to come. */
+        val conflicted: Set<String> = emptySet(),
     ) : ScheduleUiState
 }
 
@@ -63,10 +65,11 @@ class ScheduleViewModel @Inject constructor(
         everyMinute.flatMapLatest { missions.observeSchedule() },
         problems,
         missions.observePause(),
-    ) { schedule, problemCount, pause ->
+        missions.observeConflicted(),
+    ) { schedule, problemCount, pause, conflicted ->
         ScheduleUiState.Ready(
             schedule.upcoming, schedule.recent, problemCount, pause?.untilUtcMs?.takeIf { it > clock.nowMs() },
-            Instant.ofEpochMilli(clock.nowMs()).atZone(clock.zone()).toLocalDate(),
+            Instant.ofEpochMilli(clock.nowMs()).atZone(clock.zone()).toLocalDate(), conflicted,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ScheduleUiState.Loading)
 

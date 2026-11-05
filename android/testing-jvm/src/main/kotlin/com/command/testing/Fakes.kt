@@ -5,6 +5,9 @@ import com.command.domain.alarm.AlarmScheduler
 import com.command.domain.alarm.PauseEffects
 import com.command.domain.alarm.RingController
 import com.command.domain.alarm.WorkEnqueuer
+import com.command.domain.calendar.CalendarRead
+import com.command.domain.calendar.CalendarReader
+import com.command.domain.calendar.DeviceCalendar
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.WorkKind
 import com.command.domain.time.Clock
@@ -89,5 +92,28 @@ class FakeRingController : RingController {
     override fun stop(occurrenceId: String, requestCode: Int) {
         stopped += occurrenceId
         stoppedCodes += requestCode
+    }
+}
+
+/** A calendar provider the test fills by hand. Empty, it has nothing to say: nothing may come of it. */
+class FakeCalendarReader : CalendarReader {
+    var permission = true
+    var result: CalendarRead = CalendarRead.Ok(emptyList(), emptyList(), emptySet())
+    var reads = 0
+
+    /** Runs in the middle of a read, for tests of what may happen meanwhile. */
+    var duringRead: suspend () -> Unit = {}
+
+    override fun hasPermission(): Boolean = permission
+
+    override suspend fun calendars(): List<DeviceCalendar>? {
+        duringRead()
+        return (result as? CalendarRead.Ok)?.calendars
+    }
+
+    override suspend fun read(fromMs: Long, toMs: Long, calendarIds: Set<Long>, askAbout: Set<Long>): CalendarRead {
+        reads++
+        duringRead()
+        return result
     }
 }

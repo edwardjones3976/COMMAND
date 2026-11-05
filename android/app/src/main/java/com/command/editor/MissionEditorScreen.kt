@@ -49,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -68,6 +69,8 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
 object EditorTags {
+    const val IMPORTED = "editor_imported"
+    const val CONFLICT = "editor_conflict"
     const val TITLE = "editor_title"
     const val ACTION = "editor_action"
     const val REPEAT_ONCE = "editor_repeat_once"
@@ -161,10 +164,19 @@ fun MissionEditorScreen(state: EditorState, actions: EditorActions, snackbar: Sn
                 Text(stringResource(R.string.editor_not_found), style = MaterialTheme.typography.titleLarge)
                 OutlinedButton(onClick = actions.onBack) { Text(stringResource(R.string.editor_back), style = MaterialTheme.typography.labelLarge) }
             }
+            state.imported -> Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(state.title, style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.editor_imported_body), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag(EditorTags.IMPORTED))
+                if (state.conflicts > 0) ConflictWarning(state.conflicts)
+                TextButton(onClick = actions.onDelete, enabled = !state.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(EditorTags.DELETE)) {
+                    Text(stringResource(R.string.editor_imported_remove), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelLarge)
+                }
+            }
             else -> Column(
                 modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).imePadding().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
+                if (state.conflicts > 0) ConflictWarning(state.conflicts)
                 OutlinedTextField(
                     value = state.title,
                     onValueChange = actions.onTitle,
@@ -356,3 +368,13 @@ private val DAYS = listOf(
 )
 
 private val STARTER_MINUTES = listOf(2, 5, 10, 15)
+
+@Composable
+private fun ConflictWarning(count: Int) {
+    Text(
+        pluralStringResource(R.plurals.editor_conflict, count, count),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.error,
+        modifier = Modifier.testTag(EditorTags.CONFLICT),
+    )
+}

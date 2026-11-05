@@ -161,6 +161,18 @@ class ReveilleViewModelTest {
     }
 
     @Test
+    fun `the direction has a coaching line right after the handshake, and none once the person says they are blocked`() {
+        val o = ringing()
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+        vm.holdCompleted(hold().tryId, 100, 3_100)
+        awaitUi("coached") { it is ReveilleUiState.Direction && it.coaching.isNotBlank() }
+        assertFalse("the first step is already on the screen", (vm.state.value as ReveilleUiState.Direction).coaching.contains("Open the document"))
+        runBlocking { repo.apply(o.id, OccurrenceCommand.ReportBlocked, EventSource.USER) }
+        awaitUi("plain") { it is ReveilleUiState.Direction && it.coaching.isEmpty() }
+    }
+
+    @Test
     fun `letting go early is recorded as a failed attempt and leaves the alarm ringing`() {
         val o = ringing()
         vm.show(o.id)

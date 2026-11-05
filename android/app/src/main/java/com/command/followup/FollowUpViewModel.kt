@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.command.data.ApplyResult
 import com.command.data.OccurrenceRepository
 import com.command.data.db.OccurrenceRow
+import com.command.domain.coaching.CoachingPhase
 import com.command.domain.dials.DialEffects
 import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.RecoveryOption
@@ -35,7 +36,7 @@ sealed interface FollowUpUiState {
      * Waiting for an answer: whether it was started, or how it is going. [started] is whether a start was ever reported (the question
      * differs), [unconfirmed] that the questions went unanswered.
      */
-    data class Ask(val title: String, val firstAction: String, val started: Boolean, val unconfirmed: Boolean) : FollowUpUiState
+    data class Ask(val title: String, val firstAction: String, val started: Boolean, val unconfirmed: Boolean, val coaching: String = "") : FollowUpUiState
 
     /** A reset was asked for or offered: one finite menu, from the person's recovery setting. */
     data class Recovery(
@@ -44,6 +45,7 @@ sealed interface FollowUpUiState {
         val options: List<RecoveryOption>,
         val rescheduleMinutes: List<Int>,
         val offerTomorrow: Boolean,
+        val coaching: String = "",
     ) : FollowUpUiState
 
     data class Finished(val title: String, val outcome: FollowUpOutcome) : FollowUpUiState
@@ -111,10 +113,10 @@ class FollowUpViewModel @Inject constructor(
             OccurrenceState.ACKNOWLEDGED -> FollowUpUiState.Loading // being moved on to guided start, see show()
             OccurrenceState.STARTED_SELF_REPORTED, OccurrenceState.WORKING_SELF_REPORTED ->
                 FollowUpUiState.Ask(brief.title, brief.firstAction, started = true, unconfirmed = false)
-            OccurrenceState.UNCONFIRMED -> FollowUpUiState.Ask(brief.title, brief.firstAction, started = false, unconfirmed = true)
+            OccurrenceState.UNCONFIRMED -> FollowUpUiState.Ask(brief.title, brief.firstAction, started = false, unconfirmed = true, coaching = repository.lineFor(row, CoachingPhase.UNCONFIRMED, withMissionWords = false).text)
             OccurrenceState.RECOVERY_OFFERED -> {
                 val policy = DialEffects.recoveryPolicy(repository.dialsOf(row).recoveryStructure)
-                FollowUpUiState.Recovery(brief.title, brief.firstAction, policy.menu, policy.rescheduleMinutes, policy.offerTomorrow)
+                FollowUpUiState.Recovery(brief.title, brief.firstAction, policy.menu, policy.rescheduleMinutes, policy.offerTomorrow, repository.lineFor(row, recoveryPhase(policy.menu), withMissionWords = false).text)
             }
             OccurrenceState.COMPLETED_SELF_REPORTED -> FollowUpUiState.Finished(brief.title, FollowUpOutcome.DONE)
             OccurrenceState.SKIPPED -> FollowUpUiState.Finished(brief.title, FollowUpOutcome.SKIPPED)
@@ -123,6 +125,10 @@ class FollowUpViewModel @Inject constructor(
                 FollowUpUiState.Finished(brief.title, FollowUpOutcome.WAITING)
         }
     }
+
+    /** The words match the first option on the screen, which does not show Smaller until something can make the step smaller (see FollowUpScreens). */
+    private fun recoveryPhase(menu: List<RecoveryOption>): CoachingPhase =
+        if (menu.first { it != RecoveryOption.SMALLER } == RecoveryOption.RESCHEDULE) CoachingPhase.RECOVERY_RESCHEDULE else CoachingPhase.RECOVERY_RESET
 
     // --- the answers --------------------------------------------------------------------------------------------
 

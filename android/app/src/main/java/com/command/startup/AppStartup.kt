@@ -3,12 +3,15 @@ package com.command.startup
 import android.content.Context
 import android.util.Log
 import com.command.alarm.ArmingReconciler
+import com.command.alarm.CalendarSyncScheduler
 import com.command.alarm.ErasureLatch
 import com.command.alarm.ReconcileScheduler
 import com.command.alarm.RingNotifications
+import com.command.data.ConsentStore
 import com.command.data.LegacyAlarmCanceller
 import com.command.data.LegacyImporter
 import com.command.data.ReconcileTrigger
+import com.command.domain.model.ConsentKey
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -30,6 +33,7 @@ class AppStartup @Inject constructor(
     private val legacyAlarms: LegacyAlarmCanceller,
     private val reconciler: ArmingReconciler,
     private val latch: ErasureLatch,
+    private val consents: ConsentStore,
 ) {
     suspend fun run() {
         // Everything is being erased (the screen was turned off and on during it, say): nothing is brought back behind the erase, and a
@@ -40,6 +44,7 @@ class AppStartup @Inject constructor(
         step("legacy alarms") { legacyAlarms.cancelIfNeeded() }
         step("reconcile") { reconciler.run(ReconcileTrigger.OPEN) }
         step("backstop") { ReconcileScheduler.ensurePeriodic(context) }
+        step("calendar") { if (consents.isGranted(ConsentKey.CALENDAR_READ)) CalendarSyncScheduler.ensure(context) }
     }
 
     private inline fun step(name: String, block: () -> Unit) {

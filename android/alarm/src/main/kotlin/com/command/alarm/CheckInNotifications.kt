@@ -33,7 +33,9 @@ object CheckInNotifications {
         fun builder(withTitle: Boolean) = NotificationCompat.Builder(context, AlarmContract.CHANNEL_CHECK_IN)
             .setSmallIcon(R.drawable.ic_stat_command)
             .setContentTitle(if (withTitle && prompt.title.isNotBlank()) prompt.title else context.getString(R.string.checkin_title_generic))
-            .setContentText(context.getString(if (prompt.started) R.string.checkin_text_progress else R.string.checkin_text_start))
+            // The coaching line may hold words the person wrote (a template of their own), so the version for a locked screen asks the plain question.
+            .setContentText(prompt.line?.text?.takeIf { withTitle && it.isNotBlank() } ?: context.getString(if (prompt.started) R.string.checkin_text_progress else R.string.checkin_text_start))
+            .apply { prompt.line?.text?.takeIf { withTitle && it.isNotBlank() }?.let { setStyle(NotificationCompat.BigTextStyle().bigText(it)) } }
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(open)

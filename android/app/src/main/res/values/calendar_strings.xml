@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="calendars_title">Calendars</string>
+    <string name="calendars_back">Back</string>
+    <string name="calendars_intro">COMMAND can set an alarm for the events of calendars you choose. It reads their time and title, never their description, and never changes your calendar. Whole-day events are left out.</string>
+    <string name="calendars_allow">Allow reading my calendars</string>
+    <string name="calendars_permission_lost">Android is not letting COMMAND read your calendars. Alarms already set stay set, but changes in your calendar will not reach them.</string>
+    <string name="calendars_empty">This phone has no calendars to choose from.</string>
+    <string name="calendars_switch_description">%1$s, %2$s</string>
+    <string name="calendars_profile_active">Active profile</string>
+    <string name="settings_link_calendars">Calendars</string>
+    <string name="editor_imported_body">This comes from your calendar. Change it there and the alarm follows.</string>
+    <string name="editor_imported_remove">Remove the alarm for this event</string>
+    <plurals name="editor_conflict">
+        <item quantity="one">%d alarm of this overlaps with something else.</item>
+        <item quantity="other">%d alarms of this overlap with something else.</item>
+    </plurals>
+</resources>

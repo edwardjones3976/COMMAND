@@ -10,6 +10,7 @@ import com.command.domain.alarm.CheckInPoster
 import com.command.domain.alarm.CheckInPrompt
 import com.command.domain.voice.SpeechLevel
 import com.command.data.db.VoicePackRow
+import com.command.domain.coaching.CoachingPhase
 import com.command.domain.dials.AlertPlan
 import com.command.domain.dials.ChainOp
 import com.command.domain.dials.ChainSpec
@@ -610,6 +611,32 @@ class OccurrenceRepositoryTest {
     }
 
     @Test
+    fun `a follow-up question carries a coaching line without the mission's words, and no words reach the events`() = run {
+        val o = scheduled()
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+        apply(o, OccurrenceCommand.Acknowledge()); apply(o, OccurrenceCommand.StartGuidance)
+        apply(o, OccurrenceCommand.CheckInDue(0))
+        val line = f.poster.posted.single().line!!
+        assertFalse(line.isEmpty)
+        assertFalse(line.text, line.text.contains("Write the report"))
+        val spoken = f.repo.lineFor(f.repo.get(o.id)!!, CoachingPhase.REVEILLE)
+        assertTrue(spoken.segments.any { it.carriesUserText && it.text == "Write the report." })
+        for (event in f.db.events().forOccurrence(o.id)) {
+            assertFalse(event.payloadJson, event.payloadJson.contains("Write the report") || event.payloadJson.contains(line.text) || event.payloadJson.contains(spoken.text))
+        }
+    }
+
+    @Test
+    fun `an override row that cannot be read costs the wording, and the question is still asked`() = run {
+        f.db.openHelper.writableDatabase.execSQL("INSERT INTO template_overrides (personality, phase, variant, text) VALUES ('FROM_THE_FUTURE', 'CHECK_IN', 0, 'Go.')")
+        val o = scheduled()
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+        apply(o, OccurrenceCommand.Acknowledge()); apply(o, OccurrenceCommand.StartGuidance)
+        apply(o, OccurrenceCommand.CheckInDue(0))
+        assertFalse(f.poster.posted.single().line!!.isEmpty)
+    }
+
+    @Test
     fun `protected time defers the follow-up question until the window ends`() = run {
         f.restWindowCoveringNow() // Monday 08:00-10:00 UTC; it is 09:00
         val o = scheduled()
@@ -902,5 +929,50 @@ class OccurrenceRepositoryTest {
         assertTrue(d.events.any { it.type == EventType.CHECK_IN_ASKED })
         assertEquals(CheckInAnswer.STARTED, d.checkIns.single().answer)
         assertNull(f.repo.detail("no-such-occurrence"))
+    }
+
+    private suspend fun armedAt(): OccurrenceRow {
+        val o = scheduled()
+        apply(o, com.command.domain.occurrence.OccurrenceCommand.Arm(ArmMode.EXACT))
+        return f.repo.get(o.id)!!
+    }
+
+    @Test
+    fun `a Fire for a time the occurrence has left is rejected and the alarm is set for the new time`() = run {
+        val o = armedAt()
+        val moved = o.scheduledAtUtc + 3_600_000L
+        f.repo.reschedule(o.id, moved, "UTC")
+        f.scheduler.armed.clear()
+        val r = apply(o, com.command.domain.occurrence.OccurrenceCommand.Fire, ApplyExtras(setForUtc = o.scheduledAtUtc))
+        assertTrue(r is ApplyResult.Rejected)
+        assertEquals(OccurrenceState.ARMED, state(o))
+        assertEquals(listOf(moved), f.scheduler.armed.values.map { it.atUtcMs })
+    }
+
+    @Test
+    fun `a Fire for the occurrence's own time, or that names no time, fires`() = run {
+        val a = armedAt()
+        assertTrue(apply(a, com.command.domain.occurrence.OccurrenceCommand.Fire, ApplyExtras(setForUtc = a.scheduledAtUtc)) is ApplyResult.Applied)
+        val b = scheduled(atOffsetMs = 120_000)
+        apply(b, com.command.domain.occurrence.OccurrenceCommand.Arm(ArmMode.EXACT))
+        assertTrue(apply(b, com.command.domain.occurrence.OccurrenceCommand.Fire) is ApplyResult.Applied)
+    }
+
+    @Test
+    fun `a Fire delivered again to a ring that is going sets no alarm, whatever time it names`() = run {
+        val o = armedAt()
+        apply(o, com.command.domain.occurrence.OccurrenceCommand.Fire)
+        f.scheduler.armed.keys.filter { it.startsWith("command://occurrence/") }.forEach { f.scheduler.armed.remove(it) }
+        val r = apply(o, com.command.domain.occurrence.OccurrenceCommand.Fire, ApplyExtras(setForUtc = o.scheduledAtUtc - 1))
+        assertTrue(r is ApplyResult.Rejected)
+        assertTrue(f.scheduler.armed.keys.none { it.startsWith("command://occurrence/") })
+    }
+
+    @Test
+    fun `a rejected Fire that is not about a moved time sets no alarm`() = run {
+        val o = scheduled()
+        val r = apply(o, com.command.domain.occurrence.OccurrenceCommand.Fire, ApplyExtras(setForUtc = o.scheduledAtUtc))
+        assertTrue(r is ApplyResult.Rejected)
+        assertTrue(f.scheduler.armed.isEmpty())
     }
 }

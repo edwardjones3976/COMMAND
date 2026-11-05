@@ -149,7 +149,7 @@ class ConsentCenterScreenTest {
 
     @Test
     fun `the volume consent says what it allows and what it never does`() {
-        show(everyConsent())
+        show(ConsentCenterUiState.Ready(listOf(item(ConsentKey.VOLUME_CONTROL, emptyList()))))
         compose.onNodeWithText("While an alarm rings, COMMAND may turn the alarm volume up", substring = true).assertIsDisplayed()
         compose.onNodeWithText("never changes the ring or media volume", substring = true).assertIsDisplayed()
         compose.onNodeWithText("only around an alarm", substring = true).assertIsDisplayed()

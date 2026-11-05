@@ -171,6 +171,7 @@ private fun Ask(state: FollowUpUiState.Ask, notice: FollowUpNotice?, actions: Fo
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.testTag(FollowUpTags.QUESTION),
         )
+        if (state.coaching.isNotBlank()) Text(state.coaching, style = MaterialTheme.typography.bodyLarge)
         if (state.firstAction.isNotBlank()) {
             Text(stringResource(R.string.followup_first_step, state.firstAction), style = MaterialTheme.typography.bodyLarge)
         }
@@ -234,6 +235,7 @@ private fun Recovery(state: FollowUpUiState.Recovery, actions: FollowUpActions) 
         Text(state.title, style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
         Text(stringResource(R.string.followup_recovery_title), style = MaterialTheme.typography.titleLarge)
         Text(stringResource(R.string.followup_recovery_body), style = MaterialTheme.typography.bodyLarge)
+        if (state.coaching.isNotBlank()) Text(state.coaching, style = MaterialTheme.typography.bodyLarge)
         Spacer(Modifier.height(8.dp))
         for (option in state.options) {
             when (option) {

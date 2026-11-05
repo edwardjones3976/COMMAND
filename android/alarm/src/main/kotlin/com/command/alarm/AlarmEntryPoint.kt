@@ -42,6 +42,7 @@ interface AlarmEntryPoint {
     fun checkInPoster(): CheckInPoster
     fun clock(): Clock
     fun latch(): ErasureLatch
+    fun calendarSync(): com.command.data.CalendarSync
 
     companion object {
         fun from(context: Context): AlarmEntryPoint =
