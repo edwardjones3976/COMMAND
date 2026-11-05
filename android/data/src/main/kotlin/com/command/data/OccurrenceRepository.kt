@@ -138,6 +138,17 @@ class OccurrenceRepository @Inject constructor(
     class Tx internal constructor(private val repo: OccurrenceRepository, private val pending: MutableList<Pending>) {
         suspend fun apply(id: String, command: OccurrenceCommand, source: EventSource, extras: ApplyExtras = ApplyExtras.NONE): ApplyResult =
             repo.applyInTx(id, command, source, extras, pending)
+
+        /** [createOccurrence] inside this transaction. */
+        suspend fun create(missionId: String, scheduledAtUtc: Long, zoneId: String): Created =
+            repo.createInTx(missionId, scheduledAtUtc, zoneId, null, avoidCollision = false)
+
+        /** [OccurrenceRepository.reschedule] inside this transaction: an armed alarm is replaced only after it has committed. */
+        suspend fun reschedule(occurrenceId: String, newAtUtc: Long, zoneId: String): Boolean {
+            val row = repo.rescheduleInTx(occurrenceId, newAtUtc, zoneId, EventSource.WORKER) ?: return false
+            if (row.state == OccurrenceState.ARMED) pending += Pending(row, Effect.ArmAlarm(row.armMode), repo.clock.nowMs())
+            return true
+        }
     }
 
     /**
@@ -419,21 +430,21 @@ class OccurrenceRepository @Inject constructor(
      * is replaced in place. Returns false if it cannot be moved (already fired, or the slot is taken).
      */
     suspend fun reschedule(occurrenceId: String, newAtUtc: Long, zoneId: String, source: EventSource = EventSource.WORKER): Boolean {
-        var moved: OccurrenceRow? = null
-        db.withTransaction {
-            val occ = db.occurrences().get(occurrenceId) ?: return@withTransaction
-            if (occ.state != OccurrenceState.SCHEDULED && occ.state != OccurrenceState.ARMED) return@withTransaction
-            if (db.occurrences().find(occ.missionId, newAtUtc) != null) return@withTransaction
-            db.occurrences().reschedule(occ.id, newAtUtc, zoneId)
-            log(EventType.OCCURRENCE_MOVED, occ, source, EventPayload.of("from" to occ.scheduledAtUtc, "to" to newAtUtc))
-            moved = db.occurrences().get(occ.id)
-        }
-        val row = moved ?: return false
+        val row = db.withTransaction { rescheduleInTx(occurrenceId, newAtUtc, zoneId, source) } ?: return false
         if (row.state == OccurrenceState.ARMED) {
             val mode = scheduler.arm(AlarmRequest(row.id, row.requestCode, AlarmKind.FIRE, row.scheduledAtUtc))
             if (mode != row.armMode) db.occurrences().setArmMode(row.id, mode)
         }
         return true
+    }
+
+    private suspend fun rescheduleInTx(occurrenceId: String, newAtUtc: Long, zoneId: String, source: EventSource): OccurrenceRow? {
+        val occ = db.occurrences().get(occurrenceId) ?: return null
+        if (occ.state != OccurrenceState.SCHEDULED && occ.state != OccurrenceState.ARMED) return null
+        if (db.occurrences().find(occ.missionId, newAtUtc) != null) return null
+        db.occurrences().reschedule(occ.id, newAtUtc, zoneId)
+        log(EventType.OCCURRENCE_MOVED, occ, source, EventPayload.of("from" to occ.scheduledAtUtc, "to" to newAtUtc))
+        return db.occurrences().get(occ.id)
     }
 
     /**

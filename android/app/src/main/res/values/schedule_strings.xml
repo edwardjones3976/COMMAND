@@ -83,4 +83,5 @@
     <string name="editor_error_past">That time has already passed.</string>
     <string name="editor_error_days">Pick at least one day.</string>
     <string name="editor_not_found">That mission no longer exists.</string>
+    <string name="schedule_conflict">Overlaps with something else</string>
 </resources>

@@ -16,5 +16,6 @@ object ConsentBoundaries {
         ConsentBoundary(ConsentKey.EXACT_ALARM, ConsentOwner.PLATFORM),
         ConsentBoundary(ConsentKey.FULL_SCREEN, ConsentOwner.PLATFORM),
         ConsentBoundary(ConsentKey.VOLUME_CONTROL, ConsentOwner.APP),
+        ConsentBoundary(ConsentKey.CALENDAR_READ, ConsentOwner.APP),
     )
 }

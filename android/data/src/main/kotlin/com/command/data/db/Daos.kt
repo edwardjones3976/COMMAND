@@ -334,6 +334,46 @@ interface CalendarDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLink(row: CalendarLinkRow)
 
+    /** Fails on a duplicate, so that a second link to one instance is an error and never a second alarm. */
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun addLink(row: CalendarLinkRow)
+
+    @Update
+    suspend fun updateLink(row: CalendarLinkRow)
+
+    @Query("DELETE FROM calendar_links WHERE occurrence_id = :occurrenceId")
+    suspend fun deleteLink(occurrenceId: String)
+
+    @Query("SELECT * FROM calendar_links")
+    suspend fun links(): List<CalendarLinkRow>
+
+    @Query("SELECT * FROM calendar_sources ORDER BY display_name")
+    suspend fun sources(): List<CalendarSourceRow>
+
+    @Query("SELECT * FROM calendar_sources ORDER BY display_name")
+    fun observeSources(): Flow<List<CalendarSourceRow>>
+
+    @Query("DELETE FROM calendar_sources WHERE calendar_id = :id")
+    suspend fun deleteSource(id: Long)
+
+    @Query("UPDATE calendar_sources SET selected = :selected WHERE calendar_id = :id")
+    suspend fun setSelected(id: Long, selected: Boolean)
+
+    @Query("UPDATE calendar_sources SET default_flexibility = :flexibility, default_profile_id = :profileId WHERE calendar_id = :id")
+    suspend fun setDefaults(id: Long, flexibility: Flexibility, profileId: String?)
+
+    @Query("SELECT * FROM conflicts")
+    suspend fun conflicts(): List<ConflictRow>
+
+    @Query("SELECT * FROM conflicts")
+    fun observeConflicts(): Flow<List<ConflictRow>>
+
+    @Query("DELETE FROM conflicts")
+    suspend fun clearConflicts()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertConflicts(rows: List<ConflictRow>)
+
     @Query("SELECT COUNT(*) FROM calendar_links")
     suspend fun linkCount(): Int
 

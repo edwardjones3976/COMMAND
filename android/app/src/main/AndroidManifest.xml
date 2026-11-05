@@ -4,8 +4,9 @@
 
     <!--
         Permissions, the alarm service and the alarm receivers are declared by the :alarm module and merged in. Calendar
-        access returns with the calendar import, which is when it will ask for it.
+        access is only for the optional import, is asked for on its own screen, and is read only.
     -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
 
     <queries>
         <intent>

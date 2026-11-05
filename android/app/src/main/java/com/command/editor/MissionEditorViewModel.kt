@@ -10,6 +10,7 @@ import com.command.data.SaveResult
 import com.command.data.ScheduleDraft
 import com.command.data.TestRingSpec
 import com.command.domain.dials.Flexibility
+import com.command.domain.model.MissionSource
 import com.command.domain.schedule.Frequency
 import com.command.domain.schedule.RRule
 import com.command.domain.time.Clock
@@ -51,6 +52,10 @@ data class EditorState(
     val busy: Boolean = false,
     val finished: Boolean = false,
     val message: EditorMessage? = null,
+    /** A copy of a calendar event: only the calendar can change it, and the alarm can only be taken away. */
+    val imported: Boolean = false,
+    /** How many of this mission's coming alarms overlap something else. */
+    val conflicts: Int = 0,
 )
 
 /** Creates a mission or edits one (the id arrives as the navigation argument). */
@@ -71,8 +76,13 @@ class MissionEditorViewModel @Inject constructor(
             _state.update { it.copy(loading = false) }
         } else {
             viewModelScope.launch {
-                val draft = missions.get(missionId)?.let { missions.draftOf(it) }
-                _state.update { if (draft == null) it.copy(loading = false, notFound = true) else fill(it, draft) }
+                val mission = missions.get(missionId)
+                val draft = mission?.let { missions.draftOf(it) }
+                val conflicts = missions.conflictsOf(missionId)
+                _state.update {
+                    if (draft == null) it.copy(loading = false, notFound = true)
+                    else fill(it, draft).copy(imported = mission.source != MissionSource.MANUAL, conflicts = conflicts)
+                }
             }
         }
     }
@@ -125,7 +135,7 @@ class MissionEditorViewModel @Inject constructor(
 
     fun save() {
         val s = _state.value
-        if (s.busy || s.loading) return
+        if (s.busy || s.loading || s.imported) return
         _state.update { it.copy(busy = true) }
         viewModelScope.launch {
             when (val result = missions.save(s.toDraft(missionId))) {
