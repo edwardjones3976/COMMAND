@@ -50,7 +50,11 @@ fun interface WindowRoller {
     fun roll()
 }
 
-/** Stops the sound and vibration of a ring that has ended (on Android: an intent to the alarm service). */
+/**
+ * Ends the ring of an occurrence: the sound and vibration, and every notification the ring left behind. Naming the
+ * occurrence matters: if a different one is ringing by now, it is left alone. The request code is the one its alarms and
+ * its notification use.
+ */
 fun interface RingController {
-    fun stop(occurrenceId: String)
+    fun stop(occurrenceId: String, requestCode: Int)
 }

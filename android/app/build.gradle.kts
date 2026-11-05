@@ -58,6 +58,12 @@ android {
     debug {
       // Local test build: AI Studio's debug.keystore isn't in the export, so AGP's default debug key is used.
     }
+    // A debug build whose manifest drops USE_EXACT_ALARM, so on a current emulator the exact-alarm app-op decides and the
+    // inexact and degraded paths really run. Same sources as debug.
+    create("noexact") {
+      initWith(getByName("debug"))
+      matchingFallbacks += "debug"
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
@@ -71,6 +77,12 @@ android {
   testOptions {
     unitTests {
       isIncludeAndroidResources = true
+    }
+  }
+  sourceSets {
+    getByName("noexact") {
+      java.directories.add("src/debug/java")
+      kotlin.directories.add("src/debug/java")
     }
   }
   dependenciesInfo {
@@ -103,6 +115,9 @@ fun localSecret(name: String): String {
 dependencies {
   coreLibraryDesugaring(libs.desugar.jdk.libs)
   implementation(project(":voice"))
+  implementation(project(":domain"))
+  implementation(project(":data"))
+  implementation(project(":alarm"))
   implementation(libs.hilt.android)
   implementation(libs.androidx.hilt.navigation.compose)
   implementation(libs.androidx.work.runtime.ktx)
@@ -142,6 +157,7 @@ dependencies {
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.hilt.android.testing)
+  testImplementation(project(":testing-android"))
   testImplementation(libs.androidx.junit)
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
@@ -152,6 +168,7 @@ dependencies {
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.runner)
   debugImplementation(libs.firebase.appcheck.debug)
+  "noexactImplementation"(libs.firebase.appcheck.debug)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)

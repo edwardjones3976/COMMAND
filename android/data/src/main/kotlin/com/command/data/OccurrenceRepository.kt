@@ -17,6 +17,7 @@ import com.command.domain.alarm.RingController
 import com.command.domain.alarm.WindowRoller
 import com.command.domain.alarm.WorkEnqueuer
 import com.command.domain.dials.CheckInSchedule
+import com.command.domain.dials.DialEffects
 import com.command.domain.dials.Dials
 import com.command.domain.dials.LockPolicy
 import com.command.domain.dials.MissionLock
@@ -84,6 +85,8 @@ sealed interface ApplyResult {
 
 data class Created(val occurrence: OccurrenceRow, val isNew: Boolean)
 
+data class MissionBrief(val title: String, val firstAction: String, val starterMinutes: Int)
+
 /**
  * The only writer of `occurrences.state`.
  *
@@ -127,6 +130,25 @@ class OccurrenceRepository @Inject constructor(
     suspend fun get(id: String): OccurrenceRow? = db.occurrences().get(id)
 
     fun observe(id: String): Flow<OccurrenceRow?> = db.occurrences().observe(id)
+
+    /** The title of an occurrence's mission, for notifications and screens that need to name it. */
+    suspend fun missionTitle(missionId: String): String? = db.missions().get(missionId)?.title
+
+    /** What the screens show about a mission while one of its occurrences is being handled. */
+    suspend fun missionBrief(missionId: String): MissionBrief? =
+        db.missions().get(missionId)?.let { MissionBrief(it.title, it.firstAction, it.starterMinutes) }
+
+    /** The seven dials in force for an occurrence: its mission's profile, else the active one. */
+    suspend fun dialsOf(occurrence: OccurrenceRow): Dials = dialsFor(db.missions().get(occurrence.missionId)?.profileId)
+
+    /** Records a handshake attempt that did not change the occurrence's state (a hold released too early). */
+    suspend fun recordChallenge(occurrenceId: String, record: ChallengeRecord) {
+        db.challenges().insert(ChallengeRow(0, occurrenceId, record.chainPosition, record.mode, record.attemptNo, record.outcome, record.startedAt, record.endedAt))
+    }
+
+    /** Appends an audit event that no state transition produced (a degraded ring, a dismissed notification). */
+    suspend fun logEvent(type: EventType, occurrence: OccurrenceRow?, source: EventSource, payload: EventPayload) =
+        log(type, occurrence, source, payload)
 
     // --- creation ----------------------------------------------------------------------------------------------
 
@@ -225,7 +247,15 @@ class OccurrenceRepository @Inject constructor(
                     checkInsAsked = r.snapshot.checkInsAsked,
                 )
                 r.effects.filterIsInstance<Effect.ArmCycleEnd>().firstOrNull()?.let {
-                    newSession = newSession.copy(planEndUtc = now + it.totalMs, planEndElapsed = clock.elapsedRealtimeMs() + it.totalMs)
+                    val ring = DialEffects.alertPlan(dials.alertIntensity)
+                    newSession = newSession.copy(
+                        planEndUtc = now + it.totalMs,
+                        planEndElapsed = clock.elapsedRealtimeMs() + it.totalMs,
+                        ringStartUtc = now,
+                        ringCycles = ring.cycles,
+                        ringCycleMs = ring.cycleMs,
+                        ringGapMs = ring.gapMs,
+                    )
                 }
                 val armMode = r.effects.filterIsInstance<Effect.ArmAlarm>().firstOrNull()?.mode
                     ?: if (r.effects.any { it is Effect.DisarmAlarm }) ArmMode.NONE else occ.armMode
@@ -366,7 +396,7 @@ class OccurrenceRepository @Inject constructor(
                     }
                 }
                 Effect.DisarmAlarm -> scheduler.cancel(request(AlarmKind.FIRE))
-                Effect.StopRinging -> ringController.stop(occ.id)
+                Effect.StopRinging -> ringController.stop(occ.id, occ.requestCode)
                 is Effect.ArmCycleEnd -> scheduler.arm(request(AlarmKind.CYCLE_END, at = p.nowMs + e.totalMs))
                 Effect.CancelCycleEnd -> scheduler.cancel(request(AlarmKind.CYCLE_END))
                 is Effect.ScheduleCheckIn -> scheduler.arm(request(AlarmKind.CHECK_IN, at = e.atUtcMs, index = e.index))

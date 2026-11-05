@@ -20,6 +20,11 @@ data class SessionData(
     val planEndUtc: Long? = null,
     val planEndElapsed: Long? = null,
     val bootId: String? = null,
+    /** The ring plan (see AlertPlan), so a restarted service can work out how much ringing is left. */
+    val ringStartUtc: Long? = null,
+    val ringCycles: Int = 1,
+    val ringCycleMs: Long = 0,
+    val ringGapMs: Long = 0,
 )
 
 internal object Codec {

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="reveille_hold_hint">Hold to start</string>
+    <string name="reveille_hold_description">Press and hold for %1$d seconds to acknowledge the alarm</string>
+    <string name="reveille_hold_progress">%1$d percent</string>
+    <string name="reveille_hold_released">Released early. Hold the full %1$d seconds.</string>
+    <string name="reveille_hold_confirm_action">Confirm without holding</string>
+    <string name="reveille_hold_accessible_button">I cannot hold: confirm instead</string>
+    <string name="reveille_silence">Safety silence</string>
+    <string name="reveille_silence_description">Silence the alarm now. This does not count as starting.</string>
+    <string name="reveille_silenced_title">Alarm silenced</string>
+    <string name="reveille_silenced_body">Silenced is not started. Pick it up when you are ready.</string>
+    <string name="reveille_resume">Resume</string>
+    <string name="reveille_direction_label">Your first step</string>
+    <string name="reveille_starting">I am starting</string>
+    <string name="reveille_delay">Delay %1$d min</string>
+    <string name="reveille_skip">Skip</string>
+    <string name="reveille_closed_started">Started. Good.</string>
+    <string name="reveille_closed_skipped">Skipped. It is recorded as skipped.</string>
+    <string name="reveille_closed_delayed">Delayed. You will hear from it again.</string>
+    <string name="reveille_closed_missed">Missed. Open it again to pick it up.</string>
+    <string name="reveille_closed_done">This one is finished.</string>
+    <string name="reveille_not_ringing">Nothing is ringing for this right now.</string>
+    <string name="reveille_not_found">That alarm no longer exists.</string>
+    <string name="reveille_close">Close</string>
+    <string name="reveille_friction_confirm_title">Skip a fixed commitment?</string>
+    <string name="reveille_friction_confirm_body">This one is set as fixed. Confirm that you want to skip it.</string>
+    <string name="reveille_friction_reason_title">Why skip?</string>
+    <string name="reveille_friction_recovery_title">Before you skip</string>
+    <string name="reveille_friction_recovery_body">This is a fixed commitment. Starting a smaller step is still possible. Skip anyway?</string>
+    <string name="reveille_friction_confirm">Skip anyway</string>
+    <string name="reveille_friction_cancel">Keep going</string>
+    <string name="reveille_reason_EMERGENCY">Emergency</string>
+    <string name="reveille_reason_UNWELL">Unwell</string>
+    <string name="reveille_reason_SCHEDULE_CONFLICT">Something else came up</string>
+    <string name="reveille_reason_NEED_REST">Need rest</string>
+    <string name="reveille_reason_NOT_RELEVANT_TODAY">Not relevant today</string>
+    <string name="reveille_reason_OTHER">Other</string>
+</resources>

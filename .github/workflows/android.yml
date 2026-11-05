@@ -69,8 +69,8 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
-      - name: Assemble debug and unsigned release APKs
-        run: ./gradlew --no-daemon assembleDebug assembleRelease
+      - name: Assemble debug, noexact and unsigned release APKs
+        run: ./gradlew --no-daemon assembleDebug assembleRelease assembleNoexact
       - name: Record APK digests
         run: |
           {

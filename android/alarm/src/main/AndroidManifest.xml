@@ -1,2 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+        Exact alarms: SCHEDULE_EXACT_ALARM is pre-granted but revocable on Android 12-12L only; from Android 13 the alarm-clock
+        permission USE_EXACT_ALARM is granted at install. Either way the code asks the platform before every arm.
+    -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <application>
+        <!-- The ring. The type passed at runtime is one constant (ReveilleService.FGS_TYPE); the other is declared so it can be swapped. -->
+        <service
+            android:name=".ReveilleService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback|systemExempted" />
+
+        <receiver android:name=".ReveilleAlarmReceiver" android:exported="false" />
+        <receiver android:name=".CycleEndReceiver" android:exported="false" />
+        <receiver android:name=".CheckInReceiver" android:exported="false" />
+        <receiver android:name=".SilenceReceiver" android:exported="false" />
+    </application>
+</manifest>
