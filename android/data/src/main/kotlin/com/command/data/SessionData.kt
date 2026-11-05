@@ -32,6 +32,8 @@ data class SessionData(
      */
     val handshakeDifficulty: Int? = null,
     val handshakePersonality: String? = null,
+    /** The chain the person saved for the profile when the alarm fired, as [ChainJson] reads it; null when the profile has none of its own. */
+    val handshakeChainJson: String? = null,
 )
 
 internal object Codec {

@@ -19,6 +19,7 @@ import com.command.domain.handshake.ChainState
 import com.command.domain.handshake.ChainStatus
 import com.command.domain.handshake.ConfirmSequence
 import com.command.domain.handshake.StepPart
+import com.command.domain.handshake.StepProgress
 import com.command.domain.handshake.StepStatus
 import com.command.domain.handshake.TryId
 import com.command.domain.handshake.TypedPhrase
@@ -57,6 +58,7 @@ sealed interface ReveilleUiState {
         val challenge: Challenge,
         val progress: ChainProgress? = null,
         val offerAccessibleConfirm: Boolean = false,
+        val alternatives: List<Alternative> = emptyList(),
     ) : ReveilleUiState
 
     /** Silenced or missed: nothing was started. The user can pick it up again or let it go. */
@@ -82,8 +84,11 @@ data class FrictionPrompt(val required: LockPolicy, val retry: (FrictionEvidence
  * begun and left unfinished runs out after the step's time, and counts as a try; doing nothing is not a try. Once the ring is over, however
  * it ended, nothing of its handshake goes on. The chain a ring is restored against is the one it was fired with ([OccurrenceRepository.handshakeOf]).
  *
- * *Not yet.* Turning to another open step of a chain whose steps are all needed (`ChainEvent.Switch`) has no control: the one default chain
- * with two steps that are all needed (difficulty 4) asks for them in a fixed order, and the choice comes with the editor of chains in M8c.
+ * *Another way.* In a chain of alternatives (one step is enough) or of steps that are all needed in any order, the screen offers the other
+ * steps that are still open ([switchTo]); an ordered chain offers none. Turning to one is not a try and writes nothing, and like every other
+ * event of the handshake it is about a ring, so it is checked against the ring on screen, in the lock. A step that would give the person
+ * nothing that the screen does not give already is not offered ([alternativesOf]: the same screen, such as the numbers that gave way to
+ * typing beside a step of typing, or, where every step is needed, the hold of a two-step beside the press that has to be passed anyway).
  */
 @HiltViewModel
 class ReveilleViewModel @Inject constructor(
@@ -271,7 +276,7 @@ class ReveilleViewModel @Inject constructor(
         val state = chain ?: return _state.value
         // Satisfied: the alarm is being acknowledged, and the observer will show the next screen; the screen stays as it is until then.
         if (state.status == ChainStatus.SATISFIED) return _state.value
-        return ReveilleUiState.Firing(id, brief.title, challengeOf(id, state, brief.firstAction), progressOf(state), offerAccessibleConfirm)
+        return ReveilleUiState.Firing(id, brief.title, challengeOf(id, state, brief.firstAction), progressOf(state), offerAccessibleConfirm, alternativesOf(state))
     }
 
     private fun challengeOf(id: String, state: ChainState, firstAction: String): Challenge {
@@ -300,6 +305,54 @@ class ReveilleViewModel @Inject constructor(
     private fun progressOf(state: ChainState): ChainProgress? {
         if (state.spec.op == ChainOp.OR || state.steps.size < 2) return null
         return ChainProgress(minOf(state.steps.count { it.status == StepStatus.PASSED } + 1, state.steps.size), state.steps.size)
+    }
+
+    /**
+     * The other steps the person may turn to: any open one in a chain of alternatives or of steps that are all needed, none in an ordered one.
+     * A step is left out when turning to it would give nothing that the screen does not give already ([Look.makesRedundant]: the same screen,
+     * or, where every step is needed, the hold that a two-step begins with beside a press of the same length, which acknowledges the two-step
+     * as well when it passes), and of several that would show the same under the same name only the first is offered, so that two buttons
+     * never carry one name.
+     */
+    private fun alternativesOf(state: ChainState): List<Alternative> {
+        val onScreen = state.step?.let { lookOf(state, it) }
+        return state.alternatives
+            .map { state.steps[it] }
+            .filter { onScreen == null || !onScreen.makesRedundant(lookOf(state, it), state.spec.op) }
+            .distinctBy { it.mode to lookOf(state, it) }
+            .map { step ->
+                Alternative(
+                    step.position,
+                    step.mode,
+                    instead = state.spec.op == ChainOp.OR,
+                    assistive = step.mode == HandshakeMode.HOLD && step.assistive,
+                )
+            }
+    }
+
+    /**
+     * What a step shows a person, as far as they can tell. A press is told by how long it lasts, and the three taps that take its place by
+     * nothing else (they show no length); every other challenge is the same whichever step it belongs to. [acknowledging] is the hold that a
+     * two-step begins with, or the taps in its place: the same press, but one that only acknowledges the alarm and is followed by the question.
+     */
+    private data class Look(val shown: HandshakeMode, val pressSeconds: Int, val assistive: Boolean, val acknowledging: Boolean = false) {
+        /**
+         * Turning to [other] would give the person nothing that this screen does not give already: it is the same screen, or, where every step
+         * is needed, it is the hold that a two-step begins with (or the taps in its place) and this screen is the same press of a step that
+         * is not one. Passing a press acknowledges every two-step as well and the press has to be passed anyway, so that hold would only be
+         * an extra press first. Where one step is enough, the two-step is a way of its own (it asks what the person will do first, and
+         * records it), so it is offered beside the press as the press is beside it. In either chain the press is worth turning to from the
+         * two-step's hold, because it ends the chain (or is the other step that is needed) where that hold only begins.
+         */
+        fun makesRedundant(other: Look, op: ChainOp) =
+            this == other || (op == ChainOp.AND && !acknowledging && other.acknowledging && this == other.copy(acknowledging = false))
+    }
+
+    private fun lookOf(state: ChainState, step: StepProgress): Look {
+        if (step.shown != HandshakeMode.HOLD) return Look(step.shown, 0, false)
+        val acknowledging = step.part == StepPart.ACKNOWLEDGE
+        return if (step.assistive) Look(HandshakeMode.HOLD, 0, true, acknowledging)
+        else Look(HandshakeMode.HOLD, state.holdSeconds(step.position), false, acknowledging)
     }
 
     /** Draws the screen again from the chain, if a ring is what is on it. */
@@ -350,7 +403,14 @@ class ReveilleViewModel @Inject constructor(
         publish()
     }
 
-    /** Starts the clock on the try on screen, once: it is begun, and if it is not finished in the step's time it counts as a try. */
+    /**
+     * Starts the clock on the try on screen, once: it is begun, and if it is not finished in the step's time it counts as a try.
+     *
+     * A time-out is an event like any other and is handled in the order it came (the lock is fair). One that is already waiting for its turn
+     * when the person turns to another way is handled before the turn, for the try it is about; one that comes after finds another try on
+     * screen and changes nothing. Handling the turn stops the clock before the person can see the other way, so no time-out can be queued
+     * behind both the turn away and the turn back to a try with the same identity.
+     */
     private fun startTimer(state: ChainState, tryId: TryId) {
         if (began == null) began = clock.nowMs()
         if (timer?.isActive == true) return
@@ -426,6 +486,13 @@ class ReveilleViewModel @Inject constructor(
             ConfirmSequence.Press.WRONG -> advance(ChainEvent.Failed(at))
         }
     }
+
+    /**
+     * The person turns to another open step. The turn is not a try, so nothing is written for it; what is written is the tries made afterwards.
+     * A screen that is shown again (or a process that restarts) comes back to the step of the last try that was recorded, if that left it
+     * open, and otherwise to the first open step: a turn made after the last try is forgotten, and so is every turn that no try followed.
+     */
+    fun switchTo(ring: String, position: Int) = inRing(ring) { advance(ChainEvent.Switch(position)) }
 
     /** "I am doing: ..." The person has said what they will do first. It acknowledges; it does not start. */
     fun twoStepIndicated(ring: String, at: TryId) = send(ring, ChainEvent.Passed(at))

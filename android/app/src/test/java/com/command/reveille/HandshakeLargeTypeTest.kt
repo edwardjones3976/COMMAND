@@ -5,6 +5,7 @@ import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -36,6 +37,7 @@ import org.robolectric.annotation.GraphicsMode
 class HandshakeLargeTypeTest {
 
     @get:Rule val compose = createComposeRule()
+    private val shown = ShownDirection()
 
     private var silenced = 0
     private val typed = ArrayList<String>()
@@ -50,10 +52,11 @@ class HandshakeLargeTypeTest {
         onResume = {}, onStarted = {}, onDelay = {}, onSkip = {}, onClose = {},
     )
 
-    private fun show(challenge: Challenge, progress: ChainProgress? = null, offerConfirm: Boolean = false) {
+    private fun show(challenge: Challenge, progress: ChainProgress? = null, offerConfirm: Boolean = false, alternatives: List<Alternative> = emptyList()) {
         compose.setContent {
+            shown.RecordDirection()
             CommandTheme(darkTheme = true) {
-                ReveilleContent(ReveilleUiState.Firing("occ-1", "Write the report", challenge, progress, offerConfirm), null, emptyList(), actions(), {}, {})
+                ReveilleContent(ReveilleUiState.Firing("occ-1", "Write the report", challenge, progress, offerConfirm, alternatives), null, emptyList(), actions(), {}, {})
             }
         }
     }
@@ -92,7 +95,102 @@ class HandshakeLargeTypeTest {
         compose.onNodeWithTag(ReveilleTags.HOLD).assertIsDisplayed().assertHeightIsAtLeast(160.dp).assertWidthIsAtLeast(160.dp)
     }
 
+    private val ways = listOf(Alternative(1, com.command.domain.dials.HandshakeMode.CONFIRM_SEQUENCE, instead = true), Alternative(2, com.command.domain.dials.HandshakeMode.TWO_STEP, instead = true))
+
+    private fun assertWaysReachable(list: List<Alternative> = ways) {
+        for (alternative in list) {
+            compose.onNodeWithTag(ReveilleTags.alternative(alternative.position)).performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+        }
+    }
+
+    /** Where every step is needed: the longer header ("You can do these in any order. Do next:"), and the buttons are only done first. */
+    private val doNext = listOf(Alternative(1, com.command.domain.dials.HandshakeMode.TYPING, instead = false))
+
+    /** Three other ways at once (a chain of four), the last the three taps that stand in for a press: the longest names. */
+    private val threeWays = listOf(
+        Alternative(1, com.command.domain.dials.HandshakeMode.HOLD, instead = true, assistive = true),
+        Alternative(2, com.command.domain.dials.HandshakeMode.CONFIRM_SEQUENCE, instead = true),
+        Alternative(3, com.command.domain.dials.HandshakeMode.TWO_STEP, instead = true),
+    )
+
     // --- upright at twice the type size ---------------------------------------------------------------------------------
+
+    @Test
+    @Config(fontScale = 2f)
+    fun `other ways under a phrase at twice the type size are reachable and as big as a finger, with Safety silence in view`() {
+        show(typing, ChainProgress(1, 2), alternatives = ways)
+        assertWaysReachable()
+        assertSilenceWithinReach()
+    }
+
+    @Test
+    @Config(fontScale = 2f, qualifiers = "w400dp-h400dp-xxhdpi")
+    fun `other ways with a hold in a short window at twice the type size are reachable, and neither the hold nor Safety silence is in a scroll`() {
+        show(hold, ChainProgress(1, 1), alternatives = ways)
+        assertWaysReachable()
+        compose.onNodeWithTag(ReveilleTags.HOLD).assertIsDisplayed().assertHeightIsAtLeast(96.dp)
+        assertFalse("a finger resting on the target must never be taken over by a scroll", hasScrollingAncestor(ReveilleTags.HOLD))
+        assertSilenceWithinReach()
+    }
+
+    @Test
+    @Config(fontScale = 2f, qualifiers = "he-ldrtl-w360dp-h640dp-xxhdpi")
+    fun `other ways under a phrase right to left at twice the type size are reachable and as big as a finger, with Safety silence in view`() {
+        show(typing, ChainProgress(1, 2), alternatives = ways)
+        shown.assertRtl()
+        assertWaysReachable()
+        assertSilenceWithinReach()
+    }
+
+    @Test
+    @Config(fontScale = 2f)
+    fun `the other steps to do next, with the longer header, under the numbers at twice the type size are reachable and as big as a finger, with Safety silence in view`() {
+        show(sequence, ChainProgress(1, 2), alternatives = doNext)
+        compose.onNodeWithText("You can do these in any order. Do next:").performScrollTo().assertIsDisplayed()
+        assertWaysReachable(doNext)
+        assertSilenceWithinReach()
+    }
+
+    @Test
+    @Config(fontScale = 2f, qualifiers = "he-ldrtl-w360dp-h640dp-xxhdpi")
+    fun `and the same under the numbers right to left`() {
+        show(sequence, ChainProgress(1, 2), alternatives = doNext)
+        shown.assertRtl()
+        compose.onNodeWithText("You can do these in any order. Do next:").performScrollTo().assertIsDisplayed()
+        assertWaysReachable(doNext)
+        assertSilenceWithinReach()
+    }
+
+    @Test
+    @Config(fontScale = 2f)
+    fun `three other ways under the two-step at twice the type size are all reachable and as big as a finger, with Safety silence in view`() {
+        show(twoStep, ChainProgress(1, 4), alternatives = threeWays)
+        compose.onNodeWithTag(ReveilleTags.alternative(1)).performScrollTo().assertIsDisplayed().assertTextEquals("Confirm with three taps")
+        assertWaysReachable(threeWays)
+        assertSilenceWithinReach()
+    }
+
+    @Test
+    @Config(fontScale = 2f, qualifiers = "he-ldrtl-w640dp-h360dp-land-xxhdpi")
+    fun `three other ways beside a hold on a phone on its side right to left, at twice the type size, with the target and Safety silence whole`() {
+        show(hold, ChainProgress(1, 4), alternatives = threeWays)
+        shown.assertRtl()
+        assertWaysReachable(threeWays)
+        assertHoldTargetIsBig()
+        assertFalse(hasScrollingAncestor(ReveilleTags.HOLD))
+        assertSilenceWithinReach()
+    }
+
+    @Test
+    @Config(fontScale = 2f, qualifiers = "w640dp-h360dp-land-xxhdpi")
+    fun `other ways beside a hold on a phone on its side at twice the type size are reachable, with the target and Safety silence whole`() {
+        show(hold, ChainProgress(1, 1), alternatives = ways)
+        assertWaysReachable()
+        assertHoldTargetIsBig()
+        assertFalse(hasScrollingAncestor(ReveilleTags.HOLD))
+        assertSilenceWithinReach()
+    }
+
 
     @Test
     @Config(fontScale = 2f)
@@ -243,17 +341,19 @@ class HandshakeLargeTypeTest {
     // --- right to left ----------------------------------------------------------------------------------------------------
 
     @Test
-    @Config(fontScale = 2f, qualifiers = "ldrtl-w360dp-h640dp-xxhdpi")
+    @Config(fontScale = 2f, qualifiers = "he-ldrtl-w360dp-h640dp-xxhdpi")
     fun `typing right to left at twice the type size keeps Safety silence in view and the button reachable`() {
         show(typing, ChainProgress(1, 2))
+        shown.assertRtl()
         compose.onNodeWithTag(ReveilleTags.TYPING_DONE).performScrollTo().assertIsDisplayed()
         assertSilenceWithinReach()
     }
 
     @Test
-    @Config(fontScale = 2f, qualifiers = "ldrtl-w360dp-h640dp-xxhdpi")
+    @Config(fontScale = 2f, qualifiers = "he-ldrtl-w360dp-h640dp-xxhdpi")
     fun `the numbers right to left at twice the type size are all reachable, with Safety silence in view`() {
         show(sequence, ChainProgress(1, 2))
+        shown.assertRtl()
         for (n in 1..4) compose.onNodeWithTag(ReveilleTags.sequenceTarget(n)).performScrollTo().assertIsDisplayed()
         assertSilenceWithinReach()
     }

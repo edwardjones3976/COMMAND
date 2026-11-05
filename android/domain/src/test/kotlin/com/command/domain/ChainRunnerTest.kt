@@ -743,6 +743,51 @@ class ChainRunnerTest {
     }
 
     @Test
+    fun `a replay comes back to the step of the last try if that left it open, and otherwise to the first open step, because a turn that no try followed is not in the rows`() {
+        val chain = spec(ChainOp.OR, CONFIRM_SEQUENCE, TYPING, HOLD)
+
+        // Turned to typing, one wrong phrase, then turned to the press and did nothing more: the turn to the press is not in the rows.
+        val live = Run(chain).switchTo(1).fail().switchTo(2)
+        assertEquals("the person is on the press", 2, live.state.current)
+        assertEquals(listOf(row(1, TYPING, 1, FAILED)), live.rows)
+        val restored = ChainRunner.restore(chain, live.rows)
+        assertEquals("but they come back on typing, where the last try was", 1, restored.current)
+        assertEquals(TryId(1, 2), restored.tryOnScreen)
+        assertEquals(live.state.steps, restored.steps)
+
+        // A turn and no try at all: the first open step.
+        val turned = Run(chain).switchTo(1).switchTo(2)
+        assertEquals(0, ChainRunner.restore(chain, turned.rows).current)
+
+        // The last try left its step passed, in a chain where every step is needed: the first open step, not the step that passed.
+        val all = spec(ChainOp.AND, CONFIRM_SEQUENCE, TYPING, HOLD)
+        val passed = Run(all).switchTo(1).pass()
+        assertEquals("the person is on a step that is still open", 0, passed.state.current)
+        assertEquals(0, ChainRunner.restore(all, passed.rows).current)
+        val later = Run(all).switchTo(2).pass()
+        assertEquals(0, ChainRunner.restore(all, later.rows).current)
+    }
+
+    @Test
+    fun `a press that passes, by the hold or by the three taps, acknowledges a two-step that is still open, and the hold of a two-step that passes first leaves the press open`() {
+        val all = spec(ChainOp.AND, HOLD, TWO_STEP, retries = 2)
+
+        val held = Run(all).pass()
+        assertEquals(ChainStatus.RUNNING, held.state.status)
+        assertEquals("the two-step is next", TWO_STEP, held.state.step!!.mode)
+        assertEquals("and it asks only the question", StepPart.MAIN, held.state.step!!.part)
+
+        val assisted = Run(all).fail(2).assist()
+        assertEquals(ChainStatus.RUNNING, assisted.state.status)
+        assertEquals(TWO_STEP, assisted.state.step!!.mode)
+        assertEquals("the three taps acknowledge it too", StepPart.MAIN, assisted.state.step!!.part)
+
+        val first = Run(spec(ChainOp.AND, TWO_STEP, HOLD, retries = 2)).pass()
+        assertEquals("the hold in front of the two-step only acknowledges it", StepPart.MAIN, first.state.steps[0].part)
+        assertEquals("the press is still to be done", StepStatus.OPEN, first.state.steps[1].status)
+    }
+
+    @Test
     fun `the rows of a two-step, hold first, replay to the same place`() {
         val live = Run(spec(ChainOp.OR, TWO_STEP, retries = 2)).fail().assist()
         assertEquals(listOf(row(0, HOLD, 1, FAILED), row(0, HOLD, 2, ACCESSIBLE_ALT)), live.rows)

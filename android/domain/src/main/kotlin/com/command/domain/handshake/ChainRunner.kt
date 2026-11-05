@@ -170,8 +170,9 @@ data class ChainState(val spec: ChainSpec, val steps: List<StepProgress>, val cu
  * *Modes not built yet* (QR, NFC, voice) are replaced by their fallback when the chain starts, and a row says so.
  *
  * *The record.* Every try produces an [Attempt], and a change of mode produces one more (FALLBACK, with the mode that was left). The rows
- * are the whole truth about a ring: [restore] replays them to the state they came from, so a screen that is recreated, or a process that
- * died, continues where the person was.
+ * are the whole truth about the tries of a ring: [restore] replays them to the state they came from, so a screen that is recreated, or a
+ * process that died, continues where the person was. A turn to another step ([ChainEvent.Switch]) is not a try and leaves no row, so what
+ * the rows lead to is the step of the last try if that left it open, otherwise the first open step: a turn that no try followed is forgotten.
  */
 object ChainRunner {
     /** The chain at its first step, and the rows to write when it begins (one for each mode that could not be asked for and was replaced). */

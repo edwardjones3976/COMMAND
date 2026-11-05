@@ -126,6 +126,7 @@ internal fun ringActions(viewModel: ReveilleViewModel, ring: String?, onClose: (
     onTypingSubmitted = { at, text -> ring?.let { viewModel.typingSubmitted(it, at, text) } },
     onSequenceTapped = { at, number -> ring?.let { viewModel.sequenceTapped(it, at, number) } },
     onTwoStepIndicated = { at -> ring?.let { viewModel.twoStepIndicated(it, at) } },
+    onSwitch = { position -> ring?.let { viewModel.switchTo(it, position) } },
     onSilence = viewModel::silence,
     onResume = viewModel::resume,
     onStarted = viewModel::started,

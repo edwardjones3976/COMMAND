@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -90,6 +91,7 @@ object ReveilleTags {
     const val PROGRESS = "reveille_progress"
     const val ACKNOWLEDGING = "reveille_acknowledging"
     const val HOLD_WORDS = "reveille_hold_words"
+    fun alternative(position: Int) = "reveille_alternative_$position"
     const val RING_AREA = "reveille_ring_area"
     const val SCREEN_AREA = "reveille_screen_area"
     fun escapeDelay(minutes: Int) = "reveille_escape_delay_$minutes"
@@ -107,6 +109,7 @@ class ReveilleActions(
     val onTypingSubmitted: (TryId, String) -> Unit = { _, _ -> },
     val onSequenceTapped: (TryId, Int) -> Unit = { _, _ -> },
     val onTwoStepIndicated: (TryId) -> Unit = {},
+    val onSwitch: (Int) -> Unit = {},
     val onSilence: () -> Unit,
     val onResume: () -> Unit,
     val onStarted: () -> Unit,
@@ -261,6 +264,7 @@ private fun Firing(state: ReveilleUiState.Firing, actions: ReveilleActions) {
                             Challenge.OutOfTries -> OutOfTriesNote()
                             is Challenge.Hold -> Unit
                         }
+                        Alternatives(state.alternatives, actions.onSwitch)
                     }
                 }
             }
@@ -348,6 +352,7 @@ private fun HoldArea(state: ReveilleUiState.Firing, hold: Challenge.Hold, action
                     TitleBlock(state, caption)
                     if (released) ReleasedHint(hold)
                     if (offerConfirm) AssistiveConfirm(hold.tryId, primary = false, onBegun = { actions.onAssistiveBegun(hold.tryId) }) { actions.onAssistiveConfirmed(hold.tryId) }
+                    Alternatives(state.alternatives, actions.onSwitch)
                 }
                 target()
             }
@@ -359,6 +364,7 @@ private fun HoldArea(state: ReveilleUiState.Firing, hold: Challenge.Hold, action
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         TitleBlock(state, caption)
                         if (released) ReleasedHint(hold)
+                        Alternatives(state.alternatives, actions.onSwitch)
                     }
                 }
                 target()
@@ -368,10 +374,35 @@ private fun HoldArea(state: ReveilleUiState.Firing, hold: Challenge.Hold, action
     }
 }
 
+/** "Or try another way": the other steps the person may turn to, as buttons, when the chain allows any. */
+@Composable
+internal fun Alternatives(alternatives: List<Alternative>, onSwitch: (Int) -> Unit) {
+    if (alternatives.isEmpty()) return
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            stringResource(if (alternatives.first().instead) R.string.handshake_alternatives_instead else R.string.handshake_alternatives_order),
+            style = MaterialTheme.typography.labelLarge,
+            textAlign = TextAlign.Center,
+        )
+        for (alternative in alternatives) {
+            OutlinedButton(
+                onClick = { onSwitch(alternative.position) },
+                modifier = Modifier.heightIn(min = 48.dp).testTag(ReveilleTags.alternative(alternative.position)),
+            ) {
+                // A press whose tries are used up leads to the three taps: the button says what will be asked, not the name of the press.
+                Text(
+                    if (alternative.assistive) stringResource(R.string.handshake_alternative_taps) else com.command.handshake.modeName(alternative.mode),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ReleasedHint(hold: Challenge.Hold) {
     Text(
-        stringResource(R.string.reveille_hold_released, hold.seconds),
+        pluralStringResource(R.plurals.reveille_hold_released, hold.seconds, hold.seconds),
         style = MaterialTheme.typography.bodyLarge,
         color = MaterialTheme.colorScheme.primary,
         textAlign = TextAlign.Center,
@@ -409,7 +440,7 @@ fun HoldButton(
     onCannotHold: (() -> Unit)? = null,
 ) {
     var progress by remember { mutableFloatStateOf(0f) }
-    val description = stringResource(R.string.reveille_hold_description, seconds)
+    val description = pluralStringResource(R.plurals.reveille_hold_description, seconds, seconds)
     val cannotHold = stringResource(R.string.reveille_hold_accessible_button)
 
     Box(

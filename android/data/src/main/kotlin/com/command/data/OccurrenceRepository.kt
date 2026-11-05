@@ -184,18 +184,21 @@ class OccurrenceRepository @Inject constructor(
     suspend fun dialsOf(occurrence: OccurrenceRow): Dials = dialsFor(db.missions().get(occurrence.missionId)?.profileId)
 
     /**
-     * The handshake an occurrence asks for: the default chain of a handshake difficulty (a profile that carries a chain of its own comes
-     * with M8c), and a personality, whose phrases the typing challenge uses. Both are the ones the ring was fired with, so that a profile
-     * edited while it sounds changes nothing for the person in front of it; a ring from before they were pinned follows the profile.
+     * The handshake an occurrence asks for: the chain the person saved for its profile, if there is one that can be used ([ChainJson]),
+     * otherwise the default chain of a handshake difficulty, and a personality, whose phrases the typing challenge uses. All of them are
+     * the ones the ring was fired with, so that a profile edited while it sounds changes nothing for the person in front of it. A ring
+     * from before the difficulty was pinned (before M8b) follows the profile; one from before the chain was pinned (M8b pinned the
+     * difficulty and the personality) asks for the standard chain of its difficulty.
      */
     suspend fun handshakeOf(occurrence: OccurrenceRow): HandshakePlan {
         val pinned = Codec.decodeSession(occurrence.sessionJson)
         val profile = profileFor(db.missions().get(occurrence.missionId)?.profileId)
         val difficulty = pinned.handshakeDifficulty ?: profile?.handshakeDifficulty ?: Presets.dialsFor(PresetOrigin.STEADY).handshakeDifficulty
+        val saved = if (pinned.handshakeDifficulty != null) pinned.handshakeChainJson else profile?.handshakeChainJson
         val personality = pinned.handshakePersonality?.let { name -> Personality.values().firstOrNull { it.name == name } }
             ?: profile?.personality
             ?: Personality.CUSTOM
-        return HandshakePlan(DialEffects.defaultChain(difficulty), personality)
+        return HandshakePlan(ChainJson.decode(saved) ?: DialEffects.defaultChain(difficulty), personality)
     }
 
     /** Every try recorded for [occurrenceId], oldest first: what a ring that is shown again is restored from. */
@@ -338,6 +341,7 @@ class OccurrenceRepository @Inject constructor(
                         ringGapMs = ring.gapMs,
                         handshakeDifficulty = dials.handshakeDifficulty,
                         handshakePersonality = (profileFor(mission.profileId)?.personality ?: Personality.CUSTOM).name,
+                        handshakeChainJson = profileFor(mission.profileId)?.handshakeChainJson,
                     )
                 }
                 val armMode = r.effects.filterIsInstance<Effect.ArmAlarm>().firstOrNull()?.mode
@@ -479,10 +483,10 @@ class OccurrenceRepository @Inject constructor(
 
     // --- helpers -----------------------------------------------------------------------------------------------
 
-    /** The profile in force: the one the mission names, else the active one. */
+    /** The profile in force: the one the mission names (if there is one by that name), else the active one. */
     private suspend fun profileFor(profileId: String?): ProfileRow? =
         profileId?.let { db.profiles().get(it) }
-            ?: db.settings().get(SettingKeys.ACTIVE_PROFILE_ID)?.trim('"')?.let { db.profiles().get(it) }
+            ?: activeProfileIdOf(db.settings().get(SettingKeys.ACTIVE_PROFILE_ID))?.let { db.profiles().get(it) }
 
     private suspend fun dialsFor(profileId: String?): Dials {
         val profile: ProfileRow? = profileFor(profileId)

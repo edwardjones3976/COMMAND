@@ -27,3 +27,5 @@ internal fun ReveilleViewModel.typingSubmitted(at: TryId, text: String) = typing
 internal fun ReveilleViewModel.sequenceTapped(at: TryId, number: Int) = sequenceTapped(ring(), at, number)
 
 internal fun ReveilleViewModel.twoStepIndicated(at: TryId) = twoStepIndicated(ring(), at)
+
+internal fun ReveilleViewModel.switchTo(position: Int) = switchTo(ring(), position)
