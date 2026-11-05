@@ -569,4 +569,66 @@ class MissionRepositoryTest {
         val schedule = missions.observeSchedule().first()
         assertTrue(schedule.upcoming.isEmpty() && schedule.recent.isEmpty())
     }
+
+    // --- the window of history ---------------------------------------------------------------------------------------
+
+    private suspend fun due(title: String, atOffsetMs: Long, state: OccurrenceState, deleted: Boolean = false): String {
+        val mission = Fixture.missionRow(title = title, startAt = f.t0 + atOffsetMs).copy(deletedAt = if (deleted) f.t0 else null)
+        f.db.missions().insert(mission)
+        val o = f.repo.createOccurrence(mission.id, f.t0 + atOffsetMs, "UTC").occurrence
+        when (state) {
+            OccurrenceState.SCHEDULED -> Unit
+            OccurrenceState.MISSED -> {
+                val system = com.command.domain.model.EventSource.SYSTEM
+                f.repo.apply(o.id, com.command.domain.occurrence.OccurrenceCommand.Arm(com.command.domain.occurrence.ArmMode.EXACT), system)
+                f.repo.apply(o.id, com.command.domain.occurrence.OccurrenceCommand.Fire, system)
+                f.repo.apply(o.id, com.command.domain.occurrence.OccurrenceCommand.Miss(com.command.domain.occurrence.MissReason.TIMEOUT), system)
+            }
+            else -> error("not needed here: $state")
+        }
+        return o.id
+    }
+
+    @Test
+    fun `history is the last days as the person's own local days, newest first, without what is still to come`() = run {
+        // The clock stands at Monday 2026-11-02 09:00 UTC.
+        val today = due("This morning", -2 * hour, OccurrenceState.MISSED)
+        val yesterday = due("Yesterday", -26 * hour, OccurrenceState.MISSED)
+        val old = due("Eight days ago", -8 * 24 * hour, OccurrenceState.MISSED)
+        val later = due("This afternoon", 5 * hour, OccurrenceState.SCHEDULED)
+
+        val seven = missions.observeHistory(7).first().map { it.occurrenceId }
+        assertEquals("newest first, and not what is due later today", listOf(today, yesterday), seven)
+        assertTrue(old !in seven)
+        assertTrue(later !in seven)
+
+        val thirty = missions.observeHistory(30).first().map { it.occurrenceId }
+        assertEquals(listOf(today, yesterday, old), thirty)
+    }
+
+    @Test
+    fun `the fetch starts at the person's midnight less the most two zones can differ, so that a mission pinned to a zone ahead is not cut off`() = run {
+        f.clock.zone = java.time.ZoneId.of("Pacific/Auckland") // UTC+13 on that date: it is already 22:00 on Monday there
+        val sinceMidnightThere = due("Monday there, early", 0 - 5 * hour, OccurrenceState.MISSED) // 04:00 UTC = 17:00 Monday in Auckland
+        val sundayThere = due("Sunday there", -23 * hour, OccurrenceState.MISSED) // 10:00 UTC Sunday = 23:00 Sunday in Auckland
+        val longBefore = due("Three days before", -72 * hour, OccurrenceState.MISSED)
+        val one = missions.observeHistory(1).first().map { it.occurrenceId }
+        // Midnight on Monday in Auckland is 11:00 UTC on Sunday. The fetch reaches 26 hours further back, and the rule decides the rest.
+        assertEquals(listOf(sinceMidnightThere, sundayThere), one)
+        assertTrue(longBefore !in one)
+    }
+
+    @Test
+    fun `history leaves out missions that were deleted`() = run {
+        val kept = due("Kept", -hour, OccurrenceState.MISSED)
+        due("Deleted", -2 * hour, OccurrenceState.MISSED, deleted = true)
+        assertEquals(listOf(kept), missions.observeHistory(7).first().map { it.occurrenceId })
+    }
+
+    @Test
+    fun `history is not cut at a few hundred rows, because its counts are made from them`() = run {
+        val mission = Fixture.missionRow(title = "Often").also { f.db.missions().insert(it) }
+        for (i in 1..600) f.repo.createOccurrence(mission.id, f.t0 - i * hour, "UTC")
+        assertEquals(600, missions.observeHistory(30).first().size)
+    }
 }

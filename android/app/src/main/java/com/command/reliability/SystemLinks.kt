@@ -23,14 +23,8 @@ object SystemLinks {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, packageUri(context)) else appDetails(context)
             Fix.OPEN_FULL_SCREEN_SETTINGS ->
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, packageUri(context)) else null
-            Fix.OPEN_ALARM_CHANNEL_SETTINGS ->
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
-                        .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                        .putExtra(Settings.EXTRA_CHANNEL_ID, AlarmContract.CHANNEL_ALARM)
-                } else {
-                    notificationSettings(context)
-                }
+            Fix.OPEN_ALARM_CHANNEL_SETTINGS -> channelSettings(context, AlarmContract.CHANNEL_ALARM)
+            Fix.OPEN_CHECK_IN_CHANNEL_SETTINGS -> channelSettings(context, AlarmContract.CHANNEL_CHECK_IN)
             Fix.OPEN_SOUND_SETTINGS -> Intent(Settings.ACTION_SOUND_SETTINGS)
             // The list of apps, not the request that asks to exempt this one: that request needs a permission that is meant for
             // a narrower set of apps, and the person can find COMMAND in the list.
@@ -39,6 +33,16 @@ object SystemLinks {
         }
         return intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
+
+    /** One notification channel's own page; before Android 8 there are no channels, and the app's notification page is all there is. */
+    private fun channelSettings(context: Context, channelId: String): Intent =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                .putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
+        } else {
+            notificationSettings(context)
+        }
 
     /** The app's own notification page; before Android 8 there is none, and the app's details page has the switch. */
     fun notificationSettings(context: Context): Intent =

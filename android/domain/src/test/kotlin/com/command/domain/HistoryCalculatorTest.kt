@@ -55,6 +55,40 @@ class HistoryCalculatorTest {
     }
 
     @Test
+    fun `one rule decides what a window holds, so a list and the counts made from the same occurrences agree`() {
+        val tokyo = ZoneId.of("Asia/Tokyo") // UTC+9
+        val losAngeles = ZoneId.of("America/Los_Angeles")
+        // It is 16:30 on 1 March in Los Angeles (00:30Z on the 2nd). A mission pinned to Tokyo rang at 08:00 there, which is already the 2nd.
+        val calc = HistoryCalculator(clockAt(losAngeles, 2026, 3, 1, 16, 30))
+        val ahead = occ(tokyo, 2026, 3, 2, 8, 0, OccurrenceState.STARTED_SELF_REPORTED)
+        val here = occ(losAngeles, 2026, 3, 1, 9, 0, OccurrenceState.STARTED_SELF_REPORTED)
+
+        assertEquals(LocalDate.of(2026, 3, 1), calc.currentDay())
+        assertEquals(LocalDate.of(2026, 3, 2), calc.dateOf(ahead))
+        assertTrue(!calc.isWithin(ahead, days = 7) && calc.isWithin(here, days = 7))
+        val counted = calc.dayCounts(listOf(ahead, here), days = 7).sumOf { day -> day.counts.values.sum() }
+        assertEquals("the day counts hold exactly what isWithin lets in", 1, counted)
+        assertEquals(1, calc.summary(listOf(ahead, here), days = 7).daysWithStart)
+
+        // Once the phone's own day reaches the 2nd, the same occurrence is inside, in the list and in the counts.
+        val later = HistoryCalculator(clockAt(losAngeles, 2026, 3, 2, 0, 10))
+        assertTrue(later.isWithin(ahead, days = 7))
+        assertEquals(2, later.summary(listOf(ahead, here), days = 7).daysWithStart)
+    }
+
+    @Test
+    fun `today can be read once and given to every window`() {
+        val calc = HistoryCalculator(clockAt(newYork, 2026, 11, 3, 23, 59))
+        val o = occ(newYork, 2026, 11, 3, 20, 0, OccurrenceState.STARTED_SELF_REPORTED)
+        val given = calc.currentDay() // 3 Nov
+        val tomorrow = given.plusDays(1)
+        assertEquals(1, calc.summary(listOf(o), days = 2, today = given).daysWithStart)
+        assertEquals("two days ending tomorrow still hold the evening of the 3rd", 1, calc.summary(listOf(o), days = 2, today = tomorrow).daysWithStart)
+        assertTrue(!calc.isWithin(o, days = 1, today = tomorrow))
+        assertEquals(0, calc.summary(listOf(o), days = 1, today = tomorrow).daysWithStart)
+    }
+
+    @Test
     fun `every state maps to the reason a person would give`() {
         fun reason(state: OccurrenceState, skip: SkipReason? = null, miss: MissReason? = null) =
             occ(newYork, 2026, 11, 2, 9, 0, state, skip, miss).reason

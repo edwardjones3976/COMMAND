@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_title">Settings</string>
+    <string name="settings_back">Back</string>
+
+    <string name="settings_route_title">Where the spoken line is heard</string>
+    <string name="settings_route_body">An alarm always plays its tone and vibrates. This decides only where the one spoken line is said.</string>
+    <string name="settings_route_speaker">Speaker and headset</string>
+    <string name="settings_route_speaker_detail">The line is said wherever the sound is going, the phone\'s speaker included.</string>
+    <string name="settings_route_headset">Headset only</string>
+    <string name="settings_route_headset_detail">The line is said only when a headset is connected, so that it stays private. Without one, the tone and the vibration still ring.</string>
+
+    <string name="settings_more_title">More</string>
+    <string name="settings_link_history">History</string>
+    <string name="settings_link_reliability">Reliability</string>
+    <string name="settings_link_consents">Permissions and privacy</string>
+
+    <string name="settings_about_title">About</string>
+    <string name="settings_about_version">COMMAND, version %1$s</string>
+    <string name="settings_about_privacy">Everything stays on this phone unless a feature you turn on says otherwise.</string>
+</resources>

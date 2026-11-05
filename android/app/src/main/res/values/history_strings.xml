@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="history_title">History</string>
+    <string name="history_back">Back</string>
+
+    <string name="history_empty_title">Nothing has come due yet</string>
+    <string name="history_empty_body">What happens with each alarm is kept here: whether you started, finished, skipped it or never got to it. It stays on this phone.</string>
+
+    <string name="history_week_title">The last 7 days</string>
+    <string name="history_month_title">The last 30 days</string>
+    <plurals name="history_summary">
+        <item quantity="one">You started on %1$d of the %2$d day that asked something of you.</item>
+        <item quantity="other">You started on %1$d of the %2$d days that asked something of you.</item>
+    </plurals>
+    <string name="history_summary_none">Nothing was asked of you in this time.</string>
+    <string name="history_summary_note">A day counts when something was due that was yours to answer. Days when your phone was off, COMMAND was paused or your calendar cancelled something are left out. Nothing here adds up to a streak.</string>
+
+    <string name="history_day_today">Today</string>
+    <string name="history_day_yesterday">Yesterday</string>
+    <string name="history_entry_description">%1$s, %2$s, %3$s</string>
+
+    <string name="history_reason_started">Started</string>
+    <string name="history_reason_done">Done</string>
+    <string name="history_reason_skipped">Skipped</string>
+    <string name="history_reason_timed_out">Timed out</string>
+    <string name="history_reason_silenced">Silenced</string>
+    <string name="history_reason_unconfirmed">Not confirmed</string>
+    <string name="history_reason_blocked">Blocked</string>
+    <string name="history_reason_restart">Needed a restart</string>
+    <string name="history_reason_calendar">Cancelled in your calendar</string>
+    <string name="history_reason_paused">Paused</string>
+    <string name="history_reason_phone_off">The phone was off</string>
+    <string name="history_reason_moved">Moved to later</string>
+    <string name="history_reason_open">Still open</string>
+</resources>

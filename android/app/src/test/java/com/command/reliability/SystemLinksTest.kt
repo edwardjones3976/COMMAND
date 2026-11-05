@@ -65,6 +65,14 @@ class SystemLinksTest {
     }
 
     @Test
+    fun `the question channel goes to its own page, not to the ring's`() {
+        val intent = intent(Fix.OPEN_CHECK_IN_CHANNEL_SETTINGS)
+        assertEquals(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS, intent.action)
+        assertEquals(context.packageName, intent.getStringExtra(Settings.EXTRA_APP_PACKAGE))
+        assertEquals("check_in", intent.getStringExtra(Settings.EXTRA_CHANNEL_ID))
+    }
+
+    @Test
     fun `sound, battery and app settings go to the matching pages`() {
         assertEquals(Settings.ACTION_SOUND_SETTINGS, intent(Fix.OPEN_SOUND_SETTINGS).action)
         assertEquals(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS, intent(Fix.OPEN_BATTERY_SETTINGS).action)
@@ -107,6 +115,7 @@ class SystemLinksTest {
     fun `before Android 8 there is no page for an app's notifications, so the app's details page has the switch`() {
         assertEquals(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, SystemLinks.notificationSettings(context).action)
         assertEquals(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, intent(Fix.OPEN_ALARM_CHANNEL_SETTINGS).action)
+        assertEquals(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, intent(Fix.OPEN_CHECK_IN_CHANNEL_SETTINGS).action)
     }
 
     @Test

@@ -50,6 +50,8 @@ class ScheduleScreenTest {
         val answered = ArrayList<String>()
         var reliability = 0
         var consents = 0
+        var history = 0
+        var settings = 0
     }
 
     private fun show(state: ScheduleUiState, r: Recorder = Recorder()) {
@@ -62,6 +64,8 @@ class ScheduleScreenTest {
                     onOpenOccurrence = { r.answered += it },
                     onOpenReliability = { r.reliability++ },
                     onOpenConsents = { r.consents++ },
+                    onOpenHistory = { r.history++ },
+                    onOpenSettings = { r.settings++ },
                     zone = ZoneOffset.UTC,
                     today = today,
                 )
@@ -165,6 +169,16 @@ class ScheduleScreenTest {
         compose.onNodeWithTag(ScheduleTags.LINK_CONSENTS).performClick()
         assertEquals(1, r.reliability)
         assertEquals(1, r.consents)
+    }
+
+    @Test
+    fun `the schedule links to history and to settings`() {
+        val r = Recorder()
+        show(ready(), r)
+        compose.onNodeWithTag(ScheduleTags.LINK_HISTORY).performClick()
+        compose.onNodeWithTag(ScheduleTags.LINK_SETTINGS).performClick()
+        assertEquals(1, r.history)
+        assertEquals(1, r.settings)
     }
 
     @Test

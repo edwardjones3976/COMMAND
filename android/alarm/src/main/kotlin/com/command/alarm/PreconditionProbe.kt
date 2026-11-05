@@ -33,7 +33,8 @@ class PreconditionProbe @Inject constructor(
         val values = LinkedHashMap<Precondition, String>()
         values[Precondition.EXACT_ALARMS] = granted(scheduler.canScheduleExact())
         values[Precondition.NOTIFICATIONS] = granted(NotificationManagerCompat.from(context).areNotificationsEnabled())
-        values[Precondition.ALARM_CHANNEL] = alarmChannelImportance()
+        values[Precondition.ALARM_CHANNEL] = channelImportance(AlarmContract.CHANNEL_ALARM)
+        values[Precondition.CHECK_IN_CHANNEL] = channelImportance(AlarmContract.CHANNEL_CHECK_IN)
         values[Precondition.FULL_SCREEN_INTENT] = granted(canUseFullScreenIntent())
         values[Precondition.ALARM_VOLUME] = if (alarmStreamAudible()) PreconditionValue.AUDIBLE else PreconditionValue.MUTED
         values[Precondition.DO_NOT_DISTURB] = if (doNotDisturbBlocksAlarms()) PreconditionValue.DND_BLOCKS_ALARMS else PreconditionValue.DND_FREE
@@ -45,12 +46,15 @@ class PreconditionProbe @Inject constructor(
 
     private fun granted(value: Boolean) = if (value) PreconditionValue.GRANTED else PreconditionValue.DENIED
 
-    /** The ring's channel decides whether it can take over the screen; the user can lower it in settings at any time. */
-    private fun alarmChannelImportance(): String {
+    /**
+     * A channel's importance decides what its notifications can do: the ring's whether it can take over the screen, the follow-up
+     * questions' whether they are heard at all. The user can lower either in settings at any time.
+     */
+    private fun channelImportance(channelId: String): String {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return PreconditionValue.IMPORTANCE_HIGH
         val manager = context.getSystemService(NotificationManager::class.java)
-        if (manager.getNotificationChannel(AlarmContract.CHANNEL_ALARM) == null) RingNotifications.ensureChannels(context)
-        val importance = manager.getNotificationChannel(AlarmContract.CHANNEL_ALARM)?.importance ?: return "MISSING"
+        if (manager.getNotificationChannel(channelId) == null) RingNotifications.ensureChannels(context)
+        val importance = manager.getNotificationChannel(channelId)?.importance ?: return "MISSING"
         return when {
             importance >= NotificationManager.IMPORTANCE_HIGH -> PreconditionValue.IMPORTANCE_HIGH
             importance == NotificationManager.IMPORTANCE_DEFAULT -> "DEFAULT"

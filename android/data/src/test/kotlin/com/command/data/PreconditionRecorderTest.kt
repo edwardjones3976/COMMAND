@@ -47,7 +47,7 @@ class PreconditionRecorderTest {
     private fun healthy() = PreconditionSnapshot(
         mapOf(
             Precondition.EXACT_ALARMS to "granted", Precondition.NOTIFICATIONS to "granted", Precondition.FULL_SCREEN_INTENT to "granted",
-            Precondition.ALARM_CHANNEL to "HIGH", Precondition.ALARM_VOLUME to "audible", Precondition.DO_NOT_DISTURB to "free",
+            Precondition.ALARM_CHANNEL to "HIGH", Precondition.CHECK_IN_CHANNEL to "HIGH", Precondition.ALARM_VOLUME to "audible", Precondition.DO_NOT_DISTURB to "free",
             Precondition.BATTERY_OPTIMIZATION to "optimized",
             Precondition.BACKGROUND_RESTRICTED to "no", Precondition.STANDBY_BUCKET to "ACTIVE",
         ),
@@ -148,5 +148,20 @@ class PreconditionRecorderTest {
         }
         assertEquals("every flip is one change, however many readings saw it", flips, types(EventType.PERMISSION_CHANGED).size)
         assertEquals("and one consent row", flips + 1, f.db.consents().history(ConsentKey.NOTIFICATIONS).size)
+    }
+
+    @Test
+    fun `a value that an earlier version never stored is recorded once as new, and is not a change of a permission`() = run {
+        // What the version before this one stored: every reading it knew, without the channel of the follow-up questions.
+        recorder.record(PreconditionSnapshot(healthy().values - Precondition.CHECK_IN_CHANNEL))
+        val before = types(EventType.PRECONDITION).size
+
+        val changes = recorder.record(healthy())
+
+        assertEquals(listOf(Precondition.CHECK_IN_CHANNEL), changes.map { it.precondition })
+        assertNull("it is new, not changed", changes.single().from)
+        assertEquals(before + 1, types(EventType.PRECONDITION).size)
+        assertTrue(types(EventType.PERMISSION_CHANGED).isEmpty())
+        assertTrue("and the next reading says nothing", recorder.record(healthy()).isEmpty())
     }
 }

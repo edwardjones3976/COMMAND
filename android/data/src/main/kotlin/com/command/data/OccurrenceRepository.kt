@@ -45,6 +45,7 @@ import com.command.domain.schedule.RestWindows
 import com.command.domain.time.Clock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -148,7 +149,23 @@ class OccurrenceRepository @Inject constructor(
 
     suspend fun get(id: String): OccurrenceRow? = db.occurrences().get(id)
 
+    /** Everything recorded about one occurrence, or null if there is none with that id (or its mission is gone from the database). */
+    suspend fun detail(id: String): OccurrenceDetail? = db.withTransaction {
+        // One snapshot: the story reads the row (why it was missed) and the events together, and a command commits both at once.
+        val occurrence = db.occurrences().get(id) ?: return@withTransaction null
+        val mission = db.missions().get(occurrence.missionId) ?: return@withTransaction null
+        OccurrenceDetail(occurrence, mission.title, db.events().forOccurrence(id), db.checkIns().forOccurrence(id), db.challenges().forOccurrence(id))
+    }
+
     fun observe(id: String): Flow<OccurrenceRow?> = db.occurrences().observe(id)
+
+    /**
+     * [detail], followed: it is read again whenever anything it is made of is written, the row, its mission, its events, its questions or its
+     * attempts. Some of those are written without the occurrence changing (a note that the voice was unavailable, a hold released early),
+     * and a page that is open must show them.
+     */
+    fun observeDetail(id: String): Flow<OccurrenceDetail?> =
+        db.invalidationTracker.createFlow("occurrences", "missions", "events", "check_ins", "challenges").map { detail(id) }
 
     /** The title of an occurrence's mission, for notifications and screens that need to name it. */
     suspend fun missionTitle(missionId: String): String? = db.missions().get(missionId)?.title

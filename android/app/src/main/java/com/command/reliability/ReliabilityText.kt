@@ -18,6 +18,7 @@ internal fun itemTitle(precondition: Precondition): String = stringResource(
         Precondition.NOTIFICATIONS -> R.string.reliability_notifications_title
         Precondition.FULL_SCREEN_INTENT -> R.string.reliability_fullscreen_title
         Precondition.ALARM_CHANNEL -> R.string.reliability_channel_title
+        Precondition.CHECK_IN_CHANNEL -> R.string.reliability_checkin_channel_title
         Precondition.ALARM_VOLUME -> R.string.reliability_volume_title
         Precondition.DO_NOT_DISTURB -> R.string.reliability_dnd_title
         Precondition.BATTERY_OPTIMIZATION -> R.string.reliability_battery_title
@@ -34,7 +35,7 @@ internal fun itemState(item: ReliabilityItem): String {
         Precondition.EXACT_ALARMS -> stringResource(if (ok) R.string.reliability_exact_ok else R.string.reliability_exact_problem)
         Precondition.NOTIFICATIONS -> stringResource(if (ok) R.string.reliability_notifications_ok else R.string.reliability_notifications_problem)
         Precondition.FULL_SCREEN_INTENT -> stringResource(if (ok) R.string.reliability_fullscreen_ok else R.string.reliability_fullscreen_problem)
-        Precondition.ALARM_CHANNEL ->
+        Precondition.ALARM_CHANNEL, Precondition.CHECK_IN_CHANNEL ->
             if (ok) {
                 stringResource(R.string.reliability_channel_ok)
             } else {
@@ -76,6 +77,7 @@ internal fun itemBody(item: ReliabilityItem): String? {
             Precondition.NOTIFICATIONS -> R.string.reliability_notifications_body
             Precondition.FULL_SCREEN_INTENT -> R.string.reliability_fullscreen_body
             Precondition.ALARM_CHANNEL -> R.string.reliability_channel_body
+            Precondition.CHECK_IN_CHANNEL -> R.string.reliability_checkin_channel_body
             Precondition.ALARM_VOLUME -> R.string.reliability_volume_body
             Precondition.DO_NOT_DISTURB -> R.string.reliability_dnd_body
             Precondition.BATTERY_OPTIMIZATION -> R.string.reliability_battery_body
@@ -94,7 +96,7 @@ internal fun itemAction(item: ReliabilityItem, canAskNotifications: Boolean): St
             Fix.ASK_NOTIFICATIONS -> if (canAskNotifications) R.string.reliability_notifications_action_ask else R.string.reliability_notifications_action_settings
             Fix.OPEN_EXACT_ALARM_SETTINGS -> R.string.reliability_exact_action
             Fix.OPEN_FULL_SCREEN_SETTINGS -> R.string.reliability_fullscreen_action
-            Fix.OPEN_ALARM_CHANNEL_SETTINGS -> R.string.reliability_channel_action
+            Fix.OPEN_ALARM_CHANNEL_SETTINGS, Fix.OPEN_CHECK_IN_CHANNEL_SETTINGS -> R.string.reliability_channel_action
             Fix.OPEN_SOUND_SETTINGS -> R.string.reliability_volume_action
             Fix.OPEN_BATTERY_SETTINGS -> R.string.reliability_battery_action
             Fix.OPEN_APP_SETTINGS -> R.string.reliability_background_action

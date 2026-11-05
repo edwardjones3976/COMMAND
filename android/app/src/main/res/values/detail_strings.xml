@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="detail_title">Details</string>
+    <string name="detail_back">Back</string>
+
+    <string name="detail_not_found_title">This one is gone</string>
+    <string name="detail_not_found_body">There is no record of it on this phone any more.</string>
+
+    <string name="detail_section_story">What happened</string>
+    <string name="detail_story_empty">Nothing has happened with this one yet.</string>
+
+    <string name="detail_story_set">The alarm was set.</string>
+    <string name="detail_story_set_again">The alarm was set again.</string>
+    <string name="detail_story_set_roughly">The alarm could only be set approximately, so it may have gone off late.</string>
+    <string name="detail_story_rang">The alarm went off.</string>
+    <string name="detail_story_answered">You answered the alarm.</string>
+    <string name="detail_story_directed">You were told the first step.</string>
+    <string name="detail_story_asked">A follow-up question was asked.</string>
+    <plurals name="detail_story_question_late">
+        <item quantity="one">The phone held the question back for %1$d second.</item>
+        <item quantity="other">The phone held the question back for %1$d seconds.</item>
+    </plurals>
+    <string name="detail_story_started">You said you started.</string>
+    <string name="detail_story_still_working">You said you were still working.</string>
+    <string name="detail_story_done">You said it was done.</string>
+    <string name="detail_story_skipped">You skipped it.</string>
+    <string name="detail_story_calendar_cancelled">It was cancelled in your calendar.</string>
+    <string name="detail_story_delayed">You delayed it.</string>
+    <string name="detail_story_missed">The alarm ran out without an answer.</string>
+    <string name="detail_story_silenced">You silenced the alarm.</string>
+    <string name="detail_story_not_confirmed">It was left unconfirmed.</string>
+    <string name="detail_story_restart_offered">You asked for a restart and were offered a way back.</string>
+    <string name="detail_story_restarted">You started over.</string>
+    <string name="detail_story_moved_later">It was moved to later.</string>
+    <string name="detail_story_blocked">You said something was in the way.</string>
+    <string name="detail_story_phone_off">The phone was off when it was due.</string>
+    <string name="detail_story_paused">COMMAND was paused when this was due.</string>
+    <string name="detail_story_swiped">The ring\'s notification was swiped away.</string>
+    <string name="detail_story_voice_unavailable">The spoken line was not available on this phone.</string>
+    <string name="detail_story_test">This was a test alarm.</string>
+
+    <string name="detail_technical_show">Show technical details</string>
+    <string name="detail_technical_hide">Hide technical details</string>
+    <string name="detail_technical_line">%1$s  %2$s</string>
+    <string name="detail_technical_note">Everything recorded, as it was written: times, names of events and counts, never your own words. It stays on this phone.</string>
+</resources>
