@@ -16,6 +16,7 @@ import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.EventType
 import com.command.domain.occurrence.OccurrenceCommand
+import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.voice.RoutePolicy
 import com.command.domain.voice.SpeakResult
 import com.command.domain.voice.SpeechProblem
@@ -252,13 +253,21 @@ class ReveilleServiceSpeechTest {
     }
 
     @Test
-    fun `the speech engine is started with the ring, before the database has even been opened, and not when the first line is asked for`() {
+    fun `the speech engine is started with the ring, before the database work has begun, and not when the first line is asked for`() {
         speaker.hold = true
         val o = armed()
+        // Looked at by the engine's start itself, not after it: how far the database work has got by the time a test looks is a race with
+        // another thread (CI lost it), but what the occurrence was when the engine was started is not.
+        var stateWhenStarted: OccurrenceState? = null
+        speaker.onPrepare = { stateWhenStarted = runBlocking { repo.get(o.id)?.state } }
+
         startService(o)
-        assertEquals(1, speaker.prepares)
+
+        assertEquals("the engine is started by the start command itself", 1, speaker.prepares)
         assertTrue("the tone is already going too", output.ringing)
-        assertTrue("and no line has been asked for yet", speaker.spoken.isEmpty())
+        assertEquals("the alarm had not even been fired yet when the engine was started", OccurrenceState.ARMED, stateWhenStarted)
+        awaitUntil(message = "the first line is asked for") { speaker.spoken.isNotEmpty() }
+        assertEquals("and the engine is not started again for the line", 1, speaker.prepares)
     }
 
     @Test

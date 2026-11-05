@@ -48,7 +48,7 @@ import javax.inject.Inject
 
 @HiltAndroidTest
 @RunWith(RobolectricTestRunner::class)
-@Config(application = HiltTestApplication::class, sdk = [34, 36])
+@Config(application = HiltTestApplication::class, sdk = [34, 36], shadows = [VolumeRefusalShadow::class])
 class ReveilleServiceTest {
 
     @get:Rule val hilt = HiltAndroidRule(this)
@@ -60,6 +60,9 @@ class ReveilleServiceTest {
     @Inject lateinit var scheduler: FakeAlarmScheduler
     @Inject lateinit var resolver: RingModeResolver
     @Inject lateinit var session: RingSession
+    @Inject lateinit var latch: ErasureLatch
+    @Inject lateinit var eraser: DataEraser
+    @Inject lateinit var consents: com.command.data.ConsentStore
 
     private lateinit var context: Context
 
@@ -232,6 +235,111 @@ class ReveilleServiceTest {
     }
 
     @Test
+    fun `while everything is being erased an alarm that was already on its way rings nothing and leaves the occurrence alone`() {
+        val o = armed()
+        latch.seal()
+        val controller = startService(fireIntent(o))
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse("no tone", output.ringing)
+        assertTrue("it went foreground, as the platform demands of a start like this, and dropped it again", shadowOf(controller.get()).isForegroundStopped)
+        assertTrue("and the service lets itself go", shadowOf(controller.get()).isStoppedBySelf)
+        assertEquals("the database was not written", OccurrenceState.ARMED, stateOf(o))
+        assertFalse(EventType.ALARM_FIRED in eventTypes(o))
+        assertEquals("the tone was never started, not started and stopped again", 0, output.starts)
+    }
+
+    @Test
+    fun `an alarm that arrives while the erase is sealing the latch counts as busy from its first moment`() {
+        val o = armed()
+        var busyWhileStarting: Boolean? = null
+        // The latch is read at the top of the ring, and the tone starts after it: an erase that seals and asks in between must see a service that is busy.
+        val closesWhileSettingUp = object : ErasureLatch() {
+            override val sealed: Boolean
+                get() {
+                    busyWhileStarting = session.isBusy
+                    return false
+                }
+        }
+        val service = Robolectric.buildService(ReveilleService::class.java, fireIntent(o))
+        service.create().get().latch = closesWhileSettingUp
+        service.startCommand(0, 1)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("the service was busy while the latch was being looked at", true, busyWhileStarting)
+    }
+
+    @Test
+    fun `erasing while a ring is sounding on a phone that keeps the alarm volume above a floor says the volume was not put back`() {
+        androidx.work.testing.WorkManagerTestInitHelper.initializeTestWorkManager(context)
+        val audio = context.getSystemService(android.media.AudioManager::class.java)
+        audio.setStreamVolume(android.media.AudioManager.STREAM_ALARM, 1, 0)
+        runBlocking { consents.grant(com.command.domain.model.ConsentKey.VOLUME_CONTROL) }
+        val o = armed()
+        try {
+            startService(fireIntent(o))
+            awaitUntil(message = "the ring has raised the volume") { runBlocking { db.settings().get(SettingKeys.VOLUME_RESTORE) } != null }
+            VolumeRefusalShadow.floor = 3 // the platform only lets it go as low as 3
+
+            // The erase runs on its own thread, as it does in the app; this one pumps the main looper, which the ring's end needs.
+            val report = java.util.concurrent.CompletableFuture.supplyAsync { runBlocking { eraser.erase() } }
+            awaitUntil(message = "the erase is over") { report.isDone }
+
+            val result = report.get()
+            assertTrue("the ring's own clean-up got to the volume first, and the erase still says so: $result", result.volumeLeft)
+            assertFalse(result.toString(), result.complete)
+        } finally {
+            VolumeRefusalShadow.floor = 0
+        }
+    }
+
+    @Test
+    fun `a delivery that meets a database that is gone does not take the process down`() {
+        val o = armed()
+        val uncaught = ArrayList<Throwable>()
+        val before = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { _, e -> uncaught += e }
+        try {
+            db.close() // as the erase does, under a delivery that outlived its wait
+            val controller = startService(fireIntent(o))
+            repeat(40) {
+                shadowOf(Looper.getMainLooper()).idle()
+                Thread.sleep(5)
+            }
+            assertTrue("nothing reached the process: $uncaught", uncaught.isEmpty())
+            assertTrue("and the service let go", shadowOf(controller.get()).isStoppedBySelf)
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(before)
+        }
+    }
+
+    @Test
+    fun `ending everything silences the ring that is sounding and the delivery that is being checked, whichever they are`() {
+        val o = armed()
+        val controller = startService(fireIntent(o))
+        assertTrue("the sound started ahead of the checks", output.ringing)
+
+        session.endActive() // the database has not answered yet
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertFalse("silenced at once, without naming the alarm", output.ringing)
+        awaitUntil(message = "service stop") { shadowOf(controller.get()).isStoppedBySelf }
+        assertFalse("and the late check does not start it again", output.ringing)
+    }
+
+    @Test
+    fun `the session is busy from the moment an alarm arrives, through its ring, until the service is quiet`() {
+        val o = armed()
+        assertFalse("with no service there is nothing to wait for", session.isBusy)
+        val controller = startService(fireIntent(o))
+        assertTrue("the alarm is being checked, and its tone may already be going", session.isBusy)
+        awaitUntil(message = "ringing") { controller.get().ringingOccurrenceId == o.id }
+        assertTrue(session.isBusy)
+        session.end(o.id)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(session.isBusy)
+    }
+
+    @Test
     fun `ending the ring of a different occurrence leaves this one sounding`() {
         val o = armed()
         val controller = startService(fireIntent(o))
@@ -388,6 +496,46 @@ class ReveilleServiceTest {
         assertEquals(AlarmContract.CHANNEL_FALLBACK, notification.channelId)
         assertNotNull(notification.fullScreenIntent)
         assertEquals("two minutes of ring", 2 * 60_000L, notification.timeoutAfter)
+    }
+
+    @Test
+    fun `while everything is being erased the fallback ring starts nothing`() {
+        val o = armed()
+        latch.seal()
+
+        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+
+        assertEquals("the occurrence was not fired", OccurrenceState.ARMED, stateOf(o))
+        assertTrue("and nothing was posted", notifications().allNotifications.isEmpty())
+        assertFalse(EventType.RING_DEGRADED in eventTypes(o))
+    }
+
+    @Test
+    fun `an erase that seals the latch while the fallback ring is asking the database still keeps it from sounding`() {
+        val o = armed()
+        // Open when the fallback ring begins, closed by the time it is ready to post: the erase got in between its database calls.
+        val closesMeanwhile = object : ErasureLatch() {
+            var looks = 0
+            override val sealed: Boolean get() = ++looks > 1
+        }
+
+        runBlocking { RingModeResolver(context, repo, clock, closesMeanwhile).degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+
+        assertTrue("nothing sounds behind the erase", notifications().allNotifications.isEmpty())
+    }
+
+    @Test
+    fun `and one that seals it just as the notification is posted takes the notification down again`() {
+        val o = armed()
+        val closesAfterPosting = object : ErasureLatch() {
+            var looks = 0
+            override val sealed: Boolean get() = ++looks > 2
+        }
+
+        runBlocking { RingModeResolver(context, repo, clock, closesAfterPosting).degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException") }
+
+        assertTrue("it was posted and then taken down, so nothing is left to sound", notifications().allNotifications.isEmpty())
+        assertTrue("and it was looked at after the post", closesAfterPosting.looks >= 3)
     }
 
     @Test

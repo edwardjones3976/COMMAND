@@ -41,6 +41,7 @@ interface AlarmEntryPoint {
     fun scheduler(): com.command.domain.alarm.AlarmScheduler
     fun checkInPoster(): CheckInPoster
     fun clock(): Clock
+    fun latch(): ErasureLatch
 
     companion object {
         fun from(context: Context): AlarmEntryPoint =

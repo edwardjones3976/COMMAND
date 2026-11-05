@@ -15,7 +15,7 @@ import javax.inject.Singleton
  * of the next ring. With no service running there is nothing to end, and nothing is started.
  */
 @Singleton
-class RingSession @Inject constructor() {
+open class RingSession @Inject constructor() {
     private val main = Handler(Looper.getMainLooper())
 
     @Volatile private var service: ReveilleService? = null
@@ -34,9 +34,20 @@ class RingSession @Inject constructor() {
      */
     val isRinging: Boolean get() = service?.ringingOccurrenceId != null
 
+    /** Whether the service is ringing something or still checking a delivery that may be about to. Safe from any thread. */
+    open val isBusy: Boolean get() = service?.busy == true
+
     /** Ends the sound for [occurrenceId] if that is what is ringing. Safe from any thread. */
     fun end(occurrenceId: String) {
         main.post { service?.endRing(occurrenceId) }
+    }
+
+    /**
+     * Ends whatever the service is ringing or still checking, without naming it: for the erase, which silences first and must not wait for
+     * the database to say which alarm that is. Safe from any thread.
+     */
+    open fun endActive() {
+        main.post { service?.endEverything() }
     }
 }
 

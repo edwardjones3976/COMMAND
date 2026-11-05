@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="data_title">Your data</string>
+    <string name="data_back">Back</string>
+
+    <string name="data_overview_title">What is on this phone</string>
+    <string name="data_overview_body">Everything COMMAND keeps is on this phone. Nothing leaves it unless you turn on a feature that says otherwise.</string>
+    <string name="data_overview_counts">Right now: %1$s, %2$s and %3$s.</string>
+    <plurals name="data_count_missions">
+        <item quantity="one">%d mission</item>
+        <item quantity="other">%d missions</item>
+    </plurals>
+    <plurals name="data_count_alarms">
+        <item quantity="one">%d alarm with what happened to it</item>
+        <item quantity="other">%d alarms with what happened to each</item>
+    </plurals>
+    <plurals name="data_count_entries">
+        <item quantity="one">%d log entry</item>
+        <item quantity="other">%d log entries</item>
+    </plurals>
+
+    <string name="data_save_title">Save a copy</string>
+    <string name="data_save_body">A zip file of everything COMMAND keeps, as files you can read: one for each kind of record, and your history as a spreadsheet. It holds the titles of your missions and what you did with each alarm, and it goes only where you save it.</string>
+    <string name="data_save_button">Save a copy of my data</string>
+    <string name="data_save_working">Saving your copy…</string>
+    <string name="data_save_done">Saved: %1$s and %2$s.</string>
+    <plurals name="data_count_records">
+        <item quantity="one">%d record</item>
+        <item quantity="other">%d records</item>
+    </plurals>
+    <plurals name="data_count_history_lines">
+        <item quantity="one">%d line of history</item>
+        <item quantity="other">%d lines of history</item>
+    </plurals>
+    <string name="data_save_failed">That did not save, and nothing was changed. Try again, or choose another place.</string>
+
+    <string name="data_erase_title">Erase everything</string>
+    <string name="data_erase_body">Deletes your missions, your schedule, your history and your settings from this phone, takes back every alarm and notice, and closes COMMAND. It cannot be undone. A copy you saved stays where you saved it.</string>
+    <string name="data_erase_button">Erase everything on this phone</string>
+    <string name="data_erase_failed">Erasing did not finish. Try again.</string>
+    <string name="data_erase_confirm_title">Erase everything?</string>
+    <string name="data_erase_confirm_body">This deletes everything COMMAND keeps on this phone, and it cannot be undone. Alarms that are set are taken back and COMMAND closes. Copies you saved stay where you saved them.</string>
+    <string name="data_erase_confirm">Erase everything</string>
+    <string name="data_erase_keep">Keep my data</string>
+    <string name="data_erase_working">Erasing…</string>
+    <string name="data_erased_done">Everything was deleted. COMMAND is closing.</string>
+    <plurals name="data_erased_partial">
+        <item quantity="one">Almost everything was deleted. %d thing could not be removed. Closing COMMAND lets Android clear the rest.</item>
+        <item quantity="other">Almost everything was deleted. %d things could not be removed. Closing COMMAND lets Android clear the rest.</item>
+    </plurals>
+    <string name="data_erased_volume_only">Everything was deleted, but the alarm volume could not be put back to what it was. You can set it in your phone\'s sound settings.</string>
+    <string name="data_erased_volume_also">The alarm volume could not be put back to what it was. You can set it in your phone\'s sound settings.</string>
+    <string name="data_erased_close">Close COMMAND now</string>
+    <string name="data_erased_retry">Try again</string>
+</resources>

@@ -30,13 +30,14 @@ class AlarmSchedulerTest {
     private lateinit var context: Context
     private lateinit var alarms: AlarmManager
     private lateinit var scheduler: AndroidAlarmScheduler
+    private val latch = ErasureLatch()
     private val at = 1_900_000_000_000L
 
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         alarms = context.getSystemService(AlarmManager::class.java)
-        scheduler = AndroidAlarmScheduler(context)
+        scheduler = AndroidAlarmScheduler(context, latch)
         if (android.os.Build.VERSION.SDK_INT >= 31) ShadowAlarmManager.setCanScheduleExactAlarms(true)
     }
 
@@ -51,6 +52,45 @@ class AlarmSchedulerTest {
         val alarm = scheduled().single()
         assertNotNull("the alarm-clock call is the one that wakes a dozing phone", alarm.alarmClockInfo)
         assertEquals(at, alarm.triggerAtMs)
+    }
+
+    @Test
+    fun `once an erase has begun nothing is armed any more, and what was armed before can still be taken back`() {
+        scheduler.arm(request())
+        latch.seal()
+        for (kind in AlarmKind.values()) {
+            assertEquals(kind.name, ArmMode.NONE, scheduler.arm(request(kind, occurrence = "occ-2", code = 9)))
+        }
+        assertEquals("only the alarm from before the erase", 1, scheduled().size)
+        assertTrue("and it can be taken back", scheduler.isArmed(request()))
+        scheduler.cancel(request())
+        assertTrue(scheduled().isEmpty())
+        assertFalse(scheduler.isArmed(request()))
+    }
+
+    @Test
+    fun `an erase that failed before it deleted anything opens the latch again, and arming works`() {
+        latch.seal()
+        assertEquals(ArmMode.NONE, scheduler.arm(request()))
+
+        latch.unseal()
+
+        assertEquals(ArmMode.EXACT, scheduler.arm(request()))
+        assertEquals(1, scheduled().size)
+    }
+
+    @Test
+    fun `an alarm that was being set when the erase closed the latch is taken back by the arm itself`() {
+        val closesBetweenTheLooks = object : ErasureLatch() {
+            private var looks = 0
+            override val sealed: Boolean get() = looks++ > 0 // open for the first look, closed by the second
+        }
+        val racing = AndroidAlarmScheduler(context, closesBetweenTheLooks)
+
+        assertEquals(ArmMode.NONE, racing.arm(request()))
+
+        assertFalse("the alarm that was set is not left behind", racing.isArmed(request()))
+        assertTrue(scheduled().isEmpty())
     }
 
     @Test

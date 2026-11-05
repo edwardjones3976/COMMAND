@@ -29,7 +29,10 @@ interface AlarmScheduler {
     /** Whether the platform will deliver precisely timed alarms right now. Checked before every arm. */
     fun canScheduleExact(): Boolean
 
-    /** Arms (or replaces) the alarm and reports the precision actually obtained: EXACT or INEXACT, never NONE. */
+    /**
+     * Arms (or replaces) the alarm and reports the precision actually obtained: EXACT or INEXACT. NONE means that nothing was set because
+     * everything is being erased: the app is about to be ended, and the caller has nothing to record.
+     */
     fun arm(request: AlarmRequest): ArmMode
 
     fun cancel(request: AlarmRequest)

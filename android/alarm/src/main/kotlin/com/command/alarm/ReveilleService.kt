@@ -32,6 +32,7 @@ import com.command.domain.voice.SpeechProblem
 import com.command.domain.voice.SpeechUsage
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -69,14 +70,23 @@ class ReveilleService : Service() {
     @Inject lateinit var volume: AlarmVolumePolicy
     @Inject lateinit var appSettings: AppSettings
     @Inject lateinit var lines: ReveilleLines
+    @Inject lateinit var latch: ErasureLatch
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    /**
+     * What a delivery or a ring's timing throws must never reach the process, which would die in the middle of an alarm (or of an erase, when
+     * the database is closed under a delivery that outlived the wait): it is logged, the `finally` of the coroutine has already run, and the
+     * service goes on or lets go.
+     */
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Main.immediate +
+            CoroutineExceptionHandler { _, e -> Log.w(TAG, "a ring's work failed, and the service carries on: ${e.javaClass.simpleName}", e) },
+    )
 
     /** One delivery at a time, in the order they arrived. */
     private val deliveries = Mutex()
 
-    // Everything below is touched on the main thread only.
-    private var pending = 0
+    // Everything below is touched on the main thread only (what other threads read through RingSession is marked).
+    @Volatile private var pending = 0
     private var lastStartId = 0
 
     // Written on the main thread only, and read from others through RingSession.isRinging.
@@ -90,6 +100,13 @@ class ReveilleService : Service() {
 
     /** The occurrence that is sounding right now, if any. For tests. */
     internal val ringingOccurrenceId: String? get() = active?.id
+
+    /**
+     * A ring is sounding, or a delivery is being set up or checked (its tone may already be going). Read by whoever must wait for the service
+     * to be quiet, from another thread. [pending] is read first: a delivery that becomes the ring that sounds sets [active] before it stops
+     * being counted, so whichever way the two reads fall one of them sees it.
+     */
+    internal val busy: Boolean get() = pending > 0 || active != null
     private var wakeLock: PowerManager.WakeLock? = null
     private var focus: AudioFocusRequest? = null
 
@@ -124,10 +141,23 @@ class ReveilleService : Service() {
     }
 
     private fun ring(intent: Intent?) {
+        // Counted from the first moment, before the latch is looked at: the erase seals the latch and then asks whether the service is
+        // quiet, and a delivery that is still being set up (the notification, the tone) has to show as busy until it has been queued.
+        pending++
+        try {
+            startRing(intent)
+        } finally {
+            pending--
+            settle()
+        }
+    }
+
+    private fun startRing(intent: Intent?) {
         val id = AlarmContract.occurrenceId(intent)
         val code = AlarmContract.requestCode(intent)
-        if (id == null || code == 0) {
-            // Started with nothing to ring for. A foreground start must still be answered with startForeground.
+        if (id == null || code == 0 || latch.sealed) {
+            // Started with nothing to ring for, or while everything is being erased (an alarm that was already on its way stays quiet). A
+            // foreground start must still be answered with startForeground.
             runCatching { ServiceCompat.startForeground(this, FALLBACK_ID, RingNotifications.starting(this), FGS_TYPE) }
             settle()
             return
@@ -312,6 +342,11 @@ class ReveilleService : Service() {
             delay((end - position()).coerceAtLeast(0))
         }
         output.stop()
+    }
+
+    /** Ends every ring and every delivery that is being checked, whichever occurrence it is: the erase's first act. Called on the main thread. */
+    internal fun endEverything() {
+        for (id in (listOfNotNull(active?.id) + inFlight).distinct()) endRing(id)
     }
 
     /**

@@ -22,6 +22,7 @@ import javax.inject.Singleton
 @Singleton
 class AndroidAlarmScheduler @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val latch: ErasureLatch,
 ) : AlarmScheduler {
 
     private val alarms: AlarmManager = context.getSystemService(AlarmManager::class.java)
@@ -29,6 +30,19 @@ class AndroidAlarmScheduler @Inject constructor(
     override fun canScheduleExact(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarms.canScheduleExactAlarms()
 
     override fun arm(request: AlarmRequest): ArmMode {
+        // Erasing everything is under way (or done): whatever is still running must not set an alarm that the erase has taken back or will.
+        if (latch.sealed) return ArmMode.NONE
+        val mode = armNow(request)
+        // The erase can close the latch between the check and the call, after its last pass over the alarms: look again, and undo what was set.
+        // Either this sees the latch closed and takes the alarm back, or the erase's later pass finds the alarm.
+        if (latch.sealed) {
+            cancel(request)
+            return ArmMode.NONE
+        }
+        return mode
+    }
+
+    private fun armNow(request: AlarmRequest): ArmMode {
         val operation = pendingIntent(request, create = true)!!
         if (canScheduleExact()) {
             try {

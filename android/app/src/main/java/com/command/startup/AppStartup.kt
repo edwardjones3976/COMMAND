@@ -3,6 +3,7 @@ package com.command.startup
 import android.content.Context
 import android.util.Log
 import com.command.alarm.ArmingReconciler
+import com.command.alarm.ErasureLatch
 import com.command.alarm.ReconcileScheduler
 import com.command.alarm.RingNotifications
 import com.command.data.LegacyAlarmCanceller
@@ -28,8 +29,12 @@ class AppStartup @Inject constructor(
     private val importer: LegacyImporter,
     private val legacyAlarms: LegacyAlarmCanceller,
     private val reconciler: ArmingReconciler,
+    private val latch: ErasureLatch,
 ) {
     suspend fun run() {
+        // Everything is being erased (the screen was turned off and on during it, say): nothing is brought back behind the erase, and a
+        // database that is closed or gone is not opened.
+        if (latch.sealed) return
         step("channels") { RingNotifications.ensureChannels(context) }
         step("legacy import") { importer.importIfNeeded() }
         step("legacy alarms") { legacyAlarms.cancelIfNeeded() }

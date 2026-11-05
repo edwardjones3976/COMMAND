@@ -42,6 +42,13 @@ class LegacyAlarmCanceller @Inject constructor(
         return cancelled
     }
 
+    /**
+     * Cancels what the previous version armed, now, whether or not that was done before: for erasing everything, which must leave no alarm of
+     * either version. True when it could look (there is no old database, or one that was read); false when there is one that cannot be
+     * read, so that the alarms of its missions (their request codes were their row ids) could not be found.
+     */
+    suspend fun cancelNow(): Boolean = withContext(Dispatchers.IO) { cancelAll().second }
+
     private fun cancelAll(): Pair<Int, Boolean> {
         var cancelled = 0
         val ids = legacyMissionIds()

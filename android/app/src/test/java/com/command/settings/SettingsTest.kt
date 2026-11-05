@@ -144,6 +144,7 @@ class SettingsScreenTest {
         var history = 0
         var reliability = 0
         var consents = 0
+        var data = 0
         var back = 0
         val pauses = ArrayList<Int>()
         var endPause = 0
@@ -166,6 +167,7 @@ class SettingsScreenTest {
                     onOpenHistory = { taps.history++ },
                     onOpenReliability = { taps.reliability++ },
                     onOpenConsents = { taps.consents++ },
+                    onOpenData = { taps.data++ },
                     version = "4.0",
                     onPause = { taps.pauses += it },
                     onEndPause = { taps.endPause++ },
@@ -203,6 +205,14 @@ class SettingsScreenTest {
         assertEquals(1, taps.history)
         assertEquals(1, taps.reliability)
         assertEquals(1, taps.consents)
+    }
+
+    @Test
+    fun `saving a copy of the data or erasing it is one tap away`() {
+        val taps = show()
+        compose.onNodeWithText("Your data: save a copy or erase everything").assertIsDisplayed()
+        compose.onNodeWithTag(SettingsTags.LINK_DATA).performClick()
+        assertEquals(1, taps.data)
     }
 
     @Test

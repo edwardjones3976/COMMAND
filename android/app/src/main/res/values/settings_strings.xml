@@ -14,6 +14,7 @@
     <string name="settings_link_history">History</string>
     <string name="settings_link_reliability">Reliability</string>
     <string name="settings_link_consents">Permissions and privacy</string>
+    <string name="settings_link_data">Your data: save a copy or erase everything</string>
 
     <string name="settings_about_title">About</string>
     <string name="settings_about_version">COMMAND, version %1$s</string>
