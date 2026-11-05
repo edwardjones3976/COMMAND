@@ -263,14 +263,17 @@ class OccurrenceRepository @Inject constructor(
         val dials = dialsFor(mission.profileId)
         val lock = MissionLock.effectivePolicy(mission.flexibility, mission.lockPolicy, dials.scheduleRigidity)
         val session = Codec.decodeSession(occ.sessionJson)
+        // A test alarm is the one thing a pause lets through: the person asked for it, there and then.
+        val pausedUntil = if (mission.category == MissionRepository.TEST_CATEGORY) null else PauseStore.active(db, now)?.untilUtcMs
         val snapshot = OccurrenceSnapshot(
             state = occ.state,
             dials = dials,
             lockPolicy = lock,
             recoveryOffers = session.recoveryOffers,
             checkInsAsked = session.checkInsAsked,
-            restEndsAtUtc = restEndsAt(now),
+            restEndsAtUtc = restEndsAt(now, pausedUntil),
             zoneId = occ.zoneId,
+            pausedUntilUtc = pausedUntil,
         )
 
         when (val r = OccurrenceStateMachine.transition(snapshot, command, now)) {
@@ -327,8 +330,11 @@ class OccurrenceRepository @Inject constructor(
                     when (effect) {
                         is Effect.ArmChild -> {
                             val child = createInTx(occ.missionId, effect.atUtcMs, occ.zoneId, occ.id, avoidCollision = true).occurrence
-                            val childMode = if (scheduler.canScheduleExact()) ArmMode.EXACT else ArmMode.INEXACT
-                            applyInTx(child.id, OccurrenceCommand.Arm(childMode), EventSource.SYSTEM, ApplyExtras.NONE, pending)
+                            // A pause holds a delayed alarm back like any other that falls inside it; the end of the pause settles it.
+                            if (pausedUntil == null || child.scheduledAtUtc >= pausedUntil) {
+                                val childMode = if (scheduler.canScheduleExact()) ArmMode.EXACT else ArmMode.INEXACT
+                                applyInTx(child.id, OccurrenceCommand.Arm(childMode), EventSource.SYSTEM, ApplyExtras.NONE, pending)
+                            }
                         }
                         else -> pending += Pending(updated, effect, now)
                     }
@@ -440,8 +446,17 @@ class OccurrenceRepository @Inject constructor(
         } ?: Presets.dialsFor(PresetOrigin.STEADY)
     }
 
-    /** When the protected window containing [nowMs] ends, or null if the user is not in one. */
-    private suspend fun restEndsAt(nowMs: Long): Long? {
+    /**
+     * When the protected time containing [nowMs] ends, or null if the person is not in any: the end of the rest window they are in or of a
+     * global pause, whichever is later. A follow-up question is held back until then.
+     */
+    private suspend fun restEndsAt(nowMs: Long, pausedUntil: Long?): Long? {
+        val windowEnd = restWindowEndsAt(nowMs)
+        return if (pausedUntil == null) windowEnd else maxOf(pausedUntil, windowEnd ?: pausedUntil)
+    }
+
+    /** When the rest window (sleep, leisure, driving) containing [nowMs] ends, or null if the person is not in one. */
+    private suspend fun restWindowEndsAt(nowMs: Long): Long? {
         val rows: List<RestWindowRow> = db.restWindows().all()
         if (rows.isEmpty()) return null
         val windows = rows.mapNotNull { row ->

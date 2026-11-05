@@ -46,6 +46,10 @@ object SettingKeys {
     const val NEXT_REQUEST_CODE = "next_request_code"
     const val VOLUME_RESTORE = "volume_restore"
     const val GLOBAL_PAUSE_UNTIL = "global_pause_until"
+
+    /** When the pause in force began; kept with [GLOBAL_PAUSE_UNTIL] so that only what came due inside the pause is blamed on it. */
+    const val GLOBAL_PAUSE_SINCE = "global_pause_since"
+
     const val LEGACY_IMPORT_DONE = "legacy_import_done"
     const val AI_DAILY_BUDGET = "ai_daily_budget"
     const val ALARM_ROUTE_POLICY = "alarm_route_policy"

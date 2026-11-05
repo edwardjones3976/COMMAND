@@ -92,7 +92,8 @@ object OccurrenceStateMachine {
                     applied()
                 } else illegal()
 
-                Fire -> if (from == ARMED) {
+                // A pause in force holds back what is due inside it, even an alarm the platform had already delivered.
+                Fire -> if (from == ARMED && s.pausedUntilUtc == null) {
                     go(FIRING)
                     events += DomainEvent(EventType.ALARM_FIRED)
                     effects += Effect.ArmCycleEnd(DialEffects.alertPlan(s.dials.alertIntensity).totalMs)

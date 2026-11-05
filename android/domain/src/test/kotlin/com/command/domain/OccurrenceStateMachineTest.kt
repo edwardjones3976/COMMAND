@@ -79,7 +79,8 @@ class OccurrenceStateMachineTest {
         asked: Int = 0,
         restEndsAt: Long? = null,
         zoneId: String = "UTC",
-    ) = OccurrenceSnapshot(state, dials, lock, recoveryOffers, asked, restEndsAt, zoneId)
+        pausedUntil: Long? = null,
+    ) = OccurrenceSnapshot(state, dials, lock, recoveryOffers, asked, restEndsAt, zoneId, pausedUntil)
 
     private fun run(s: OccurrenceSnapshot, c: OccurrenceCommand) = OccurrenceStateMachine.transition(s, c, now)
 
@@ -549,5 +550,13 @@ class OccurrenceStateMachineTest {
         val four = snap(RECOVERY_OFFERED, command.copy(recoveryStructure = 4), zoneId = "Not/AZone")
         val r = applied(four, RescheduleRecovery(OccurrenceCommand.TOMORROW_MINUTES))
         assertTrue(Effect.ArmChild(ChildKind.DELAY, now + 24 * 60 * minute) in r.effects)
+    }
+
+    @Test
+    fun `an alarm delivered while a pause is in force is held back and does not ring, and nothing else is held`() {
+        val paused = snap(ARMED, pausedUntil = now + 60 * minute)
+        assertTrue(run(paused, Fire) is TransitionResult.Illegal)
+        assertTrue("without a pause it rings", run(snap(ARMED), Fire) is TransitionResult.Applied)
+        assertTrue("a ring that is going can still be answered", run(snap(FIRING, pausedUntil = now + 60 * minute), SafetySilence) is TransitionResult.Applied)
     }
 }

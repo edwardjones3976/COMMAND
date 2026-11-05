@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.command.alarm.ReliabilityMonitor
 import com.command.data.MissionRepository
 import com.command.data.db.ScheduleRow
+import com.command.domain.time.Clock
 import com.command.domain.reliability.Reliability
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -17,6 +18,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDate
 import javax.inject.Inject
 
 sealed interface ScheduleUiState {
@@ -30,14 +33,19 @@ sealed interface ScheduleUiState {
         val upcoming: List<ScheduleRow>,
         val recent: List<ScheduleRow>,
         val problems: Int,
+        /** When the pause in force ends, or null when COMMAND is not paused. */
+        val pausedUntilUtcMs: Long? = null,
+        /** The clock's day, which the labels ("Today", "Tomorrow") are counted from; part of the state so that they follow it across midnight. */
+        val today: LocalDate = LocalDate.now(),
     ) : ScheduleUiState
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ScheduleViewModel @Inject constructor(
-    missions: MissionRepository,
+    private val missions: MissionRepository,
     private val monitor: ReliabilityMonitor,
+    private val clock: Clock,
 ) : ViewModel() {
 
     private val problems = MutableStateFlow(0)
@@ -50,11 +58,16 @@ class ScheduleViewModel @Inject constructor(
         }
     }
 
+    // The list is read again every minute, which is also when a pause that has run out stops being shown.
     val state: StateFlow<ScheduleUiState> = combine(
         everyMinute.flatMapLatest { missions.observeSchedule() },
         problems,
-    ) { schedule, problemCount ->
-        ScheduleUiState.Ready(schedule.upcoming, schedule.recent, problemCount)
+        missions.observePause(),
+    ) { schedule, problemCount, pause ->
+        ScheduleUiState.Ready(
+            schedule.upcoming, schedule.recent, problemCount, pause?.untilUtcMs?.takeIf { it > clock.nowMs() },
+            Instant.ofEpochMilli(clock.nowMs()).atZone(clock.zone()).toLocalDate(),
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ScheduleUiState.Loading)
 
     /**
@@ -63,6 +76,11 @@ class ScheduleViewModel @Inject constructor(
      */
     fun onResume() {
         viewModelScope.launch { problems.value = Reliability.assess(monitor.refresh()).problems.size }
+    }
+
+    /** Ends the pause now. */
+    fun endPause() {
+        viewModelScope.launch { missions.resume() }
     }
 
     private companion object {

@@ -9,18 +9,22 @@ import androidx.work.testing.WorkManagerTestInitHelper
 import androidx.work.workDataOf
 import com.command.data.MissionDraft
 import com.command.data.MissionRepository
+import com.command.data.ReconcileTrigger
 import com.command.data.SaveResult
 import com.command.data.ScheduleDraft
 import com.command.data.db.CommandDb
 import com.command.domain.dials.Flexibility
 import com.command.domain.model.SettingKeys
 import com.command.domain.occurrence.EventType
+import com.command.domain.occurrence.MissReason
+import com.command.domain.occurrence.OccurrenceState
 import com.command.testing.FakeAlarmScheduler
 import com.command.testing.FakeClock
 import com.command.testing.android.FakeAlarmModule
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -138,5 +142,22 @@ class ReconcileWorkerTest {
         db.openHelper.writableDatabase.execSQL("DROP TABLE missions")
         assertEquals(ListenableWorker.Result.retry(), runBlocking { worker("BOOT", attempt = 0).doWork() })
         assertEquals("asking again leaves the one that is there", 1, backstops().size)
+    }
+
+    @Test
+    fun `the run queued for the end of a pause closes it, records what it held back as paused, and puts the rest back`() {
+        val held = saveStandup() // two hours from now
+        runBlocking { missions.pause(4 * 3_600_000L) }
+        clock.advance(5 * 3_600_000L) // the pause has run out, and the standup was due inside it
+
+        val result = runBlocking { worker(ReconcileTrigger.PAUSE_ENDED.name).doWork() }
+
+        assertEquals(ListenableWorker.Result.success(), result)
+        val o = runBlocking { db.occurrences().forMission(held) }.single()
+        assertEquals(OccurrenceState.MISSED, o.state)
+        assertEquals(MissReason.PAUSED, o.missReason)
+        assertNull(runBlocking { missions.observePause().first() })
+        assertEquals(1, events(EventType.UNPAUSED).size)
+        assertTrue("the run says why it ran", events(EventType.BOOT_RECONCILE).any { it.payloadJson.contains("PAUSE_ENDED") })
     }
 }

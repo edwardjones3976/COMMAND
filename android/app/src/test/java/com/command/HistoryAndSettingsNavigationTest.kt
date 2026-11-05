@@ -119,4 +119,20 @@ class HistoryAndSettingsNavigationTest {
         waitFor(HistoryTags.EMPTY)
         controller.pause().stop().destroy()
     }
+
+    @Test
+    fun `from Settings a pause for an hour is on the schedule too, and ending it there brings the schedule back`() {
+        val controller = open()
+
+        tap(ScheduleTags.LINK_SETTINGS)
+        tap(SettingsTags.PAUSE_1H)
+        waitFor(SettingsTags.PAUSED)
+        assertEquals("the lengths to choose from are gone while it lasts", false, exists(SettingsTags.PAUSE_1H))
+
+        back(controller)
+        waitFor(ScheduleTags.PAUSED_BANNER)
+        tap(ScheduleTags.PAUSED_ACTION)
+        compose.waitUntil(timeoutMillis = 30_000) { !exists(ScheduleTags.PAUSED_BANNER) }
+        controller.pause().stop().destroy()
+    }
 }

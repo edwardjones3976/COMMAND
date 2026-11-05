@@ -4,6 +4,8 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +17,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -30,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -38,7 +42,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.domain.voice.RoutePolicy
+import com.command.ui.pauseTitle
 import com.example.R
+import java.time.LocalDate
+import java.time.ZoneId
 
 object SettingsTags {
     const val ROUTE_SPEAKER = "settings_route_speaker"
@@ -46,6 +53,11 @@ object SettingsTags {
     const val LINK_HISTORY = "settings_link_history"
     const val LINK_RELIABILITY = "settings_link_reliability"
     const val LINK_CONSENTS = "settings_link_consents"
+    const val PAUSE_1H = "settings_pause_1h"
+    const val PAUSE_4H = "settings_pause_4h"
+    const val PAUSE_12H = "settings_pause_12h"
+    const val PAUSED = "settings_paused"
+    const val RESUME = "settings_resume"
     const val ABOUT = "settings_about"
 }
 
@@ -66,11 +78,13 @@ fun SettingsRoute(
         onOpenReliability = onOpenReliability,
         onOpenConsents = onOpenConsents,
         version = com.example.BuildConfig.VERSION_NAME,
+        onPause = viewModel::pauseFor,
+        onEndPause = viewModel::endPause,
     )
 }
 
 /** Stateless, so it can be shown in tests without a view model. */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(
     state: SettingsUiState,
@@ -80,6 +94,10 @@ fun SettingsScreen(
     onOpenReliability: () -> Unit,
     onOpenConsents: () -> Unit,
     version: String,
+    onPause: (hours: Int) -> Unit = {},
+    onEndPause: () -> Unit = {},
+    zone: ZoneId = ZoneId.systemDefault(),
+    today: LocalDate = LocalDate.now(zone),
 ) {
     Scaffold(
         topBar = {
@@ -122,6 +140,7 @@ fun SettingsScreen(
                         )
                     }
                 }
+                item { PauseSection(state.pausedUntilUtcMs, zone, today, onPause, onEndPause) }
                 item {
                     Text(
                         stringResource(R.string.settings_more_title),
@@ -143,6 +162,35 @@ fun SettingsScreen(
         }
     }
 }
+
+/** Starts a pause, or, while one is in force, says until when and ends it. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PauseSection(pausedUntilUtcMs: Long?, zone: ZoneId, today: LocalDate, onPause: (Int) -> Unit, onEndPause: () -> Unit) {
+    Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (pausedUntilUtcMs == null) {
+            Text(stringResource(R.string.settings_pause_title), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+            Text(stringResource(R.string.settings_pause_body), style = MaterialTheme.typography.bodyMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((hours, tag) in PAUSE_CHOICES) {
+                    OutlinedButton(onClick = { onPause(hours) }, modifier = Modifier.heightIn(min = 48.dp).testTag(tag)) {
+                        Text(pluralStringResource(R.plurals.settings_pause_for, hours, hours), style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+        } else {
+            Column(Modifier.testTag(SettingsTags.PAUSED), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(pauseTitle(pausedUntilUtcMs, zone, today), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+                Text(stringResource(R.string.pause_body), style = MaterialTheme.typography.bodyMedium)
+            }
+            Button(onClick = onEndPause, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(SettingsTags.RESUME)) {
+                Text(stringResource(R.string.pause_resume), style = MaterialTheme.typography.labelLarge)
+            }
+        }
+    }
+}
+
+private val PAUSE_CHOICES = listOf(1 to SettingsTags.PAUSE_1H, 4 to SettingsTags.PAUSE_4H, 12 to SettingsTags.PAUSE_12H)
 
 @Composable
 private fun Choice(selected: Boolean, @StringRes title: Int, @StringRes detail: Int, onSelect: () -> Unit, tag: String) {

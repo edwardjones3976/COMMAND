@@ -33,6 +33,22 @@ object ReconcileScheduler {
     }
 
     /**
+     * Queues the run for the moment a pause ends, replacing the one queued for an earlier end. It is not expedited, because expedited
+     * work cannot wait. A late run only closes the pause late: nothing that is due from the end of the pause on was ever held back.
+     */
+    fun enqueuePauseEnd(context: Context, atUtcMs: Long, nowMs: Long): Operation {
+        val request = OneTimeWorkRequestBuilder<ReconcileAlarmsWorker>()
+            .setInitialDelay((atUtcMs - nowMs).coerceAtLeast(0), TimeUnit.MILLISECONDS)
+            .setInputData(workDataOf(ReconcileAlarmsWorker.KEY_TRIGGER to ReconcileTrigger.PAUSE_ENDED.name))
+            .addTag(tagFor(ReconcileTrigger.PAUSE_ENDED))
+            .build()
+        return WorkManager.getInstance(context).enqueueUniqueWork(ReconcileAlarmsWorker.NAME_PAUSE_END, ExistingWorkPolicy.REPLACE, request)
+    }
+
+    /** Takes the queued run for the end of a pause away, because the pause was ended early. */
+    fun cancelPauseEnd(context: Context): Operation = WorkManager.getInstance(context).cancelUniqueWork(ReconcileAlarmsWorker.NAME_PAUSE_END)
+
+    /**
      * The backstop: every six hours, whatever else happens. Calling it again leaves the existing schedule alone. Its first run is
      * one period away, not at once: whoever asks for the backstop (the app opening, a reconcile after a reboot) is reconciling
      * right now anyway, and a periodic request would otherwise run its first period as soon as it is queued.
