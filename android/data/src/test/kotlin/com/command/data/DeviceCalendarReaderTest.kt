@@ -25,6 +25,7 @@ import org.robolectric.annotation.Config
 /** A calendar provider that answers from fixed rows and writes down what it was asked. */
 class FakeCalendarProvider : ContentProvider() {
     var refuse = false
+    var refuseDeletedColumn = false
     var noCursorFor: String? = null
     val asked = ArrayList<Uri>()
     var eventsSelection: String? = null
@@ -34,6 +35,7 @@ class FakeCalendarProvider : ContentProvider() {
 
     override fun query(uri: Uri, projection: Array<out String>?, selection: String?, selectionArgs: Array<out String>?, sortOrder: String?): Cursor? {
         if (refuse) throw SecurityException("no")
+        if (refuseDeletedColumn && uri.path!!.startsWith("/instances") && CalendarContract.Events.DELETED in projection!!) throw IllegalArgumentException("no such column")
         asked += uri
         projections += projection!!
         if (noCursorFor != null && uri.path!!.startsWith(noCursorFor!!)) return null
@@ -41,8 +43,10 @@ class FakeCalendarProvider : ContentProvider() {
         when {
             uri.path!!.startsWith("/calendars") -> c.addRow(arrayOf<Any?>(7L, "me@example.test", "Work"))
             uri.path!!.startsWith("/instances") -> {
-                c.addRow(arrayOf<Any?>(100L, 1000L, 2000L, "Standup", 0, 7L, "UTC", null, null, CalendarContract.Events.STATUS_CONFIRMED, 0))
-                c.addRow(arrayOf<Any?>(101L, 3000L, 4000L, null, 1, 7L, null, 100L, 1000L, CalendarContract.Events.STATUS_CANCELED, 1))
+                val plain = arrayOf<Any?>(100L, 1000L, 2000L, "Standup", 0, 7L, "UTC", null, null, CalendarContract.Events.STATUS_CONFIRMED, 0)
+                val exception = arrayOf<Any?>(101L, 3000L, 4000L, null, 1, 7L, null, 100L, 1000L, CalendarContract.Events.STATUS_CANCELED, 1)
+                c.addRow(plain.copyOf(projection.size))
+                c.addRow(exception.copyOf(projection.size))
             }
             uri.path!!.startsWith("/events") -> {
                 eventsSelection = selection
@@ -116,5 +120,14 @@ class DeviceCalendarReaderTest {
     fun `an event the calendar cancelled counts as gone, because the provider may not expand it at all`() {
         read()
         assertTrue(provider.eventsSelection!!, provider.eventsSelection!!.contains("${CalendarContract.Events.STATUS} != ${CalendarContract.Events.STATUS_CANCELED}"))
+    }
+
+    @Test
+    fun `a provider that refuses the deleted column on instances still gives its instances`() {
+        provider.refuseDeletedColumn = true
+        val ok = read() as CalendarRead.Ok
+        assertEquals(2, ok.instances.size)
+        assertFalse(ok.instances.any { it.deleted })
+        assertTrue(ok.instances[1].cancelled)
     }
 }

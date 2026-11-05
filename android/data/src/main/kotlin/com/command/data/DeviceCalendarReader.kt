@@ -64,7 +64,13 @@ class DeviceCalendarReader(private val context: Context) : CalendarReader {
         ContentUris.appendId(uri, fromMs)
         ContentUris.appendId(uri, toMs)
         val selection = "${CalendarContract.Instances.CALENDAR_ID} IN (${calendarIds.joinToString(",")})"
-        return resolver.query(uri.build(), INSTANCE_PROJECTION, selection, null, null)?.use { c ->
+        // The column is not in the documented Instances contract. Without it a deleted event is still found: readAlive asks about every linked one.
+        val cursor = try {
+            resolver.query(uri.build(), INSTANCE_PROJECTION, selection, null, null)
+        } catch (e: IllegalArgumentException) {
+            resolver.query(uri.build(), INSTANCE_PROJECTION.copyOf(INSTANCE_PROJECTION.size - 1).requireNoNulls(), selection, null, null)
+        }
+        return cursor?.use { c ->
             buildList {
                 while (c.moveToNext()) {
                     add(
@@ -79,7 +85,7 @@ class DeviceCalendarReader(private val context: Context) : CalendarReader {
                             originalId = c.longOrNull(7),
                             originalInstanceMs = c.longOrNull(8),
                             cancelled = !c.isNull(9) && c.getInt(9) == CalendarContract.Events.STATUS_CANCELED,
-                            deleted = c.getInt(10) != 0,
+                            deleted = c.columnCount > 10 && c.getInt(10) != 0,
                         ),
                     )
                 }

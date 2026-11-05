@@ -1,5 +1,6 @@
 package com.command.data
 
+import androidx.room.withTransaction
 import com.command.data.db.CalendarLinkRow
 import com.command.data.db.CalendarSourceRow
 import com.command.data.db.CommandDb
@@ -45,7 +46,7 @@ enum class CalendarSyncOutcome {
 
 /**
  * Brings the imported occurrences in line with the phone's calendars. The whole plan commits in one transaction, and its alarms are only
- * touched afterwards. Arming, and holding back during a pause, are left to [MissionRepository.reconcile], which does that for every
+ * touched afterwards. Arming, moving an armed alarm, and holding back during a pause, are left to [MissionRepository.reconcile], which does that for every
  * occurrence there is. Nothing is ever invented: an empty reader gives no rows.
  */
 @Singleton
@@ -64,10 +65,13 @@ class CalendarSync @Inject constructor(
     fun hasPermission(): Boolean = reader.hasPermission()
 
     /** Lists the phone's calendars for the person to choose from. A new one starts unselected. */
-    suspend fun refreshSources() {
-        if (!consents.isGranted(ConsentKey.CALENDAR_READ)) return
-        val found = reader.calendars() ?: return
-        db.calendarDao().let { dao ->
+    suspend fun refreshSources() = gate.withLock {
+        if (!consents.isGranted(ConsentKey.CALENDAR_READ)) return@withLock
+        val found = reader.calendars() ?: return@withLock
+        db.withTransaction {
+            // Withdrawn while the list was read: the cascade has run, and nothing is stored behind it.
+            if (!consents.isGranted(ConsentKey.CALENDAR_READ)) return@withTransaction
+            val dao = db.calendarDao()
             val known = dao.sources().associateBy { it.calendarId }
             for (c in found) {
                 val old = known[c.id]
@@ -79,11 +83,18 @@ class CalendarSync @Inject constructor(
         }
     }
 
-    suspend fun setSelected(calendarId: Long, selected: Boolean) {
+    /** The person agreed on the Calendars screen: their calendars can be listed as soon as the consent is on record. */
+    suspend fun allow() {
+        consents.grant(ConsentKey.CALENDAR_READ)
+        refreshSources()
+    }
+
+    /** Waits for a sync in progress, which must reconcile against the same selection that it read. */
+    suspend fun setSelected(calendarId: Long, selected: Boolean) = gate.withLock {
         db.calendarDao().setSelected(calendarId, selected)
     }
 
-    suspend fun setDefaults(calendarId: Long, flexibility: Flexibility, profileId: String?) {
+    suspend fun setDefaults(calendarId: Long, flexibility: Flexibility, profileId: String?) = gate.withLock {
         db.calendarDao().setDefaults(calendarId, flexibility, profileId)
     }
 
@@ -165,16 +176,6 @@ class CalendarSync @Inject constructor(
                 .filterKeys { it in wanted }
                 .forEach { (key, group) -> upsertMission(key.first, key.second, group, sources.getValue(key.first)) }
 
-            for (i in plan.creates) {
-                val mission = db.missions().get(missionIdOf(i.calendarId, i.originalId ?: i.eventId))
-                // The person deleted this event's mission: it stays deleted.
-                if (mission == null || mission.deletedAt != null) continue
-                freeSlot(mission.id, i.beginMs)
-                val created = tx.create(mission.id, i.beginMs, i.eventTz ?: clock.zone().id)
-                // The slot is taken by another instance of the same event, which is about to ring anyway: never a second alarm.
-                if (created.isNew) dao.addLink(rowOf(i, created.occurrence.id, now))
-            }
-
             // First, because each can free a slot that a move below needs. The link goes with it: the calendar took this away, and if the
             // calendar brings it back (a calendar selected again, an instance the provider lost for a while) it must ring again.
             for (skip in plan.skips) {
@@ -207,11 +208,22 @@ class CalendarSync @Inject constructor(
                 pending = blocked
             }
 
+            // Last: a new instance may want a slot that a skip or a move above has just left.
+            for (i in plan.creates) {
+                val mission = db.missions().get(missionIdOf(i.calendarId, i.originalId ?: i.eventId))
+                // The person deleted this event's mission: it stays deleted.
+                if (mission == null || mission.deletedAt != null) continue
+                freeSlot(mission.id, i.beginMs)
+                val created = tx.create(mission.id, i.beginMs, i.eventTz ?: clock.zone().id)
+                // The slot is taken by another instance of the same event, which is about to ring anyway: never a second alarm.
+                if (created.isNew) dao.addLink(rowOf(i, created.occurrence.id, now))
+            }
+
             for (update in plan.linkUpdates) {
                 val old = rows.getValue(update.link.occurrenceId)
                 dao.updateLink(
                     old.copy(
-                        eventId = update.link.eventId, eventTz = update.link.eventTz, misses = update.link.misses,
+                        eventId = update.link.eventId, originalId = update.link.originalId, originalInstanceMs = update.link.originalInstanceMs, eventTz = update.link.eventTz, misses = update.link.misses,
                         lastSeenAt = if (update.seen) now else old.lastSeenAt,
                     ),
                 )

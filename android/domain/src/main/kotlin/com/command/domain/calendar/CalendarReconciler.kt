@@ -82,12 +82,13 @@ object CalendarReconciler {
                 // itself took away has no link any more (CalendarSync drops it), so that it can come back if the calendar brings it back.
                 !link.unfired -> Unit
                 link.calendarId !in calendars -> skips += CalendarPlan.Skip(link.occurrenceId, SkipReason.CALENDAR_REMOVED)
-                (link.originalId ?: link.eventId) in goneEventIds || link.eventId in goneEventIds || instance?.deleted == true ->
+                // An exception's own event can go because it was put back into its series: then the series' instance has been found.
+                (link.originalId ?: link.eventId) in goneEventIds || (instance == null && link.eventId in goneEventIds) || instance?.deleted == true ->
                     skips += CalendarPlan.Skip(link.occurrenceId, SkipReason.CALENDAR_REMOVED)
                 instance?.cancelled == true -> skips += CalendarPlan.Skip(link.occurrenceId, SkipReason.CALENDAR_CANCELLED)
                 instance == null -> if (link.instanceBeginMs in windowStart until windowEnd) unmatched += link
                 instance.beginMs != link.instanceBeginMs -> move(link, instance)
-                else -> updates += CalendarPlan.LinkUpdate(link.copy(eventId = instance.eventId, eventTz = instance.eventTz, misses = 0), seen = true)
+                else -> updates += CalendarPlan.LinkUpdate(link.copy(eventId = instance.eventId, originalId = instance.originalId, originalInstanceMs = instance.originalInstanceMs, eventTz = instance.eventTz, misses = 0), seen = true)
             }
         }
 

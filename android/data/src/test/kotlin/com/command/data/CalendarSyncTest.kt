@@ -13,6 +13,7 @@ import com.command.domain.occurrence.EventType
 import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.SkipReason
 import com.command.testing.FakeCalendarReader
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -353,5 +354,65 @@ class CalendarSyncTest {
         reads()
         sync.refreshSources()
         assertTrue(f.db.calendarDao().sources().isEmpty())
+    }
+
+    @Test
+    fun `an exception at the same time survives further syncs and reaches the stored link`() = run {
+        switchOn()
+        reads(instance())
+        sync.run()
+        reads(instance(event = 555, original = 100, originalAt = f.t0 + HOUR))
+        repeat(3) { sync.run() }
+        assertOneArmedAt(f.t0 + HOUR)
+        assertEquals(100L, f.db.calendarDao().links().single().originalId)
+    }
+
+    @Test
+    fun `a new instance on the slot another one is leaving gets its own alarm`() = run {
+        switchOn()
+        val ten = f.t0 + HOUR
+        val eleven = f.t0 + 2 * HOUR
+        reads(instance(begin = ten))
+        sync.run()
+        // The one at ten moves to eleven; a new instance of the same event appears, with its own identity, at ten.
+        reads(instance(begin = eleven, event = 555, original = 100, originalAt = ten), instance(begin = ten, event = 556, original = 100, originalAt = f.t0 + 5 * HOUR))
+        sync.run()
+        assertEquals(setOf(ten, eleven), f.scheduler.armed.values.map { it.atUtcMs }.toSet())
+        assertEquals(2, f.db.calendarDao().linkCount())
+    }
+
+    @Test
+    fun `a choice made during a read waits until the sync that read is over`() = run {
+        switchOn()
+        reads(instance())
+        var selectedDuringRead = false
+        var change: kotlinx.coroutines.Job? = null
+        reader.duringRead = {
+            change = kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Default) { sync.setSelected(7, false) }
+            kotlinx.coroutines.delay(300)
+            selectedDuringRead = f.db.calendarDao().anySelected()
+            reader.duringRead = {}
+        }
+        sync.run()
+        change!!.join()
+        assertTrue(selectedDuringRead)
+        assertFalse(f.db.calendarDao().anySelected())
+    }
+
+    @Test
+    fun `consent withdrawn while the calendar list is read stores no calendar`() = run {
+        consents.grant(ConsentKey.CALENDAR_READ)
+        reads()
+        reader.duringRead = { consents.revoke(ConsentKey.CALENDAR_READ) }
+        sync.refreshSources()
+        assertTrue(f.db.calendarDao().sources().isEmpty())
+    }
+
+    @Test
+    fun `allowing lists the calendars once the consent is written`() = run {
+        reads()
+        sync.allow()
+        assertTrue(consents.isGranted(ConsentKey.CALENDAR_READ))
+        assertEquals(listOf("Work"), f.db.calendarDao().sources().map { it.displayName })
     }
 }

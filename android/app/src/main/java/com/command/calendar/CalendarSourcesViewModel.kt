@@ -51,7 +51,7 @@ class CalendarSourcesViewModel @Inject constructor(
 
     /** The person agreed on this screen. Android's own question follows, from the screen. */
     fun consent() {
-        viewModelScope.launch { consents.grant(ConsentKey.CALENDAR_READ) }
+        viewModelScope.launch { sync.allow() }
     }
 
     /** Android answered, or the screen came back: the permission can change in Android's settings at any time. */

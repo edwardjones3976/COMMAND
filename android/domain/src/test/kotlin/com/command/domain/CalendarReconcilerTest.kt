@@ -167,4 +167,28 @@ class CalendarReconcilerTest {
         assertTrue(p.creates.isEmpty())
         assertEquals(listOf("b"), p.linkUpdates.map { it.link.occurrenceId })
     }
+
+    @Test
+    fun `an instance that becomes an exception at the same time keeps its identity on the link`() {
+        val same = instance(event = 555, original = 100, originalAt = at)
+        val link = plan(listOf(link()), listOf(same)).linkUpdates.single().link
+        assertEquals(100L, link.originalId)
+        assertEquals(at, link.originalInstanceMs)
+        val next = plan(listOf(link), listOf(same))
+        assertEquals(0, next.linkUpdates.single().link.misses)
+        assertTrue(next.creates.isEmpty() && next.skips.isEmpty())
+    }
+
+    @Test
+    fun `an exception put back into its series is kept, though its own event is gone`() {
+        val p = plan(listOf(link(event = 555, original = 100, originalAt = at)), listOf(instance()), gone = setOf(555))
+        assertTrue(p.skips.isEmpty())
+        assertEquals(100L, p.linkUpdates.single().link.eventId)
+    }
+
+    @Test
+    fun `an exception whose own event is gone and that nothing replaces is removed`() {
+        val p = plan(listOf(link(event = 555, original = 100, originalAt = at)), emptyList(), gone = setOf(555))
+        assertEquals(listOf(CalendarPlan.Skip("o", SkipReason.CALENDAR_REMOVED)), p.skips)
+    }
 }

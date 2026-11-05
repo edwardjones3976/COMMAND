@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import com.command.data.db.CalendarSourceRow
@@ -74,5 +75,11 @@ class CalendarSourcesScreenTest {
     fun `no calendars on the phone is said, nothing is made up`() {
         show(CalendarSourcesUiState.Ready(true, true, emptyList(), emptyList()))
         compose.onNodeWithTag(CalendarTags.EMPTY).assertIsDisplayed()
+    }
+
+    @Test
+    fun `the switch says which calendar it controls`() {
+        show(CalendarSourcesUiState.Ready(true, true, listOf(source()), emptyList()))
+        compose.onNodeWithContentDescription("Work, me@example.test").assertIsOff()
     }
 }

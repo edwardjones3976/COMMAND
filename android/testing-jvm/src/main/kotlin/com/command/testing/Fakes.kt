@@ -101,12 +101,19 @@ class FakeCalendarReader : CalendarReader {
     var result: CalendarRead = CalendarRead.Ok(emptyList(), emptyList(), emptySet())
     var reads = 0
 
+    /** Runs in the middle of a read, for tests of what may happen meanwhile. */
+    var duringRead: suspend () -> Unit = {}
+
     override fun hasPermission(): Boolean = permission
 
-    override suspend fun calendars(): List<DeviceCalendar>? = (result as? CalendarRead.Ok)?.calendars
+    override suspend fun calendars(): List<DeviceCalendar>? {
+        duringRead()
+        return (result as? CalendarRead.Ok)?.calendars
+    }
 
     override suspend fun read(fromMs: Long, toMs: Long, calendarIds: Set<Long>, askAbout: Set<Long>): CalendarRead {
         reads++
+        duringRead()
         return result
     }
 }

@@ -143,12 +143,12 @@ class OccurrenceRepository @Inject constructor(
         suspend fun create(missionId: String, scheduledAtUtc: Long, zoneId: String): Created =
             repo.createInTx(missionId, scheduledAtUtc, zoneId, null, avoidCollision = false)
 
-        /** [OccurrenceRepository.reschedule] inside this transaction: an armed alarm is replaced only after it has committed. */
-        suspend fun reschedule(occurrenceId: String, newAtUtc: Long, zoneId: String): Boolean {
-            val row = repo.rescheduleInTx(occurrenceId, newAtUtc, zoneId, EventSource.WORKER) ?: return false
-            if (row.state == OccurrenceState.ARMED) pending += Pending(row, Effect.ArmAlarm(row.armMode), repo.clock.nowMs())
-            return true
-        }
+        /**
+         * The row only, inside this transaction. The caller puts an armed alarm back afterwards with [OccurrenceRepository.rearm], which looks at
+         * the row as it then is: an effect queued here could re-arm something answered in between.
+         */
+        suspend fun reschedule(occurrenceId: String, newAtUtc: Long, zoneId: String): Boolean =
+            repo.rescheduleInTx(occurrenceId, newAtUtc, zoneId, EventSource.WORKER) != null
     }
 
     /**

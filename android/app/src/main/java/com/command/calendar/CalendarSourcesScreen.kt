@@ -36,6 +36,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -131,6 +133,7 @@ private fun SourceCard(
     onDefaults: (CalendarSourceRow, Flexibility, String?) -> Unit,
 ) {
     val id = source.calendarId
+    val name = stringResource(R.string.calendars_switch_description, source.displayName, source.account)
     Card(Modifier.fillMaxWidth().testTag(CalendarTags.source(id))) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -138,7 +141,7 @@ private fun SourceCard(
                     Text(source.displayName, style = MaterialTheme.typography.titleMedium)
                     Text(source.account, style = MaterialTheme.typography.bodyMedium)
                 }
-                Switch(checked = source.selected, onCheckedChange = { onSelect(id, it) }, modifier = Modifier.testTag(CalendarTags.select(id)))
+                Switch(checked = source.selected, onCheckedChange = { onSelect(id, it) }, modifier = Modifier.testTag(CalendarTags.select(id)).semantics { contentDescription = name })
             }
             if (source.selected) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

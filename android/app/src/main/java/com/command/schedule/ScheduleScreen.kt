@@ -231,7 +231,9 @@ private fun AttentionBanner(problems: Int, onAction: () -> Unit) {
 private fun RowCard(row: ScheduleRow, zone: ZoneId, today: LocalDate, pausedUntilUtcMs: Long?, onOpen: (String) -> Unit, onOpenOccurrence: (String) -> Unit, conflicted: Boolean = false) {
     val whenText = whenLabel(row.scheduledAtUtc, zone, today)
     val state = stateLabel(row, pausedUntilUtcMs)
-    val description = stringResource(R.string.schedule_row_description, row.title, whenText, state)
+    val described = stringResource(R.string.schedule_row_description, row.title, whenText, state)
+    val warning = stringResource(R.string.schedule_conflict)
+    val description = if (conflicted) "$described, $warning" else described
     Card(
         // An occurrence that is waiting for an answer opens its questions; everything else opens the mission.
         onClick = { if (row.state.isFollowUp()) onOpenOccurrence(row.occurrenceId) else onOpen(row.missionId) },
