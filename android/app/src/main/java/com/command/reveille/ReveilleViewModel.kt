@@ -38,7 +38,7 @@ sealed interface ReveilleUiState {
     data class Firing(val title: String, val holdSeconds: Int, val earlyRelease: Boolean, val offerAccessibleConfirm: Boolean) : ReveilleUiState
 
     /** Silenced or missed: nothing was started. The user can pick it up again or let it go. */
-    data class Silenced(val title: String) : ReveilleUiState
+    data class Silenced(val title: String, val missed: Boolean = false) : ReveilleUiState
 
     /** Acknowledged: the one concrete first step, and the one-tap answers. */
     data class Direction(val title: String, val firstAction: String, val starterMinutes: Int) : ReveilleUiState
@@ -104,7 +104,8 @@ class ReveilleViewModel @Inject constructor(
                 val hold = chain.steps.firstOrNull { it.mode == HandshakeMode.HOLD }?.holdSeconds ?: FALLBACK_HOLD_SECONDS
                 ReveilleUiState.Firing(brief.title, hold, earlyRelease, accessibilityTouchExploration)
             }
-            OccurrenceState.SAFETY_SILENCED, OccurrenceState.MISSED -> ReveilleUiState.Silenced(brief.title)
+            OccurrenceState.SAFETY_SILENCED -> ReveilleUiState.Silenced(brief.title)
+            OccurrenceState.MISSED -> ReveilleUiState.Silenced(brief.title, missed = true)
             OccurrenceState.ACKNOWLEDGED, OccurrenceState.GUIDED_START,
             OccurrenceState.UNCONFIRMED, OccurrenceState.BLOCKED, OccurrenceState.RECOVERY_OFFERED ->
                 ReveilleUiState.Direction(brief.title, brief.firstAction, brief.starterMinutes)

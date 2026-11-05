@@ -188,6 +188,19 @@ class ReveilleViewModelTest {
     }
 
     @Test
+    fun `a ring that ran out is shown as missed, not as silenced, and can be resumed`() {
+        val o = ringing()
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+        runBlocking { repo.apply(o.id, OccurrenceCommand.Miss(com.command.domain.occurrence.MissReason.TIMEOUT), EventSource.SERVICE) }
+        awaitUi("missed") { it is ReveilleUiState.Silenced }
+        assertTrue((vm.state.value as ReveilleUiState.Silenced).missed)
+        vm.resume()
+        awaitUi("direction") { it is ReveilleUiState.Direction }
+        assertEquals(OccurrenceState.GUIDED_START, stateOf(o))
+    }
+
+    @Test
     fun `saying you are starting is the only way to a started status`() {
         val o = ringing()
         vm.show(o.id)

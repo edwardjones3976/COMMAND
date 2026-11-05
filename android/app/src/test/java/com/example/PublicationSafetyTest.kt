@@ -78,8 +78,8 @@ class PublicationSafetyTest {
         scan(
             "licence claim",
             Regex("""(?i)(human stem|certified human|verified human consent|rights cleared|public domain field)"""),
-            // Removed with the voice-pack rebuild (M4b/M9); until then the legacy seed data still carries them.
-            exempt = LEGACY_VOICE_CLAIM_FILES,
+            // The design document quotes the claims it removes.
+            exempt = DOCS_THAT_QUOTE_CLAIMS,
         )
     }
 
@@ -89,12 +89,32 @@ class PublicationSafetyTest {
         val hits = main.filter { path ->
             textOf(path)?.let { "Simulate Missed Day" in it } == true
         }
-        // Tracked as issues #9/#15; removed by the M4b cut-over. This list shrinks to empty, never grows.
-        assertEquals(LEGACY_MAIN_FILES_WITH_SIMULATE_BUTTON, hits.toSet())
-        assertTrue(
-            "fallbackToDestructiveMigration must go with the M3 database: $LEGACY_DESTRUCTIVE",
-            main.filter { p -> textOf(p)?.contains("fallbackToDestructiveMigration") == true }
-                .toSet() == LEGACY_DESTRUCTIVE,
+        assertTrue("a simulate-missed-day button is back in: $hits", hits.isEmpty())
+        val destructive = main.filter { p -> textOf(p)?.contains("fallbackToDestructiveMigration") == true }
+        assertTrue("a destructive migration is back in: $destructive", destructive.isEmpty())
+    }
+
+    @Test
+    fun `only the launcher activity is exported from a release build, and only debug builds export the ring starter`() {
+        val component = Regex("<(activity|activity-alias|service|receiver|provider)\\b[^>]*>")
+        val exportedTrue = Regex("android:exported\\s*=\\s*\"true\"")
+        val nameOf = Regex("android:name\\s*=\\s*\"([^\"]+)\"")
+        val found = HashMap<String, Set<String>>()
+        for (path in tracked.filter { it.endsWith("AndroidManifest.xml") }) {
+            val names = component.findAll(File(root, path).readText())
+                .map { it.value }
+                .filter { exportedTrue.containsMatchIn(it) }
+                .map { nameOf.find(it)?.groupValues?.get(1) ?: "?" }
+                .toSet()
+            if (names.isNotEmpty()) found[path] = names
+        }
+        assertEquals(
+            mapOf(
+                "android/app/src/main/AndroidManifest.xml" to setOf("com.command.MainActivity"),
+                "android/app/src/debug/AndroidManifest.xml" to setOf(DEBUG_RING_STARTER),
+                "android/app/src/noexact/AndroidManifest.xml" to setOf(DEBUG_RING_STARTER),
+            ),
+            found,
         )
     }
 
@@ -132,23 +152,11 @@ class PublicationSafetyTest {
 
     private companion object {
         const val SELF = "android/app/src/test/java/com/example/PublicationSafetyTest.kt"
-        val LEGACY_VOICE_CLAIM_FILES = setOf(
-            // The design document quotes the claims it removes.
-            "docs/RECONSTRUCTION-DESIGN.html",
-            "android/app/src/main/java/com/example/data/CommandRepository.kt",
-            "android/app/src/main/java/com/example/data/CommandModels.kt",
-            "android/app/src/main/java/com/example/ui/screens/VoiceStudioScreen.kt",
-            "android/app/src/test/java/com/example/ExampleRobolectricTest.kt",
-        )
-        // Provenance: AI Studio-generated placeholder art from the original import. All five go with the legacy UI in M4b.
-        val IMAGE_ALLOWLIST = setOf(
-            "android/app/src/main/res/drawable/drill_sergeant_avatar.jpg",
-            "android/app/src/main/res/drawable/img_life_coach_avatar.png",
-            "android/app/src/main/res/drawable/img_life_coach_frame1.png",
-            "android/app/src/main/res/drawable/img_life_coach_frame2.png",
-            "android/app/src/main/res/drawable/img_life_coach_frame3.png",
-        )
-        val LEGACY_MAIN_FILES_WITH_SIMULATE_BUTTON = setOf("android/app/src/main/java/com/example/ui/screens/StreakVaultScreen.kt")
-        val LEGACY_DESTRUCTIVE = setOf("android/app/src/main/java/com/example/data/CommandDatabase.kt")
+        val DOCS_THAT_QUOTE_CLAIMS = setOf("docs/RECONSTRUCTION-DESIGN.html")
+
+        // A raster image needs a provenance note here. The placeholder art of the original import went with the legacy UI.
+        val IMAGE_ALLOWLIST = emptySet<String>()
+
+        const val DEBUG_RING_STARTER = "com.command.debug.DebugRingReceiver"
     }
 }

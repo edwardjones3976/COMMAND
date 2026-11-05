@@ -2,11 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Read-only calendar access for expanding recurring Google Calendar events into missions -->
-    <uses-permission android:name="android.permission.READ_CALENDAR" />
-    <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!--
+        Permissions, the alarm service and the alarm receivers are declared by the :alarm module and merged in. Calendar
+        access returns with the calendar import, which is when it will ask for it.
+    -->
 
     <queries>
         <intent>
@@ -24,6 +23,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
+
         <!-- The lock-screen face of a ring. Not exported: only this app's own PendingIntents (notification, full-screen intent) reach it. -->
         <activity
             android:name="com.command.ReveilleActivity"
@@ -35,11 +35,10 @@
             android:turnScreenOn="true"
             android:theme="@style/Theme.MyApplication" />
 
+        <!-- The app proper. It never shows over the lock screen. -->
         <activity
-            android:name=".MainActivity"
+            android:name="com.command.MainActivity"
             android:exported="true"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.MyApplication">
             <intent-filter>
@@ -48,24 +47,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <receiver
-            android:name=".service.ReveilleAlarmReceiver"
-            android:exported="false" />
-
-        <!-- Background service for fetching Google Calendar events and mapping to task queue -->
-        <service
-            android:name=".service.CalendarBackgroundSyncService"
-            android:exported="false" />
-
-        <!-- Periodic AlarmManager wakeup receiver for background calendar sync -->
-        <receiver
-            android:name=".service.CalendarSyncAlarmReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.example.action.CALENDAR_PERIODIC_WAKEUP" />
-            </intent-filter>
-        </receiver>
     </application>
 
 </manifest>

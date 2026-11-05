@@ -10,6 +10,8 @@
     <string name="reveille_silence_description">Silence the alarm now. This does not count as starting.</string>
     <string name="reveille_silenced_title">Alarm silenced</string>
     <string name="reveille_silenced_body">Silenced is not started. Pick it up when you are ready.</string>
+    <string name="reveille_missed_title">Alarm missed</string>
+    <string name="reveille_missed_body">Nothing was started. Pick it up when you are ready.</string>
     <string name="reveille_resume">Resume</string>
     <string name="reveille_direction_label">Your first step</string>
     <string name="reveille_starting">I am starting</string>

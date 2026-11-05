@@ -345,6 +345,51 @@ class OccurrenceRepository @Inject constructor(
         return true
     }
 
+    /**
+     * Removes occurrences that have not started to ring (SCHEDULED or ARMED) and cancels their alarms, one audit event
+     * each. They are the plan, not history: an edit or a deletion regenerates them from the mission, and removing the
+     * row (rather than keeping a tombstone) lets an edit be undone without a stale row holding the slot. Anything that
+     * has rung is left alone. Returns how many were removed.
+     */
+    suspend fun discardUnfired(occurrenceIds: Collection<String>, source: EventSource): Int {
+        val removed = removeUnfiredRows(occurrenceIds, source)
+        cancelAlarms(removed)
+        return removed.size
+    }
+
+    /**
+     * The database half of [discardUnfired]. It can run inside a caller's transaction, so that a mission change and the
+     * removal of its plan commit together or not at all; the caller then cancels the platform alarms with [cancelAlarms]
+     * once that transaction has committed. Returns the rows it removed.
+     */
+    suspend fun removeUnfiredRows(occurrenceIds: Collection<String>, source: EventSource): List<OccurrenceRow> {
+        val removed = ArrayList<OccurrenceRow>()
+        db.withTransaction {
+            for (id in occurrenceIds) {
+                val occ = db.occurrences().get(id) ?: continue
+                if (occ.state != OccurrenceState.SCHEDULED && occ.state != OccurrenceState.ARMED) continue
+                db.occurrences().delete(id)
+                log(EventType.OCCURRENCE_DISCARDED, occ, source, EventPayload.of("state" to occ.state))
+                removed += occ
+            }
+        }
+        return removed
+    }
+
+    /** Takes the platform alarms of removed (never rung) occurrences down. Idempotent. */
+    fun cancelAlarms(rows: List<OccurrenceRow>) {
+        for (occ in rows) scheduler.cancel(AlarmRequest(occ.id, occ.requestCode, AlarmKind.FIRE, occ.scheduledAtUtc))
+    }
+
+    /** Puts the platform alarm of an armed occurrence back (idempotent) and records the precision actually obtained. */
+    suspend fun rearm(occurrenceId: String): ArmMode? {
+        val occ = db.occurrences().get(occurrenceId) ?: return null
+        if (occ.state != OccurrenceState.ARMED) return null
+        val mode = scheduler.arm(AlarmRequest(occ.id, occ.requestCode, AlarmKind.FIRE, occ.scheduledAtUtc))
+        if (mode != occ.armMode) db.occurrences().setArmMode(occ.id, mode)
+        return mode
+    }
+
     // --- helpers -----------------------------------------------------------------------------------------------
 
     private suspend fun dialsFor(profileId: String?): Dials {

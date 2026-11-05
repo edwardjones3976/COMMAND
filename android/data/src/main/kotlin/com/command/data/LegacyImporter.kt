@@ -23,9 +23,12 @@ import com.command.domain.occurrence.EventType
 import com.command.domain.time.Clock
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.cancellation.CancellationException
 import java.util.UUID
 import javax.inject.Inject
+import javax.inject.Singleton
 
 /** What an import did, for the audit event and the tests. */
 data class LegacyImportReport(
@@ -49,12 +52,18 @@ data class LegacyImportReport(
  * Only the data eraser deletes them. Past-dated missions are imported switched off with no occurrence, so the first
  * reconcile cannot manufacture a pile of missed alarms.
  */
+@Singleton
 class LegacyImporter @Inject constructor(
     @ApplicationContext private val context: Context,
     private val db: CommandDb,
     private val clock: Clock,
 ) {
-    suspend fun importIfNeeded(): LegacyImportReport? {
+    /** The check and the import are one step: two starts that overlap import once. */
+    private val once = Mutex()
+
+    suspend fun importIfNeeded(): LegacyImportReport? = once.withLock { importUnlocked() }
+
+    private suspend fun importUnlocked(): LegacyImportReport? {
         val done = db.settings().get(SettingKeys.LEGACY_IMPORT_DONE)
         if (done == "true" || done == "failed") return null
         val file: File = context.getDatabasePath(LEGACY_DB_NAME)
@@ -130,6 +139,8 @@ class LegacyImporter @Inject constructor(
             }
 
             db.withTransaction {
+                // The marker commits with the rows: a start that is cut off between the two cannot import everything again.
+                db.settings().put(SettingRow(SettingKeys.LEGACY_IMPORT_DONE, "true"))
                 for (row in rows) db.missions().insert(row)
                 val zone = clock.zone().id
                 for ((missionId, at) in occurrenceSlots) {

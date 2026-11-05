@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
+import com.command.domain.dials.Flexibility
 import com.command.domain.model.CheckInAnswer
 import com.command.domain.model.ConsentKey
 import com.command.domain.occurrence.ArmMode
@@ -37,7 +38,30 @@ interface MissionDao {
 
     @Query("SELECT COUNT(*) FROM missions")
     suspend fun count(): Int
+
+    /** Hides a mission from every list and stops it generating occurrences. Its history stays. */
+    @Query("UPDATE missions SET deleted_at = :now, enabled = 0, sync_rev = sync_rev + 1, sync_dirty = 1 WHERE id = :id")
+    suspend fun softDelete(id: String, now: Long)
 }
+
+private const val SCHEDULE_SELECT = """SELECT o.id AS occurrenceId, o.mission_id AS missionId, m.title AS title, m.flexibility AS flexibility,
+           o.scheduled_at_utc AS scheduledAtUtc, o.zone_id AS zoneId, o.state AS state, o.arm_mode AS armMode,
+           o.skip_reason AS skipReason, o.miss_reason AS missReason
+           FROM occurrences o JOIN missions m ON m.id = o.mission_id"""
+
+/** One line of the schedule: an occurrence with the facts about its mission that a list needs. */
+data class ScheduleRow(
+    val occurrenceId: String,
+    val missionId: String,
+    val title: String,
+    val flexibility: Flexibility,
+    val scheduledAtUtc: Long,
+    val zoneId: String,
+    val state: OccurrenceState,
+    val armMode: ArmMode,
+    val skipReason: SkipReason?,
+    val missReason: MissReason?,
+)
 
 @Dao
 interface OccurrenceDao {
@@ -94,11 +118,29 @@ interface OccurrenceDao {
     @Query("UPDATE occurrences SET arm_mode = :armMode WHERE id = :id")
     suspend fun setArmMode(id: String, armMode: ArmMode)
 
+    /** Only for occurrences that never fired; see OccurrenceRepository.discardUnfired. */
+    @Query("DELETE FROM occurrences WHERE id = :id")
+    suspend fun delete(id: String)
+
     @Query("UPDATE occurrences SET scheduled_at_utc = :scheduledAtUtc, zone_id = :zoneId WHERE id = :id")
     suspend fun reschedule(id: String, scheduledAtUtc: Long, zoneId: String)
 
     @Query("SELECT COUNT(*) FROM occurrences")
     suspend fun count(): Int
+
+    /** What is still to come (or ringing), soonest first, of missions that still exist. */
+    @Query(
+        SCHEDULE_SELECT + """ WHERE m.deleted_at IS NULL AND o.state IN ('SCHEDULED', 'ARMED', 'FIRING')
+           ORDER BY o.scheduled_at_utc LIMIT :limit""",
+    )
+    fun observeUpcoming(limit: Int): Flow<List<ScheduleRow>>
+
+    /** What has happened since [fromUtc] (so the recent past shows what was just missed), newest first. */
+    @Query(
+        SCHEDULE_SELECT + """ WHERE m.deleted_at IS NULL AND o.state NOT IN ('SCHEDULED', 'ARMED', 'FIRING') AND o.scheduled_at_utc >= :fromUtc
+           ORDER BY o.scheduled_at_utc DESC LIMIT :limit""",
+    )
+    fun observeRecent(fromUtc: Long, limit: Int): Flow<List<ScheduleRow>>
 }
 
 @Dao

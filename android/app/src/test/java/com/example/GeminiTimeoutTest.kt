@@ -2,7 +2,7 @@ package com.example
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import com.example.data.CommandRepository
+import com.example.data.LegacyVoicePacks
 import com.example.service.GeminiAudio
 import com.example.service.GeminiSpeechSource
 import com.example.service.VoiceDirectorEngine
@@ -34,7 +34,7 @@ import java.nio.ByteOrder
 class GeminiTimeoutTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
-    private val packs = CommandRepository.defaultVoicePacks().associateBy { it.id }
+    private val packs = LegacyVoicePacks.defaultVoicePacks().associateBy { it.id }
     private val stone = packs.getValue("pack_major_stone")
     private val engines = mutableListOf<VoiceDirectorEngine>()
     private var nowMs = 1_000_000L

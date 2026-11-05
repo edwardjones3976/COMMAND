@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Schedule -->
+    <string name="schedule_title">Schedule</string>
+    <string name="schedule_add">New mission</string>
+    <string name="schedule_empty_title">Nothing scheduled yet</string>
+    <string name="schedule_empty_body">Add a mission. COMMAND will ring at its time, tell you the first step, and ask you to start.</string>
+    <string name="schedule_section_upcoming">Coming up</string>
+    <string name="schedule_section_recent">Recent</string>
+    <string name="schedule_row_description">%1$s, %2$s, %3$s</string>
+
+    <string name="schedule_banner_notifications_title">Notifications are off</string>
+    <string name="schedule_banner_notifications_body">Without them an alarm cannot appear over the lock screen. The sound normally still plays, but not if Android refuses to run the alarm in the background.</string>
+    <string name="schedule_banner_notifications_action">Open settings</string>
+    <string name="schedule_banner_exact_title">Alarms may be late</string>
+    <string name="schedule_banner_exact_body">Android is not letting COMMAND set exact alarms, so a ring can arrive minutes late.</string>
+    <string name="schedule_banner_exact_action">Allow exact alarms</string>
+
+    <string name="schedule_badge_fixed">Fixed</string>
+    <string name="schedule_badge_flexible">Flexible</string>
+
+    <string name="schedule_when_today">Today, %1$s</string>
+    <string name="schedule_when_tomorrow">Tomorrow, %1$s</string>
+    <string name="schedule_when_other">%1$s, %2$s</string>
+
+    <string name="schedule_state_set">Set</string>
+    <string name="schedule_state_set_inexact">Set, may be late</string>
+    <string name="schedule_state_ringing">Ringing now</string>
+    <string name="schedule_state_acknowledged">Acknowledged</string>
+    <string name="schedule_state_started">Started</string>
+    <string name="schedule_state_done">Done</string>
+    <string name="schedule_state_missed">Missed</string>
+    <string name="schedule_state_missed_off">Missed, the phone was off</string>
+    <string name="schedule_state_silenced">Silenced</string>
+    <string name="schedule_state_skipped">Skipped</string>
+    <string name="schedule_state_cancelled">Cancelled in the calendar</string>
+    <string name="schedule_state_delayed">Delayed</string>
+    <string name="schedule_state_blocked">Blocked</string>
+    <string name="schedule_state_unconfirmed">Not confirmed</string>
+    <string name="schedule_state_reset">Needs a restart</string>
+
+    <!-- Mission editor -->
+    <string name="editor_title_new">New mission</string>
+    <string name="editor_title_edit">Edit mission</string>
+    <string name="editor_back">Back</string>
+    <string name="editor_field_title">Mission</string>
+    <string name="editor_field_title_hint">For example, Write the report</string>
+    <string name="editor_field_action">First step</string>
+    <string name="editor_field_action_hint">The very first small thing to do. For example, Open the document</string>
+    <string name="editor_section_when">When</string>
+    <string name="editor_repeat_once">Once</string>
+    <string name="editor_repeat_daily">Every day</string>
+    <string name="editor_repeat_weekly">Weekly</string>
+    <string name="editor_date">Date: %1$s</string>
+    <string name="editor_date_start">Starting: %1$s</string>
+    <string name="editor_time">Time: %1$s</string>
+    <string name="editor_days">On these days</string>
+    <string name="editor_day_mon">Mon</string>
+    <string name="editor_day_tue">Tue</string>
+    <string name="editor_day_wed">Wed</string>
+    <string name="editor_day_thu">Thu</string>
+    <string name="editor_day_fri">Fri</string>
+    <string name="editor_day_sat">Sat</string>
+    <string name="editor_day_sun">Sun</string>
+    <string name="editor_section_commitment">How firm is it?</string>
+    <string name="editor_flexible">Flexible</string>
+    <string name="editor_flexible_body">You can delay or skip it with one tap.</string>
+    <string name="editor_fixed">Fixed</string>
+    <string name="editor_fixed_body">A real commitment. Delaying or skipping can ask you to confirm first, depending on your rigidity setting.</string>
+    <string name="editor_section_starter">First block</string>
+    <string name="editor_starter_minutes">%1$d min</string>
+    <string name="editor_save">Save mission</string>
+    <string name="editor_test">Test this alarm now</string>
+    <string name="editor_test_started">A test alarm will ring in a few seconds. Lock the screen to see how it looks there.</string>
+    <string name="editor_delete">Delete mission</string>
+    <string name="editor_delete_title">Delete this mission?</string>
+    <string name="editor_delete_body">Its coming alarms are cancelled. What already happened stays in your history.</string>
+    <string name="editor_delete_confirm">Delete</string>
+    <string name="editor_cancel">Cancel</string>
+    <string name="editor_ok">OK</string>
+    <string name="editor_error_title">Give the mission a name.</string>
+    <string name="editor_error_action">Say what the first step is.</string>
+    <string name="editor_error_past">That time has already passed.</string>
+    <string name="editor_error_days">Pick at least one day.</string>
+    <string name="editor_not_found">That mission no longer exists.</string>
+</resources>
