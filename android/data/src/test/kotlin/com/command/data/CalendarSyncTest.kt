@@ -412,7 +412,7 @@ class CalendarSyncTest {
     }
 
     @Test
-    fun `two instances swapping times both wait, and neither is given up`() = run {
+    fun `two instances swapping times keep both alarms, and neither is given up`() = run {
         switchOn()
         val a = f.t0 + HOUR
         val b = f.t0 + 2 * HOUR
@@ -427,6 +427,101 @@ class CalendarSyncTest {
 
         assertEquals(listOf(a, b), rows().filter { it.state == OccurrenceState.ARMED }.map { it.scheduledAtUtc }.sorted())
         assertFalse(rows().any { it.state == OccurrenceState.SKIPPED })
+    }
+
+    @Test
+    fun `two instances swapping times ring at both times, the later one after the earlier has rung`() = run {
+        switchOn()
+        val a = f.t0 + HOUR
+        val b = f.t0 + 2 * HOUR
+        reads(instance(begin = a), instance(begin = b))
+        sync.run()
+        reads(
+            instance(begin = b, event = 555, original = 100, originalAt = a),
+            instance(begin = a, event = 556, original = 100, originalAt = b),
+        )
+        repeat(2) { sync.run() }
+        val first = rows().single { it.scheduledAtUtc == a }
+        val second = rows().single { it.scheduledAtUtc == b }
+
+        f.clock.advance(HOUR + 1)
+        f.repo.apply(first.id, com.command.domain.occurrence.OccurrenceCommand.Fire, com.command.domain.model.EventSource.SERVICE)
+        repeat(2) { sync.run() }
+
+        assertEquals("the later time still has its alarm", OccurrenceState.ARMED, f.db.occurrences().get(second.id)!!.state)
+        assertEquals(b, f.db.occurrences().get(second.id)!!.scheduledAtUtc)
+        assertEquals(b, f.scheduler.armed.getValue("command://occurrence/${second.id}").atUtcMs)
+        assertEquals("what rang stays as it was", OccurrenceState.FIRING, f.db.occurrences().get(first.id)!!.state)
+        assertEquals("nothing extra is made", 2, rows().size)
+    }
+
+    @Test
+    fun `an instance moved again after a swap takes the alarm at its time, not the one it started with`() = run {
+        switchOn()
+        val a = f.t0 + HOUR
+        val b = f.t0 + 2 * HOUR
+        val c = f.t0 + 3 * HOUR
+        reads(instance(begin = a), instance(begin = b))
+        sync.run()
+        reads(
+            instance(begin = b, event = 555, original = 100, originalAt = a),
+            instance(begin = a, event = 556, original = 100, originalAt = b),
+        )
+        sync.run()
+
+        reads(
+            instance(begin = c, event = 555, original = 100, originalAt = a),
+            instance(begin = a, event = 556, original = 100, originalAt = b),
+        )
+        sync.run()
+
+        assertEquals(listOf(a, c), rows().filter { it.state == OccurrenceState.ARMED }.map { it.scheduledAtUtc }.sorted())
+        assertEquals(listOf(a, c), f.scheduler.armed.values.map { it.atUtcMs }.sorted())
+    }
+
+    @Test
+    fun `three instances going round all keep their alarms after the first has rung`() = run {
+        switchOn()
+        val a = f.t0 + HOUR
+        val b = f.t0 + 2 * HOUR
+        val c = f.t0 + 3 * HOUR
+        reads(instance(begin = a), instance(begin = b), instance(begin = c))
+        sync.run()
+        reads(
+            instance(begin = b, event = 555, original = 100, originalAt = a),
+            instance(begin = c, event = 556, original = 100, originalAt = b),
+            instance(begin = a, event = 557, original = 100, originalAt = c),
+        )
+        sync.run()
+        val first = rows().single { it.scheduledAtUtc == a }
+
+        f.clock.advance(HOUR + 1)
+        f.repo.apply(first.id, com.command.domain.occurrence.OccurrenceCommand.Fire, com.command.domain.model.EventSource.SERVICE)
+        repeat(2) { sync.run() }
+
+        assertEquals(listOf(b, c), rows().filter { it.state == OccurrenceState.ARMED }.map { it.scheduledAtUtc }.sorted())
+        assertEquals(3, rows().size)
+    }
+
+    @Test
+    fun `a move onto a swapped pair is given up, and the pair keeps its alarms`() = run {
+        switchOn()
+        val a = f.t0 + HOUR
+        val b = f.t0 + 2 * HOUR
+        val c = f.t0 + 3 * HOUR
+        reads(instance(begin = a), instance(begin = b), instance(begin = c))
+        sync.run()
+        val third = rows().single { it.scheduledAtUtc == c }
+        reads(
+            instance(begin = b, event = 555, original = 100, originalAt = a),
+            instance(begin = a, event = 556, original = 100, originalAt = b),
+            instance(begin = a, event = 557, original = 100, originalAt = c),
+        )
+        sync.run()
+
+        assertEquals(listOf(a, b), rows().filter { it.state == OccurrenceState.ARMED }.map { it.scheduledAtUtc }.sorted())
+        assertEquals(OccurrenceState.SKIPPED, f.db.occurrences().get(third.id)!!.state)
+        assertEquals(setOf(a, b), f.scheduler.armed.values.map { it.atUtcMs }.toSet())
     }
 
     @Test

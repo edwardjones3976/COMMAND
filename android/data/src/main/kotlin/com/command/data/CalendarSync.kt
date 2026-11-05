@@ -9,6 +9,7 @@ import com.command.data.db.SettingRow
 import com.command.domain.calendar.CalendarInstance
 import com.command.domain.calendar.CalendarLink
 import com.command.domain.calendar.CalendarRead
+import com.command.domain.calendar.CalendarPlan
 import com.command.domain.calendar.CalendarReader
 import com.command.domain.calendar.CalendarReconciler
 import com.command.domain.calendar.ReadFailure
@@ -185,8 +186,7 @@ class CalendarSync @Inject constructor(
                 if (tx.apply(skip.occurrenceId, OccurrenceCommand.Skip(skip.reason), EventSource.WORKER) is ApplyResult.Applied) dao.deleteLink(skip.occurrenceId)
             }
 
-            // A series moved as a whole lands each instance on the next one's slot, so whichever has a free slot goes first. Instances that
-            // block only each other (two swapped ones) stay where they are until the next sync.
+            // A series moved as a whole lands each instance on the next one's slot, so whichever has a free slot goes first.
             var pending = plan.moves
             while (pending.isNotEmpty()) {
                 val blocked = pending.filter { move ->
@@ -202,18 +202,31 @@ class CalendarSync @Inject constructor(
                 if (blocked.size == pending.size) {
                     // Blocked by something that is not going to move: rung or answered at that very time, or a sibling that stays and will ring
                     // then anyway. That instant has its alarm, and one left at the old time would be wrong. Decided before any is given up, because
-                    // giving one up changes what the next one finds. Whatever was waiting behind those gets its turn; only a cycle is left to wait.
+                    // giving one up changes what the next one finds. Whatever was waiting behind those gets its turn.
                     val waiting = blocked.map { it.occurrenceId }.toSet()
                     val givenUp = blocked.filter { move ->
                         val own = db.occurrences().get(move.occurrenceId)
                         val occupant = own?.let { db.occurrences().find(it.missionId, move.instance.beginMs) }
                         occupant != null && occupant.id !in waiting
                     }
-                    if (givenUp.isEmpty()) break
-                    for (move in givenUp) {
-                        if (tx.apply(move.occurrenceId, OccurrenceCommand.Skip(SkipReason.CALENDAR_REMOVED), EventSource.WORKER) is ApplyResult.Applied) dao.deleteLink(move.occurrenceId)
+                    if (givenUp.isNotEmpty()) {
+                        for (move in givenUp) {
+                            if (tx.apply(move.occurrenceId, OccurrenceCommand.Skip(SkipReason.CALENDAR_REMOVED), EventSource.WORKER) is ApplyResult.Applied) dao.deleteLink(move.occurrenceId)
+                        }
+                        pending = blocked - givenUp.toSet()
+                    } else {
+                        // Instances that block only each other (two swapped ones): the alarms already stand on the times the calendar wants, so
+                        // the links change hands and no alarm moves. Left waiting, the first to ring would spend the other's instance, and the next
+                        // sync would skip the other as moved into the past.
+                        val swapped = cyclesIn(blocked)
+                        if (swapped.isEmpty()) break
+                        for (move in swapped) {
+                            val own = db.occurrences().get(move.occurrenceId) ?: continue
+                            val occupant = db.occurrences().find(own.missionId, move.instance.beginMs) ?: continue
+                            dao.updateLink(rowOf(move.instance, occupant.id, now))
+                        }
+                        pending = blocked - swapped.toSet()
                     }
-                    pending = blocked - givenUp.toSet()
                 } else {
                     pending = blocked
                 }
@@ -241,6 +254,25 @@ class CalendarSync @Inject constructor(
             }
         }
         return moved
+    }
+
+    /** The moves that lead round to themselves, each wanting the slot of the next. One that merely wants a slot in such a ring is not among them. */
+    private suspend fun cyclesIn(moves: List<CalendarPlan.Move>): List<CalendarPlan.Move> {
+        val occupantOf = HashMap<String, String>()
+        for (move in moves) {
+            val own = db.occurrences().get(move.occurrenceId) ?: continue
+            val occupant = db.occurrences().find(own.missionId, move.instance.beginMs) ?: continue
+            occupantOf[move.occurrenceId] = occupant.id
+        }
+        return moves.filter { move ->
+            var at = occupantOf[move.occurrenceId]
+            var steps = 0
+            while (at != null && at != move.occurrenceId && steps < moves.size) {
+                at = occupantOf[at]
+                steps++
+            }
+            at == move.occurrenceId
+        }
     }
 
     /** A row the calendar took away only holds a time slot, and the calendar now wants that slot: its history is replaced by what follows. */
