@@ -17,12 +17,14 @@ import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.SkipReason
 import com.command.testing.FakeClock
+import com.command.testing.FakeRingController
 import com.command.testing.android.FakeAlarmModule
 import com.command.testing.android.awaitUntil
 import com.command.testing.android.testMission
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -48,6 +50,7 @@ class ReveilleViewModelTest {
     @Inject lateinit var repo: OccurrenceRepository
     @Inject lateinit var db: CommandDb
     @Inject lateinit var clock: FakeClock
+    @Inject lateinit var ringer: FakeRingController
 
     private lateinit var vm: ReveilleViewModel
 
@@ -303,4 +306,194 @@ class ReveilleViewModelTest {
 
     @Suppress("unused")
     private val appContext = ApplicationProvider.getApplicationContext<android.content.Context>()
+
+    // --- the way out that Back opens: the ring is still ringing when these are chosen ---------------------------
+
+    @Test
+    fun `a ringing alarm can be delayed, which stops it, closes it as delayed and sets the next one`() {
+        val o = ringing()
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+
+        vm.delay(30)
+
+        awaitUi("closed") { it is ReveilleUiState.Closed }
+        assertEquals(ClosedOutcome.DELAYED, (vm.state.value as ReveilleUiState.Closed).outcome)
+        assertEquals(OccurrenceState.DELAYED, stateOf(o))
+        assertEquals("the ring was told to stop", listOf(o.id), ringer.stopped)
+        val child = runBlocking { db.occurrences().forMission(o.missionId) }.single { it.parentOccurrenceId == o.id }
+        assertEquals(clock.nowMs() + 30 * 60_000L, child.scheduledAtUtc)
+    }
+
+    @Test
+    fun `a ringing alarm can be skipped, recorded as skipped by the person and not as started`() {
+        val o = ringing()
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+
+        vm.skip()
+
+        awaitUi("closed") { it is ReveilleUiState.Closed }
+        assertEquals(OccurrenceState.SKIPPED, stateOf(o))
+        assertEquals(SkipReason.USER, runBlocking { repo.get(o.id)!!.skipReason })
+        assertEquals(listOf(o.id), ringer.stopped)
+        assertNull(vm.friction.value)
+    }
+
+    @Test
+    fun `a fixed commitment asks for its friction while it rings, for a delay as for a skip, and keeps ringing until it is given`() {
+        val o = ringing(flexibility = Flexibility.RIGID, lock = LockPolicy.CONFIRM)
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+
+        vm.delay(10)
+        awaitUntil(message = "friction prompt") { vm.friction.value != null }
+        assertEquals(LockPolicy.CONFIRM, vm.friction.value!!.required)
+        assertEquals("it is still ringing", OccurrenceState.FIRING, stateOf(o))
+        assertTrue(ringer.stopped.isEmpty())
+
+        vm.dismissFriction()
+        assertEquals(OccurrenceState.FIRING, stateOf(o))
+
+        vm.skip()
+        awaitUntil(message = "friction prompt again") { vm.friction.value != null }
+        vm.confirmFriction(FrictionEvidence.Confirmed)
+        awaitUi("closed") { it is ReveilleUiState.Closed }
+        assertEquals(OccurrenceState.SKIPPED, stateOf(o))
+    }
+
+    @Test
+    fun `safety silence needs no friction at the strictest setting`() {
+        val o = ringing(flexibility = Flexibility.RIGID, lock = LockPolicy.RECOVERY_OFFER)
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+
+        vm.silence()
+
+        awaitUi("silenced") { it is ReveilleUiState.Silenced }
+        assertEquals(OccurrenceState.SAFETY_SILENCED, stateOf(o))
+        assertNull(vm.friction.value)
+    }
+
+    // --- review of the way out: what is asked over a ringing alarm goes with the ring ---------------------------
+
+    @Test
+    fun `a question asked over a ringing alarm goes when the notification's Safety silence ends the ring`() {
+        val o = ringing(flexibility = Flexibility.RIGID, lock = LockPolicy.CONFIRM)
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+        vm.skip()
+        awaitUntil(message = "friction prompt") { vm.friction.value != null }
+
+        runBlocking { repo.apply(o.id, OccurrenceCommand.SafetySilence, EventSource.USER) } // the button on the ring notification
+        awaitUi("silenced") { it is ReveilleUiState.Silenced }
+
+        assertNull("the question belonged to a ring that has stopped", vm.friction.value)
+        assertEquals(OccurrenceState.SAFETY_SILENCED, stateOf(o))
+    }
+
+    @Test
+    fun `a question asked over a ringing alarm goes when the ring runs out`() {
+        val o = ringing(flexibility = Flexibility.RIGID, lock = LockPolicy.REASON)
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+        vm.delay(10)
+        awaitUntil(message = "friction prompt") { vm.friction.value != null }
+
+        runBlocking { repo.apply(o.id, OccurrenceCommand.Miss(com.command.domain.occurrence.MissReason.TIMEOUT), EventSource.SERVICE) }
+        awaitUi("missed") { (it as? ReveilleUiState.Silenced)?.missed == true }
+
+        assertNull("the question belonged to a ring that has stopped", vm.friction.value)
+        assertEquals(OccurrenceState.MISSED, stateOf(o))
+    }
+
+    @Test
+    fun `silence from over a question takes the question away at once and silences`() {
+        val o = ringing(flexibility = Flexibility.RIGID, lock = LockPolicy.CONFIRM)
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+        vm.delay(10)
+        awaitUntil(message = "friction prompt") { vm.friction.value != null }
+
+        vm.silence()
+
+        assertNull("gone the moment it is tapped, not when the database has answered", vm.friction.value)
+        awaitUi("silenced") { it is ReveilleUiState.Silenced }
+        assertEquals(OccurrenceState.SAFETY_SILENCED, stateOf(o))
+        assertEquals(listOf(o.id), ringer.stopped)
+    }
+
+    @Test
+    fun `a question that is still waiting survives the ring being read again`() {
+        val o = ringing(flexibility = Flexibility.RIGID, lock = LockPolicy.CONFIRM)
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+        assertEquals("the screen knows which ring it is", o.id, (vm.state.value as ReveilleUiState.Firing).occurrenceId)
+        vm.skip()
+        awaitUntil(message = "friction prompt") { vm.friction.value != null }
+
+        // Any write to the occurrence makes the screen read it again, and what it reads now has another title, so that the new reading is seen.
+        runBlocking { db.openHelper.writableDatabase.execSQL("UPDATE missions SET title = 'Renamed' WHERE id = '${o.missionId}'") }
+        runBlocking { db.occurrences().setArmMode(o.id, ArmMode.EXACT) }
+        awaitUi("read again") { (it as? ReveilleUiState.Firing)?.title == "Renamed" }
+
+        assertNotNull("the same ring, the same screen, the same question", vm.friction.value)
+        assertEquals(OccurrenceState.FIRING, stateOf(o))
+    }
+
+    @Test
+    fun `an answer that comes after another ring has taken over the screen is not shown over it`() {
+        val first = ringing(flexibility = Flexibility.RIGID, lock = LockPolicy.CONFIRM)
+        val second = ringingTitled("Second")
+        val held = CompletableDeferred<Unit>()
+        vm.beforeAnswer = { held.await() }
+        vm.show(first.id)
+        awaitUi("first") { it is ReveilleUiState.Firing }
+
+        vm.skip() // decided: it needs a question; the answer is held back
+        vm.show(second.id) // another ring takes over the screen, and its first reading is on the screen
+        awaitUi("second") { (it as? ReveilleUiState.Firing)?.title == "Second" }
+        held.complete(Unit) // now the answer arrives
+        repeat(40) {
+            shadowOf(Looper.getMainLooper()).idle()
+            Thread.sleep(5)
+        }
+
+        assertNull("the question was about the first ring, which is not on the screen", vm.friction.value)
+        assertEquals("and nothing was decided for it", OccurrenceState.FIRING, stateOf(first))
+    }
+
+    @Test
+    fun `two delays tapped at once make one delay and one next alarm`() {
+        val o = ringing()
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+
+        vm.delay(10)
+        vm.delay(30)
+
+        awaitUi("closed") { it is ReveilleUiState.Closed }
+        awaitUntil(message = "delayed") { stateOf(o) == OccurrenceState.DELAYED }
+        val children = runBlocking { db.occurrences().forMission(o.missionId) }.filter { it.parentOccurrenceId == o.id }
+        assertEquals("the second tap found the alarm already put off", 1, children.size)
+        assertEquals(listOf(o.id), ringer.stopped)
+    }
+
+    @Test
+    fun `a delay and a skip tapped at once leave one answer, and a next alarm only if it was put off`() {
+        val o = ringing()
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+
+        vm.delay(10)
+        vm.skip()
+
+        awaitUi("closed") { it is ReveilleUiState.Closed }
+        val state = stateOf(o)
+        assertTrue("one answer won: $state", state == OccurrenceState.DELAYED || state == OccurrenceState.SKIPPED)
+        val children = runBlocking { db.occurrences().forMission(o.missionId) }.filter { it.parentOccurrenceId == o.id }
+        assertEquals("a next alarm exists exactly when the alarm was put off", state == OccurrenceState.DELAYED, children.size == 1)
+        assertTrue(children.size <= 1)
+        assertEquals(listOf(o.id), ringer.stopped)
+    }
 }

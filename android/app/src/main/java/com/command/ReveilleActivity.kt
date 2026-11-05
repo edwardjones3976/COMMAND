@@ -20,8 +20,8 @@ import dagger.hilt.android.AndroidEntryPoint
 /**
  * The lock-screen face of a ring: acknowledge, hear the first step, say you are starting. It sits over the keyguard and
  * turns the screen on only for this flow; the rest of the app (including check-ins) never appears over the lock screen. It
- * finishes when the flow is over and never offers a way to leave that skips the record: Back does nothing while ringing,
- * and Safety silence is always on screen.
+ * finishes when the flow is over and never offers a way to leave that skips the record: while it rings, Back opens the way out
+ * (silence, put it off, skip, each recorded as what it is), and Safety silence is always one tap away.
  */
 @AndroidEntryPoint
 class ReveilleActivity : ComponentActivity() {
