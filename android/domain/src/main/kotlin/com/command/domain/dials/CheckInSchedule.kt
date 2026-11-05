@@ -5,6 +5,8 @@ data class CheckInSchedule(val gapsMs: List<Long>) {
     val count: Int get() = gapsMs.size
 
     companion object {
+        /** The most questions any persistence setting asks. */
+        const val MAX_COUNT = 4
         private const val MINUTE = 60_000L
 
         /** Persistence 1: one question at +10 min; 2: two, 10 min apart; 3: two, 7 apart; 4: three, 5 apart; 5: four, 5 apart. */

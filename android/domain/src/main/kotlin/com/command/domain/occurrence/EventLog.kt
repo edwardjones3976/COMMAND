@@ -2,7 +2,7 @@ package com.command.domain.occurrence
 
 /** The closed vocabulary of audit events. Stored as TEXT, so names must never be repurposed. */
 enum class EventType {
-    STATE_CHANGED, REJECTED_TRANSITION,
+    STATE_CHANGED, REJECTED_TRANSITION, OCCURRENCE_MOVED,
     ALARM_ARMED, ALARM_FIRED, ALARM_FIRED_STALE, ALARM_LOST, ALARM_CAP,
     RING_DEGRADED, TTS_UNAVAILABLE, FSI_UNAVAILABLE, DND_MAY_SUPPRESS,
     PRECONDITION, PERMISSION_CHANGED, NOTIFICATION_DISMISSED,

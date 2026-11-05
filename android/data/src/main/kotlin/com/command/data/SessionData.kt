@@ -1,0 +1,42 @@
+package com.command.data
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
+
+/**
+ * What survives a process death for one occurrence besides its state: counters the state machine needs and the
+ * deadlines the alarm service recomputes from after a restart. Stored as JSON in `occurrences.session_json`.
+ */
+@Serializable
+data class SessionData(
+    val recoveryOffers: Int = 0,
+    val checkInsAsked: Int = 0,
+    val phase: String? = null,
+    val chainStep: Int = 0,
+    val starterDeadlineUtc: Long? = null,
+    /** When the ring plan ends, in wall-clock and monotonic time; a restart past this must not ring again. */
+    val planEndUtc: Long? = null,
+    val planEndElapsed: Long? = null,
+    val bootId: String? = null,
+)
+
+internal object Codec {
+    val json: Json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
+    private val mapSerializer = MapSerializer(String.serializer(), String.serializer())
+
+    fun decodeSession(text: String): SessionData =
+        runCatching { json.decodeFromString(SessionData.serializer(), text.ifBlank { "{}" }) }.getOrDefault(SessionData())
+
+    fun encodeSession(session: SessionData): String = json.encodeToString(SessionData.serializer(), session)
+
+    fun encodePayload(values: Map<String, String>): String = json.encodeToString(mapSerializer, values)
+
+    fun decodePayload(text: String): Map<String, String> =
+        runCatching { json.decodeFromString(mapSerializer, text) }.getOrDefault(emptyMap())
+}
