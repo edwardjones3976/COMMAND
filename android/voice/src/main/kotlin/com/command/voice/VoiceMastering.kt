@@ -69,10 +69,13 @@ object VoiceMastering {
     /** Most gain the alarm chain will add looking for its target: a line this far below it is a very quiet engine, not silence. */
     private const val MAX_ALARM_GAIN_DB = 40.0
     private const val ALARM_TOLERANCE_LU = 0.2
-    private const val ALARM_SEARCH_STEPS = 6
+    private const val ALARM_SEARCH_STEPS = 8
 
-    /** Below this much loudness for each dB of gain the line has met the ceiling, and pushing on only does harm. */
-    private const val MIN_LU_PER_DB = 0.15
+    /**
+     * How far past the gain a plain measurement asks for the search may push. Loudness comes first, so a line is driven hard to reach its target;
+     * this is what stops a target the ceiling makes impossible from raising breaths and hiss without end.
+     */
+    private const val MAX_DRIVE_DB = 30.0
 
     /** How one line is levelled. */
     sealed interface Profile {
@@ -120,33 +123,29 @@ object VoiceMastering {
         val start = LoudnessMeter.integratedLufs(x, sr)
         var best = x
         if (start.isFinite()) {
-            var gainDb = (target - start).coerceIn(-MAX_ALARM_GAIN_DB, MAX_ALARM_GAIN_DB)
+            val direct = target - start
+            val most = minOf(direct + MAX_DRIVE_DB, MAX_ALARM_GAIN_DB)
+            var gainDb = direct.coerceIn(-MAX_ALARM_GAIN_DB, most)
             var bestError = Double.MAX_VALUE
-            var lastGainDb = Double.NaN
-            var lastLufs = Double.NaN
             for (step in 0 until ALARM_SEARCH_STEPS) {
                 val gain = dbToLin(gainDb.toFloat())
                 val y = FloatArray(x.size) { x[it] * gain }
                 preLimit(y, sr)
                 limit(y, sr, dbToLin(PEAK_CEILING_DBFS - TRUE_PEAK_MARGIN_DB))
-                val lufs = LoudnessMeter.integratedLufs(y, sr)
-                // Against the ceiling more gain buys no loudness, only crushed syllables and louder breaths: the line stays as it was.
-                if (step > 0 && gainDb > lastGainDb && (lufs - lastLufs) / (gainDb - lastGainDb) < MIN_LU_PER_DB) break
-                val error = target - lufs
+                val error = target - LoudnessMeter.integratedLufs(y, sr)
                 if (abs(error) < bestError) {
                     bestError = abs(error)
                     best = y
                 }
                 if (abs(error) <= ALARM_TOLERANCE_LU) break
-                lastGainDb = gainDb
-                lastLufs = lufs
                 // The limiters give back only part of a change in gain, so a shortfall is pushed harder than it measures.
-                val next = (gainDb + error * if (error > 0) 2.0 else 1.0).coerceIn(-MAX_ALARM_GAIN_DB, MAX_ALARM_GAIN_DB)
+                val next = (gainDb + error * if (error > 0) 3.0 else 1.0).coerceIn(-MAX_ALARM_GAIN_DB, most)
                 if (next == gainDb) break
                 gainDb = next
             }
-            holdUnderCeiling(best)
         }
+        // Whatever was chosen, a line the meter could not hear included (a short one can hide its loud part from every whole block).
+        holdUnderCeiling(best)
         return finish(best, sr)
     }
 

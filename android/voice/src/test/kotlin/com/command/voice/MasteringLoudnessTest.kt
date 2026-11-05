@@ -126,6 +126,30 @@ class MasteringLoudnessTest {
     }
 
     @Test
+    fun `speech with sibilants still reaches its loudness, every intensity at least as loud as the one below it`() {
+        for (sampleRate in listOf(16_000, 24_000)) {
+            for (seed in listOf(5, 6, 7)) {
+                val input = sibilant(sampleRate, seed)
+                val levels = (1..5).map { lufs(VoiceMastering.master(input, sampleRate, VoiceMastering.alarmProfile(SpeechLevel(it))).pcm, sampleRate) }
+                listOf(-16.0, -16.0, -16.0, -15.0, -14.0).zip(levels).forEach { (target, level) ->
+                    assertEquals("$sampleRate Hz, seed $seed: $levels", target, level, 1.0)
+                }
+                assertTrue("$sampleRate Hz, seed $seed: $levels", levels[4] >= levels[0])
+            }
+        }
+    }
+
+    @Test
+    fun `a hot tail after a silence too short for the meter to hear is still held under the ceiling`() {
+        // 400 ms of silence fills the only whole block, so the line measures as nothing, and the 90 ms after it is at full scale.
+        val input = ShortArray(rate * 490 / 1000) { i ->
+            if (i < rate * 400 / 1000) 0 else (32_767 * sin(2 * PI * 3_000.0 * i / rate)).toInt().toShort()
+        }
+        val out = VoiceMastering.master(input, rate, VoiceMastering.Profile.ALARM(-14f)).pcm
+        assertTrue("${truePeakDb(out)} dBTP", truePeakDb(out) <= -1.0)
+    }
+
+    @Test
     fun `a target the ceiling makes impossible does not drive the pauses up without limit`() {
         // Speech over a noise floor at -60 dBFS, ending in a second of that floor alone.
         val rnd = Random(3)
@@ -140,8 +164,8 @@ class MasteringLoudnessTest {
             return 10 * log10(tail.sumOf { (it / 32768.0) * (it / 32768.0) } / tail.size)
         }
         val raised = floorDb(impossible) - floorDb(reachable)
-        // Measured: 12 dB when the search stops at the ceiling, 15 when it runs on to the gain cap. Loudness keeps some of that cost on purpose.
-        assertTrue("the floor rose $raised dB over the untrimmed line", raised <= 12.5)
+        // Measured: 15.3 dB. Loudness comes first, so this is what a target out of reach costs; the bound is that it costs no more.
+        assertTrue("the floor rose $raised dB over the untrimmed line", raised <= 16.0)
     }
 
     @Test
