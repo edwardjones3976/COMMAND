@@ -14,6 +14,9 @@ import javax.inject.Inject
 interface RingOutput {
     fun start()
     fun stop()
+
+    /** Turns the tone down while a line is spoken over it, and back up afterwards. The vibration is not affected. */
+    fun duck(ducked: Boolean)
 }
 
 /**
@@ -25,6 +28,7 @@ class AndroidRingOutput @Inject constructor(
 ) : RingOutput {
 
     private var player: MediaPlayer? = null
+    private var ducked = false
 
     private val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         context.getSystemService(VibratorManager::class.java)?.defaultVibrator
@@ -44,6 +48,7 @@ class AndroidRingOutput @Inject constructor(
             MediaPlayer.create(context, R.raw.reveille_tone, attributes, android.media.AudioManager.AUDIO_SESSION_ID_GENERATE)
                 ?.apply {
                     isLooping = true
+                    if (ducked) setVolume(DUCKED_LEVEL, DUCKED_LEVEL)
                     start()
                 }
         }.getOrNull()
@@ -62,6 +67,13 @@ class AndroidRingOutput @Inject constructor(
     }
 
     @Synchronized
+    override fun duck(ducked: Boolean) {
+        this.ducked = ducked
+        val level = if (ducked) DUCKED_LEVEL else 1f
+        player?.let { runCatching { it.setVolume(level, level) } }
+    }
+
+    @Synchronized
     override fun stop() {
         player?.let { p ->
             runCatching { if (p.isPlaying) p.stop() }
@@ -69,5 +81,10 @@ class AndroidRingOutput @Inject constructor(
         }
         player = null
         runCatching { vibrator?.cancel() }
+    }
+
+    private companion object {
+        /** How loud the tone is while a line is spoken over it: still there, no longer in the way. */
+        const val DUCKED_LEVEL = 0.3f
     }
 }

@@ -69,4 +69,11 @@ class PreconditionsTest {
         val back = PreconditionSnapshot.fromTokens(s.toTokens() + ("SOMETHING_NEW" to "x"))
         assertEquals(s.values, back.values)
     }
+
+    @Test
+    fun `Do Not Disturb stops an alarm only when it blocks alarms`() {
+        assertEquals(Severity.PROBLEM, Precondition.DO_NOT_DISTURB.severity(PreconditionValue.DND_BLOCKS_ALARMS))
+        assertEquals(Severity.OK, Precondition.DO_NOT_DISTURB.severity(PreconditionValue.DND_FREE))
+        assertFalse(Precondition.DO_NOT_DISTURB.isPermission)
+    }
 }

@@ -36,6 +36,7 @@ class PreconditionProbe @Inject constructor(
         values[Precondition.ALARM_CHANNEL] = alarmChannelImportance()
         values[Precondition.FULL_SCREEN_INTENT] = granted(canUseFullScreenIntent())
         values[Precondition.ALARM_VOLUME] = if (alarmStreamAudible()) PreconditionValue.AUDIBLE else PreconditionValue.MUTED
+        values[Precondition.DO_NOT_DISTURB] = if (doNotDisturbBlocksAlarms()) PreconditionValue.DND_BLOCKS_ALARMS else PreconditionValue.DND_FREE
         values[Precondition.BATTERY_OPTIMIZATION] = if (ignoringBatteryOptimizations()) PreconditionValue.EXEMPT else PreconditionValue.OPTIMIZED
         values[Precondition.BACKGROUND_RESTRICTED] = if (backgroundRestricted()) PreconditionValue.YES else PreconditionValue.NO
         values[Precondition.STANDBY_BUCKET] = standbyBucket()
@@ -67,6 +68,33 @@ class PreconditionProbe @Inject constructor(
     private fun alarmStreamAudible(): Boolean {
         val audio = context.getSystemService(AudioManager::class.java) ?: return true
         return !audio.isStreamMute(AudioManager.STREAM_ALARM) && audio.getStreamVolume(AudioManager.STREAM_ALARM) > 0
+    }
+
+    /**
+     * Total silence blocks alarms; priority-only blocks them unless the alarms switch is on, which is the default. This is what Android
+     * reports (the filter and the policy in force), not a model of every phone maker's own Do Not Disturb extras. Reading them needs no
+     * special access; changing them would, and the app never asks for it.
+     */
+    private fun doNotDisturbBlocksAlarms(): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        return when (manager.currentInterruptionFilter) {
+            NotificationManager.INTERRUPTION_FILTER_NONE -> true
+            NotificationManager.INTERRUPTION_FILTER_PRIORITY -> priorityPolicyBlocksAlarms(manager)
+            else -> false
+        }
+    }
+
+    /**
+     * Before Android 9 there was no switch for alarms, and priority-only always let them through. From Android 11 the answer is in the
+     * consolidated policy: the one in force now, with any automatic rule that is active folded in. The ordinary policy is only what the
+     * person set for when no rule applies, and can disagree with the filter that is actually in effect; on Android 9 and 10, which have
+     * no consolidated policy to ask for, it is all there is.
+     */
+    private fun priorityPolicyBlocksAlarms(manager: NotificationManager): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false
+        val inForce = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) manager.consolidatedNotificationPolicy else null
+        val policy = inForce ?: manager.notificationPolicy
+        return policy.priorityCategories and NotificationManager.Policy.PRIORITY_CATEGORY_ALARMS == 0
     }
 
     private fun ignoringBatteryOptimizations(): Boolean =

@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.media.AudioManager
+import android.app.NotificationManager.Policy
 import android.os.PowerManager
 import androidx.test.core.app.ApplicationProvider
 import com.command.domain.reliability.Precondition
@@ -116,5 +117,78 @@ class PreconditionProbeTest {
         assertEquals(PreconditionValue.GRANTED, read(Precondition.FULL_SCREEN_INTENT))
         assertEquals(PreconditionValue.NO, read(Precondition.BACKGROUND_RESTRICTED))
         assertEquals("ACTIVE", read(Precondition.STANDBY_BUCKET))
+    }
+
+    private fun dnd(filter: Int, categories: Int = Policy.PRIORITY_CATEGORY_ALARMS) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        // The test plays the person who has set Do Not Disturb up, which needs the access the app itself never asks for.
+        shadowOf(manager).setNotificationPolicyAccessGranted(true)
+        val policy = Policy(categories, Policy.PRIORITY_SENDERS_ANY, Policy.PRIORITY_SENDERS_ANY)
+        manager.notificationPolicy = policy
+        shadowOf(manager).setConsolidatedNotificationPolicy(policy)
+        manager.setInterruptionFilter(filter)
+    }
+
+    @Test
+    fun `Do Not Disturb is read as blocking alarms only when it does`() {
+        assertEquals("off", PreconditionValue.DND_FREE, read(Precondition.DO_NOT_DISTURB))
+
+        dnd(NotificationManager.INTERRUPTION_FILTER_NONE)
+        assertEquals("total silence blocks alarms", PreconditionValue.DND_BLOCKS_ALARMS, read(Precondition.DO_NOT_DISTURB))
+
+        dnd(NotificationManager.INTERRUPTION_FILTER_ALARMS)
+        assertEquals("alarms only lets them through", PreconditionValue.DND_FREE, read(Precondition.DO_NOT_DISTURB))
+
+        dnd(NotificationManager.INTERRUPTION_FILTER_PRIORITY, categories = Policy.PRIORITY_CATEGORY_ALARMS)
+        assertEquals("priority with alarms on lets them through", PreconditionValue.DND_FREE, read(Precondition.DO_NOT_DISTURB))
+
+        dnd(NotificationManager.INTERRUPTION_FILTER_PRIORITY, categories = Policy.PRIORITY_CATEGORY_MESSAGES)
+        assertEquals("priority with alarms switched off blocks them", PreconditionValue.DND_BLOCKS_ALARMS, read(Precondition.DO_NOT_DISTURB))
+
+        dnd(NotificationManager.INTERRUPTION_FILTER_ALL)
+        assertEquals(PreconditionValue.DND_FREE, read(Precondition.DO_NOT_DISTURB))
+    }
+
+    @Test
+    @Config(sdk = [26])
+    fun `before Android 9 priority mode always let alarms through, because there was no switch to turn them off`() {
+        dnd(NotificationManager.INTERRUPTION_FILTER_PRIORITY, categories = Policy.PRIORITY_CATEGORY_MESSAGES)
+        assertEquals(PreconditionValue.DND_FREE, read(Precondition.DO_NOT_DISTURB))
+        dnd(NotificationManager.INTERRUPTION_FILTER_NONE)
+        assertEquals("but total silence still blocked them", PreconditionValue.DND_BLOCKS_ALARMS, read(Precondition.DO_NOT_DISTURB))
+    }
+
+    @Test
+    fun `the policy in force, with an active rule folded in, decides and not the one set for when no rule applies`() {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        shadowOf(manager).setNotificationPolicyAccessGranted(true)
+        manager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+        fun policy(categories: Int) = Policy(categories, Policy.PRIORITY_SENDERS_ANY, Policy.PRIORITY_SENDERS_ANY)
+
+        // The ordinary policy lets alarms through, but a rule that is active now does not.
+        manager.notificationPolicy = policy(Policy.PRIORITY_CATEGORY_ALARMS)
+        shadowOf(manager).setConsolidatedNotificationPolicy(policy(Policy.PRIORITY_CATEGORY_MESSAGES))
+        assertEquals(PreconditionValue.DND_BLOCKS_ALARMS, read(Precondition.DO_NOT_DISTURB))
+
+        // And the other way round: the ordinary policy blocks them and the rule in force lets them through.
+        manager.notificationPolicy = policy(Policy.PRIORITY_CATEGORY_MESSAGES)
+        shadowOf(manager).setConsolidatedNotificationPolicy(policy(Policy.PRIORITY_CATEGORY_ALARMS))
+        assertEquals(PreconditionValue.DND_FREE, read(Precondition.DO_NOT_DISTURB))
+    }
+
+    @Test
+    @Config(sdk = [29])
+    fun `on Android 9 and 10, which have no consolidated policy to ask for, the ordinary policy decides`() {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        shadowOf(manager).setNotificationPolicyAccessGranted(true)
+        manager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+        fun policy(categories: Int) = Policy(categories, Policy.PRIORITY_SENDERS_ANY, Policy.PRIORITY_SENDERS_ANY)
+
+        manager.notificationPolicy = policy(Policy.PRIORITY_CATEGORY_MESSAGES)
+        shadowOf(manager).setConsolidatedNotificationPolicy(policy(Policy.PRIORITY_CATEGORY_ALARMS)) // not looked at on this version
+        assertEquals(PreconditionValue.DND_BLOCKS_ALARMS, read(Precondition.DO_NOT_DISTURB))
+
+        manager.notificationPolicy = policy(Policy.PRIORITY_CATEGORY_ALARMS)
+        assertEquals(PreconditionValue.DND_FREE, read(Precondition.DO_NOT_DISTURB))
     }
 }

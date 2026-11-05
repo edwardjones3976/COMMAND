@@ -28,6 +28,12 @@ class RingSession @Inject constructor() {
         if (this.service === service) this.service = null
     }
 
+    /**
+     * Whether this process's service is ringing something right now. A ring that was killed (a force-stop, a crash) stays "firing" in the
+     * database, so only the live service can say whether anything is sounding. Safe from any thread.
+     */
+    val isRinging: Boolean get() = service?.ringingOccurrenceId != null
+
     /** Ends the sound for [occurrenceId] if that is what is ringing. Safe from any thread. */
     fun end(occurrenceId: String) {
         main.post { service?.endRing(occurrenceId) }

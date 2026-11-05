@@ -61,8 +61,14 @@
     <string name="reliability_volume_title">Alarm volume</string>
     <string name="reliability_volume_ok">Audible</string>
     <string name="reliability_volume_problem">Silent</string>
-    <string name="reliability_volume_body">The alarm volume is muted or at its lowest, so a ring would make no sound. COMMAND never changes your volume on its own.</string>
+    <string name="reliability_volume_body">The alarm volume is muted or at its lowest, so a ring would make no sound at this level. COMMAND can turn it up for a ring, but only if you allow that under Permissions and privacy.</string>
     <string name="reliability_volume_action">Open sound settings</string>
+
+    <!-- Do Not Disturb -->
+    <string name="reliability_dnd_title">Do Not Disturb</string>
+    <string name="reliability_dnd_ok">Lets alarms through</string>
+    <string name="reliability_dnd_problem">Blocks alarms</string>
+    <string name="reliability_dnd_body">Do Not Disturb is set so that an alarm would make no sound. Change what it allows, or turn it off, in your phone\'s sound settings.</string>
 
     <!-- Battery optimization -->
     <string name="reliability_battery_title">Battery optimization</string>

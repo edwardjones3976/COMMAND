@@ -205,4 +205,14 @@ class ReliabilityScreenTest {
         compose.onNodeWithContentDescription("Back").performClick()
         assertEquals(1, r.back)
     }
+
+    @Test
+    fun `Do Not Disturb that blocks alarms is a problem that says so and opens the sound settings`() {
+        val r = Recorder()
+        show(ready(report(Precondition.DO_NOT_DISTURB to "blocks_alarms")), r)
+        compose.onNodeWithText("Blocks alarms").assertIsDisplayed()
+        compose.onNodeWithText("Do Not Disturb is set so that an alarm would make no sound", substring = true).assertIsDisplayed()
+        compose.onNodeWithTag(ReliabilityTags.action(Precondition.DO_NOT_DISTURB)).performClick()
+        assertEquals(listOf(Fix.OPEN_SOUND_SETTINGS), r.fixes)
+    }
 }

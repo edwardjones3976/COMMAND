@@ -19,7 +19,8 @@ class ReliabilityTest {
 
     private fun healthy() = mapOf(
         Precondition.EXACT_ALARMS to "granted", Precondition.NOTIFICATIONS to "granted", Precondition.FULL_SCREEN_INTENT to "granted",
-        Precondition.ALARM_CHANNEL to "HIGH", Precondition.ALARM_VOLUME to "audible", Precondition.BATTERY_OPTIMIZATION to "exempt",
+        Precondition.ALARM_CHANNEL to "HIGH", Precondition.ALARM_VOLUME to "audible", Precondition.DO_NOT_DISTURB to "free",
+        Precondition.BATTERY_OPTIMIZATION to "exempt",
         Precondition.BACKGROUND_RESTRICTED to "no", Precondition.STANDBY_BUCKET to "ACTIVE",
     )
 
@@ -85,12 +86,17 @@ class ReliabilityTest {
     }
 
     @Test
-    fun `every consent the center lists is one the platform owns and one a precondition can point to`() {
+    fun `every consent the center lists is either Android's, with a setting read and a screen to go to, or the app's own, with no setting standing for it`() {
         assertEquals(ConsentBoundaries.all.size, ConsentBoundaries.all.map { it.key }.toSet().size)
         for (boundary in ConsentBoundaries.all) {
-            assertEquals(ConsentOwner.PLATFORM, boundary.owner)
-            val precondition = Precondition.values().single { it.consent == boundary.key }
-            assertTrue("${boundary.key} has somewhere to send the person", precondition.fix != null)
+            val preconditions = Precondition.values().filter { it.consent == boundary.key }
+            when (boundary.owner) {
+                ConsentOwner.PLATFORM -> {
+                    assertEquals("${boundary.key} is read from exactly one setting", 1, preconditions.size)
+                    assertTrue("${boundary.key} has somewhere to send the person", preconditions.single().fix != null)
+                }
+                ConsentOwner.APP -> assertTrue("${boundary.key} is the app's to keep, so no Android setting stands for it", preconditions.isEmpty())
+            }
         }
     }
 
@@ -122,5 +128,15 @@ class ReliabilityTest {
     fun `a ring is never reported as early`() {
         val early = outcome(fired = 999_000)!!
         assertEquals(AlarmOutcomeKind.ON_TIME, early.kind)
+    }
+
+    @Test
+    fun `Do Not Disturb that blocks alarms is a problem with a way to the sound settings, and one that lets them through is not`() {
+        val blocked = report(Precondition.DO_NOT_DISTURB to "blocks_alarms")
+        assertEquals(Severity.PROBLEM, blocked.of(Precondition.DO_NOT_DISTURB)!!.severity)
+        assertEquals(Fix.OPEN_SOUND_SETTINGS, blocked.of(Precondition.DO_NOT_DISTURB)!!.fix)
+        assertFalse(blocked.isHealthy)
+
+        assertEquals(Severity.OK, report().of(Precondition.DO_NOT_DISTURB)!!.severity)
     }
 }

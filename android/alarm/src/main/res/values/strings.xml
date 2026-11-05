@@ -16,4 +16,10 @@
     <string name="action_silence">Safety silence</string>
     <string name="missed_title">Missed alarm</string>
     <string name="missed_text">Nobody answered. Open to pick it up again, or skip it.</string>
+
+    <!-- What a ring says aloud when it starts -->
+    <string name="say_start">Time to start.</string>
+    <string name="say_start_titled">Time to start:</string>
+    <string name="say_first_step">First step:</string>
+    <string name="say_user_text">%1$s.</string>
 </resources>

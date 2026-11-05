@@ -11,9 +11,12 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
+import com.command.data.AppSettings
 import com.command.data.ApplyResult
+import com.command.data.MissionBrief
 import com.command.data.OccurrenceRepository
 import com.command.data.SessionPlan
 import com.command.data.db.OccurrenceRow
@@ -23,7 +26,12 @@ import com.command.domain.occurrence.EventType
 import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.time.Clock
+import com.command.domain.voice.SpeakResult
+import com.command.domain.voice.Speaker
+import com.command.domain.voice.SpeechProblem
+import com.command.domain.voice.SpeechUsage
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -56,6 +64,11 @@ class ReveilleService : Service() {
     @Inject lateinit var output: RingOutput
     @Inject lateinit var resolver: RingModeResolver
     @Inject lateinit var session: RingSession
+    @Inject lateinit var speaker: Speaker
+    @Inject lateinit var routes: AudioRoutes
+    @Inject lateinit var volume: AlarmVolumePolicy
+    @Inject lateinit var appSettings: AppSettings
+    @Inject lateinit var lines: ReveilleLines
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -65,7 +78,9 @@ class ReveilleService : Service() {
     // Everything below is touched on the main thread only.
     private var pending = 0
     private var lastStartId = 0
-    private var active: ActiveRing? = null
+
+    // Written on the main thread only, and read from others through RingSession.isRinging.
+    @Volatile private var active: ActiveRing? = null
 
     /** Occurrences accepted but not yet checked against the database; the sound may already be playing for them. */
     private val inFlight = ArrayList<String>()
@@ -80,6 +95,7 @@ class ReveilleService : Service() {
 
     private class ActiveRing(val id: String, val code: Int, val title: String?) {
         var playback: Job? = null
+        var speech: Job? = null
     }
 
     override fun onCreate() {
@@ -98,7 +114,11 @@ class ReveilleService : Service() {
     override fun onDestroy() {
         session.detach(this)
         output.stop()
+        speaker.stop()
+        speaker.release()
         scope.cancel()
+        // A service destroyed with a ring still in it (not a normal ending, which has already done this) leaves no ring to need the volume.
+        volume.restoreAnySoon()
         releaseHolds()
         super.onDestroy()
     }
@@ -134,6 +154,9 @@ class ReveilleService : Service() {
             // it. If the database then says this alarm is stale or its plan is over, the sound is stopped again.
             holdWakeLock()
             output.start()
+            // The speech engine takes seconds to start on some phones, so it is started now, alongside the database work that comes
+            // next, and not when the first line is asked for.
+            runCatching { speaker.prepare() }
         }
         queue(id) { deliver(id, code) }
     }
@@ -181,6 +204,9 @@ class ReveilleService : Service() {
             row = current // restarted in the middle of this ring
         }
 
+        // The same alarm delivered twice (two reconciles can do it): the ring that is going carries on, and its line is not said again.
+        if (active?.id == row.id) return
+
         val plan = SessionPlan.of(row)
         if (plan == null || plan.isOver(clock.nowMs(), clock.elapsedRealtimeMs())) {
             // The plan ended while nothing was alive to enforce it: record the miss and do not ring at all.
@@ -189,14 +215,19 @@ class ReveilleService : Service() {
         }
         // The last suspension before the ring is installed comes first, and the check for an end that arrived in the
         // meantime comes after it with nothing in between, so a silence can never slip through the gap.
-        val title = repository.missionTitle(row.missionId)
+        val brief = repository.missionBrief(row.missionId)
         if (id in endedEarly) return // silenced or answered in the first moments: there is nothing left to sound
-        takeOver(row, code, plan, title)
+        takeOver(row, code, plan, brief)
     }
 
     /** Makes [row] the ring that is sounding. An earlier ring's sound loop ends; its occurrence is left as it is. */
-    private fun takeOver(row: OccurrenceRow, code: Int, plan: SessionPlan, title: String?) {
-        active?.playback?.cancel()
+    private fun takeOver(row: OccurrenceRow, code: Int, plan: SessionPlan, brief: MissionBrief?) {
+        val title = brief?.title
+        val previous = active
+        previous?.playback?.cancel()
+        previous?.speech?.cancel()
+        // The displaced ring's line is stopped, in the player and in the engine, before the new ring's is asked for.
+        if (previous != null) speaker.stop()
         val ring = ActiveRing(row.id, code, title)
         active = ring
         // This ring's notification, now with its title, becomes the foreground one. An earlier ring's, if there was one,
@@ -209,6 +240,55 @@ class ReveilleService : Service() {
             // Out of ring time and still unanswered: that is a miss. (The cycle-end alarm would do the same.)
             timeOutRing(this@ReveilleService, repository, ring.id, ring.code, EventSource.SERVICE)
             endRing(ring.id)
+        }
+        // The tone is already going. The first line joins it when the phone's voice is ready (it never holds the ring up), and the
+        // volume is raised only if the person agreed to that. A ring that takes over from another finds the volume already raised and
+        // adopts it, so that the first ring's delayed clean-up cannot lower it while this one sounds.
+        ring.speech = launchExtra("speech") { say(row, brief) }
+        launchExtra("raising the volume") { volume.raiseFor(row) }
+    }
+
+    /**
+     * The spoken line and the volume are extras to the ring. Whatever goes wrong in them, the ring goes on, so nothing they throw is
+     * allowed to reach the process, which an uncaught exception in a coroutine would kill in the middle of an alarm.
+     */
+    private fun launchExtra(what: String, work: suspend () -> Unit): Job = scope.launch {
+        try {
+            work()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "$what failed, and the ring carries on", e)
+        }
+    }
+
+    /**
+     * Says the opening line once, over the tone, unless the person asked for speech through a headset only and none is connected.
+     * What happened is written down either way: that it was spoken and where, that the phone could not speak and why, or that the
+     * route said no. The words are on the screen whatever happens here.
+     */
+    private suspend fun say(row: OccurrenceRow, brief: MissionBrief?) {
+        val policy = appSettings.routePolicy()
+        val devices = routes.describe()
+        if (!policy.allowsSpeech(routes.headsetConnected())) {
+            repository.logEvent(EventType.AUDIO_ROUTE, row, EventSource.SERVICE, EventPayload.of("devices" to devices, "policy" to policy, "spoke" to false))
+            return
+        }
+        // The tone is turned down only once the line is about to be heard: while the engine is starting up or writing the audio, which
+        // can take seconds, the alarm is as loud as it ever is.
+        val result = try {
+            speaker.speak(lines.reveille(brief), SpeechUsage.ALARM, policy) { output.duck(true) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            SpeakResult.Unavailable(SpeechProblem.UNEXPECTED)
+        } finally {
+            output.duck(false)
+        }
+        when (result) {
+            is SpeakResult.Unavailable -> repository.logEvent(EventType.TTS_UNAVAILABLE, row, EventSource.SERVICE, EventPayload.of("reason" to result.reason))
+            is SpeakResult.Spoken -> repository.logEvent(EventType.AUDIO_ROUTE, row, EventSource.SERVICE, EventPayload.of("devices" to devices, "policy" to policy, "spoke" to true))
+            SpeakResult.Interrupted -> Unit
         }
     }
 
@@ -242,8 +322,11 @@ class ReveilleService : Service() {
         val ring = active
         if (ring != null && ring.id == occurrenceId) {
             ring.playback?.cancel()
+            ring.speech?.cancel()
+            speaker.stop()
             active = null
             output.stop()
+            volume.restoreSoonFor(occurrenceId)
             settle()
         } else if (occurrenceId in inFlight) {
             // Ended before its alarm had even been checked (a silence in the first moments, while the database is still
@@ -255,8 +338,12 @@ class ReveilleService : Service() {
 
     private fun shutDown() {
         active?.playback?.cancel()
+        active?.speech?.cancel()
         active = null
         output.stop()
+        speaker.stop()
+        speaker.release()
+        volume.restoreAnySoon()
         releaseHolds()
         runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         // Only stops the service if no newer start has arrived since: a delivery that raced this must not be cut off.
@@ -304,5 +391,6 @@ class ReveilleService : Service() {
 
         const val MAX_RING_MS = 10 * 60_000L
         private const val FALLBACK_ID = 1
+        private const val TAG = "ReveilleService"
     }
 }

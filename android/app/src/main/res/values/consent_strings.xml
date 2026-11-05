@@ -26,4 +26,10 @@
     <string name="consent_exact_allows">Lets an alarm ring at the minute you set instead of at some point in a window.</string>
     <string name="consent_fullscreen_title">Full-screen alarms</string>
     <string name="consent_fullscreen_allows">Lets a ringing alarm take over a locked screen.</string>
+    <string name="consent_volume_title">Raise the alarm volume</string>
+    <string name="consent_volume_allows">While an alarm rings, COMMAND may turn the alarm volume up so that you can hear it. It puts the volume back afterwards, unless you have changed it yourself in the meantime.</string>
+    <string name="consent_volume_not">It never changes the ring or media volume. It changes the alarm volume only around an alarm: up when one starts to ring, and back when it stops.</string>
+    <string name="consent_app_note">This is yours to change here, at any time.</string>
+    <string name="consent_switch_on">On</string>
+    <string name="consent_switch_off">Off</string>
 </resources>

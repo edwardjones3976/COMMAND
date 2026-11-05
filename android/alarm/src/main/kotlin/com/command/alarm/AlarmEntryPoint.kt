@@ -2,19 +2,26 @@ package com.command.alarm
 
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.media.AudioManager
 import com.command.data.OccurrenceRepository
 import com.command.domain.alarm.RingController
+import com.command.domain.voice.Speaker
+import com.command.voice.AndroidSpeechSynthesizer
+import com.command.voice.AudioTrackPlayer
+import com.command.voice.LocalTtsSpeaker
 import dagger.Module
 import dagger.Binds
 import dagger.Provides
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import javax.inject.Singleton
 
 /** Lets plain broadcast receivers reach the object graph without being Hilt receivers themselves. */
 @EntryPoint
@@ -52,6 +59,20 @@ abstract class AlarmBindings {
     @Binds abstract fun ringController(impl: AndroidRingController): RingController
     @Binds abstract fun ringOutput(impl: AndroidRingOutput): RingOutput
     @Binds abstract fun reliabilityMonitor(impl: PlatformReliabilityMonitor): ReliabilityMonitor
+    @Binds abstract fun audioRoutes(impl: AndroidAudioRoutes): AudioRoutes
+}
+
+/**
+ * The phone's own voice for the ring. Nothing is started until a ring begins: the service starts the engine alongside the ring and lets
+ * it go when the ring is over. The player is given the audio manager so that a line meant for a headset only can be pinned to one.
+ */
+@Module
+@InstallIn(SingletonComponent::class)
+object VoiceProviders {
+    @Provides
+    @Singleton
+    fun speaker(@ApplicationContext context: Context): Speaker =
+        LocalTtsSpeaker(AndroidSpeechSynthesizer(context), AudioTrackPlayer(context.getSystemService(AudioManager::class.java)))
 }
 
 /**

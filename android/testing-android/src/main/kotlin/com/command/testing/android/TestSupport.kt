@@ -2,9 +2,11 @@ package com.command.testing.android
 
 import android.content.Context
 import com.command.alarm.AlarmBindings
+import com.command.alarm.AudioRoutes
 import com.command.alarm.PendingPorts
 import com.command.alarm.ReliabilityMonitor
 import com.command.alarm.RingOutput
+import com.command.alarm.VoiceProviders
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import com.command.data.ConsentRevocationListener
@@ -25,6 +27,11 @@ import com.command.domain.model.ZoneMode
 import com.command.domain.reliability.Precondition
 import com.command.domain.reliability.PreconditionSnapshot
 import com.command.domain.time.Clock
+import com.command.domain.voice.Line
+import com.command.domain.voice.RoutePolicy
+import com.command.domain.voice.SpeakResult
+import com.command.domain.voice.Speaker
+import com.command.domain.voice.SpeechUsage
 import com.command.testing.FakeAlarmScheduler
 import com.command.testing.FakeClock
 import com.command.testing.FakeRingController
@@ -34,11 +41,14 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import dagger.hilt.testing.TestInstallIn
+import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.junit.Assert.fail
 import org.robolectric.Shadows.shadowOf
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.util.UUID
+import kotlin.coroutines.resume
 import javax.inject.Singleton
 
 class FakeRingOutput : RingOutput {
@@ -47,8 +57,13 @@ class FakeRingOutput : RingOutput {
     var ringing = false
         private set
 
+    var ducked = false
+        private set
+    val ducks = ArrayList<Boolean>()
+
     override fun start() { starts++; ringing = true }
     override fun stop() { stops++; ringing = false }
+    override fun duck(ducked: Boolean) { this.ducked = ducked; ducks += ducked }
 }
 
 /**
@@ -74,11 +89,70 @@ class FakeReliabilityMonitor(private val recorder: PreconditionRecorder) : Relia
         fun healthy() = PreconditionSnapshot(
             mapOf(
                 Precondition.EXACT_ALARMS to "granted", Precondition.NOTIFICATIONS to "granted", Precondition.FULL_SCREEN_INTENT to "granted",
-                Precondition.ALARM_CHANNEL to "HIGH", Precondition.ALARM_VOLUME to "audible", Precondition.BATTERY_OPTIMIZATION to "exempt",
+                Precondition.ALARM_CHANNEL to "HIGH", Precondition.ALARM_VOLUME to "audible", Precondition.DO_NOT_DISTURB to "free",
+                Precondition.BATTERY_OPTIMIZATION to "exempt",
                 Precondition.BACKGROUND_RESTRICTED to "no", Precondition.STANDBY_BUCKET to "ACTIVE",
             ),
         )
     }
+}
+
+/**
+ * Says nothing and remembers what it was asked to say. The result is the test's to choose, and a line can be held mid-speech
+ * ([hold]) so that a ring can end under it.
+ */
+class FakeSpeaker : Speaker {
+    val spoken = ArrayList<Pair<Line, SpeechUsage>>()
+
+    /** The route each line was asked to be heard on, in the order the lines were asked for. */
+    val routes = ArrayList<RoutePolicy>()
+    var result: SpeakResult = SpeakResult.Spoken(1_000)
+
+    /** When set, speaking throws it, as a broken engine might. */
+    var failWith: Exception? = null
+    var hold = false
+    var stops = 0
+        private set
+    var releases = 0
+        private set
+    var prepares = 0
+        private set
+    private var held: CancellableContinuation<Unit>? = null
+
+    override suspend fun speak(line: Line, usage: SpeechUsage, route: RoutePolicy, onAudible: () -> Unit): SpeakResult {
+        spoken += line to usage
+        routes += route
+        failWith?.let { throw it }
+        // A phone that cannot speak makes no sound, so nobody is told to make room for it.
+        if (result !is SpeakResult.Unavailable) onAudible()
+        if (hold) suspendCancellableCoroutine<Unit> { held = it }
+        return result
+    }
+
+    override fun prepare() {
+        prepares++
+    }
+
+    override fun stop() {
+        stops++
+        finish()
+    }
+
+    override fun release() {
+        releases++
+    }
+
+    /** Lets a held line finish. */
+    fun finish() {
+        held?.takeIf { it.isActive }?.resume(Unit)
+        held = null
+    }
+}
+
+class FakeAudioRoutes : AudioRoutes {
+    var headset = false
+    override fun headsetConnected(): Boolean = headset
+    override fun describe(): String = if (headset) "speaker+wired" else "speaker"
 }
 
 class RecordingPoster : CheckInPoster {
@@ -88,7 +162,7 @@ class RecordingPoster : CheckInPoster {
 
 /** Replaces every real binding with a fake, so the service, receivers and repository run against an in-memory database. */
 @Module
-@TestInstallIn(components = [SingletonComponent::class], replaces = [DataModule::class, AlarmBindings::class, PendingPorts::class])
+@TestInstallIn(components = [SingletonComponent::class], replaces = [DataModule::class, AlarmBindings::class, PendingPorts::class, VoiceProviders::class])
 object FakeAlarmModule {
     /** Monday 2026-11-02 09:00 UTC. */
     val T0: Long = ZonedDateTime.of(2026, 11, 2, 9, 0, 0, 0, ZoneOffset.UTC).toInstant().toEpochMilli()
@@ -110,6 +184,10 @@ object FakeAlarmModule {
     @Provides @Singleton fun roller(): WindowRoller = WindowRoller { }
     @Provides @Singleton fun fakeMonitor(recorder: PreconditionRecorder): FakeReliabilityMonitor = FakeReliabilityMonitor(recorder)
     @Provides @Singleton fun monitor(fake: FakeReliabilityMonitor): ReliabilityMonitor = fake
+    @Provides @Singleton fun fakeSpeaker(): FakeSpeaker = FakeSpeaker()
+    @Provides @Singleton fun speaker(fake: FakeSpeaker): Speaker = fake
+    @Provides @Singleton fun fakeRoutes(): FakeAudioRoutes = FakeAudioRoutes()
+    @Provides @Singleton fun routes(fake: FakeAudioRoutes): AudioRoutes = fake
 }
 
 fun testMission(title: String = "Write the report", profileId: String? = null): MissionRow = MissionRow(
