@@ -212,6 +212,7 @@ private fun consentTitle(key: ConsentKey): Int = when (key) {
     ConsentKey.EXACT_ALARM -> R.string.consent_exact_title
     ConsentKey.FULL_SCREEN -> R.string.consent_fullscreen_title
     ConsentKey.VOLUME_CONTROL -> R.string.consent_volume_title
+    ConsentKey.CALENDAR_READ -> R.string.consent_calendar_title
     else -> error("$key has no words yet: a consent is added to the list together with what it says")
 }
 
@@ -221,6 +222,7 @@ private fun consentAllows(key: ConsentKey): Int = when (key) {
     ConsentKey.EXACT_ALARM -> R.string.consent_exact_allows
     ConsentKey.FULL_SCREEN -> R.string.consent_fullscreen_allows
     ConsentKey.VOLUME_CONTROL -> R.string.consent_volume_allows
+    ConsentKey.CALENDAR_READ -> R.string.consent_calendar_allows
     else -> error("$key has no words yet: a consent is added to the list together with what it says")
 }
 
@@ -228,5 +230,6 @@ private fun consentAllows(key: ConsentKey): Int = when (key) {
 @StringRes
 private fun consentNot(key: ConsentKey): Int? = when (key) {
     ConsentKey.VOLUME_CONTROL -> R.string.consent_volume_not
+    ConsentKey.CALENDAR_READ -> R.string.consent_calendar_not
     else -> null
 }

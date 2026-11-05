@@ -21,6 +21,7 @@ class ReveilleAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = AlarmContract.occurrenceId(intent) ?: return
         val code = AlarmContract.requestCode(intent)
+        val setFor = intent.getLongExtra(AlarmContract.EXTRA_AT, AlarmContract.NO_TIME)
         ReceiverWakeLock.acquire(context, WAKE_LOCK_MS)
 
         val serviceIntent = Intent(context, ReveilleService::class.java)
@@ -28,10 +29,11 @@ class ReveilleAlarmReceiver : BroadcastReceiver() {
             .setData(intent.data)
             .putExtra(AlarmContract.EXTRA_OCCURRENCE_ID, id)
             .putExtra(AlarmContract.EXTRA_REQUEST_CODE, code)
+            .putExtra(AlarmContract.EXTRA_AT, setFor)
         try {
             ContextCompat.startForegroundService(context, serviceIntent)
         } catch (e: Exception) {
-            runAsync(context) { it.resolver().degrade(id, code, reasonOf(e)) }
+            runAsync(context) { it.resolver().degrade(id, code, reasonOf(e), setFor) }
         }
     }
 

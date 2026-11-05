@@ -24,10 +24,13 @@ enum class ReconcileTrigger {
     RESUMED,
 
     /** A pause was started or moved: the run takes down what it holds back and arms again what a shorter one released. */
-    PAUSE_STARTED;
+    PAUSE_STARTED,
+
+    /** A calendar sync changed the plan: this arms what it created and moved. It runs every hour, so it is not worth a line by itself. */
+    CALENDAR_SYNC;
 
     /** A run the person did not start is worth a line in the audit log even when it found nothing to do. */
-    val alwaysLogged: Boolean get() = this != OPEN && this != PERIODIC
+    val alwaysLogged: Boolean get() = this != OPEN && this != PERIODIC && this != CALENDAR_SYNC
 }
 
 /**

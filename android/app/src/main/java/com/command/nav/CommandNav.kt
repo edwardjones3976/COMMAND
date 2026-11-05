@@ -16,6 +16,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.command.calendar.CalendarSourcesRoute
 import com.command.consents.ConsentCenterRoute
 import com.command.detail.OccurrenceDetailRoute
 import com.command.editor.MissionEditorRoute
@@ -42,6 +43,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val DATA = "data"
     const val HANDSHAKES = "handshakes"
+    const val CALENDARS = "calendars"
     const val ARG_ID = "id"
     private const val HANDSHAKE_EDITOR = "handshake"
     private const val DETAIL = "detail"
@@ -140,7 +142,11 @@ private fun CommandNavHost(
                 onOpenConsents = { navController.navigate(Routes.CONSENTS) },
                 onOpenData = { navController.navigate(Routes.DATA) },
                 onOpenHandshakes = { navController.navigate(Routes.HANDSHAKES) },
+                onOpenCalendars = { navController.navigate(Routes.CALENDARS) },
             )
+        }
+        composable(Routes.CALENDARS) {
+            CalendarSourcesRoute(onBack = { navController.popBackStack() })
         }
         composable(Routes.HANDSHAKES) {
             HandshakeProfilesRoute(onBack = { navController.popBackStack() }, onEdit = { navController.navigate(Routes.handshakeEditor(it)) })

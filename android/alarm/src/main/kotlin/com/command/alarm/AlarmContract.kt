@@ -11,6 +11,9 @@ object AlarmContract {
     /** When an alarm was meant to go off, so that its receiver can tell how late the platform delivered it. */
     const val EXTRA_AT = "com.command.extra.AT"
 
+    /** An alarm that does not say what time it was set for. */
+    const val NO_TIME = -1L
+
     /** Which quick answer was tapped on a check-in notification (the name of a CheckInAnswer). */
     const val EXTRA_ANSWER = "com.command.extra.ANSWER"
 

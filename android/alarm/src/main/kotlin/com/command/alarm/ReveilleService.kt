@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import androidx.annotation.VisibleForTesting
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -15,6 +16,7 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import com.command.data.AppSettings
+import com.command.data.ApplyExtras
 import com.command.data.ApplyResult
 import com.command.data.MissionBrief
 import com.command.data.OccurrenceRepository
@@ -165,6 +167,7 @@ class ReveilleService : Service() {
             return
         }
         val ringing = active
+        val setFor = intent?.getLongExtra(AlarmContract.EXTRA_AT, AlarmContract.NO_TIME) ?: AlarmContract.NO_TIME
         try {
             // First: become a foreground service (a deadline of a few seconds). Everything else comes after. If something is
             // ringing already, its notification stays the foreground one until this delivery has proved itself.
@@ -178,7 +181,7 @@ class ReveilleService : Service() {
             // Not allowed to run as a foreground service right now. Still answer the start if the platform will let us (its
             // deadline is a few seconds and the fallback needs the database), then ring from a full-screen notification.
             runCatching { ServiceCompat.startForeground(this, FALLBACK_ID, RingNotifications.starting(this), FGS_TYPE) }
-            queue(null) { resolver.degrade(id, code, reasonOf(e)) }
+            queue(null) { resolver.degrade(id, code, reasonOf(e), setFor) }
             return
         }
         if (ringing == null) {
@@ -190,7 +193,7 @@ class ReveilleService : Service() {
             // next, and not when the first line is asked for.
             runCatching { speaker.prepare() }
         }
-        queue(id) { deliver(id, code) }
+        queue(id) { deliver(id, code, setFor) }
     }
 
     /**
@@ -219,9 +222,13 @@ class ReveilleService : Service() {
         if (active == null && pending == 0) shutDown()
     }
 
-    private suspend fun deliver(id: String, code: Int) {
+    private suspend fun deliver(id: String, code: Int, setFor: Long) {
+        beforeFire?.invoke(id)
         // The database work is never cancelled half-way: an alarm that has been consumed must end up recorded.
-        val fire = withContext(NonCancellable) { repository.apply(id, OccurrenceCommand.Fire, EventSource.SERVICE) }
+        // Whether this alarm is still for the occurrence's time is decided in the transaction of the Fire. If it was moved meanwhile, Fire is
+        // rejected and the alarm for the new time set, and what follows treats it like any other stale alarm.
+        val time = ApplyExtras(setForUtc = setFor.takeIf { it != AlarmContract.NO_TIME })
+        val fire = withContext(NonCancellable) { repository.apply(id, OccurrenceCommand.Fire, EventSource.SERVICE, time) }
         val row: OccurrenceRow
         if (fire is ApplyResult.Applied) {
             row = fire.occurrence
@@ -427,6 +434,10 @@ class ReveilleService : Service() {
     }
 
     companion object {
+        /** A test's way in between the delivery of an alarm and its Fire, for what may commit in that gap. */
+        @VisibleForTesting
+        internal var beforeFire: (suspend (String) -> Unit)? = null
+
         /**
          * The foreground service type passed to the platform. Media playback is the honest description of an alarm tone and
          * needs no special permission; the manifest also declares systemExempted (for holders of an exact-alarm permission)

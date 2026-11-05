@@ -1,5 +1,6 @@
 package com.command.schedule
 
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -239,5 +240,12 @@ class ScheduleScreenTest {
         compose.onNodeWithTag(ScheduleTags.PAUSED_BANNER).assertDoesNotExist()
         compose.onNodeWithText("Paused").assertIsDisplayed()
         compose.onNodeWithText("Missed").assertDoesNotExist()
+    }
+
+    @Test
+    fun `an overlap is shown and is part of what the row announces`() {
+        val r = row("a", "Standup", OccurrenceState.ARMED, atMs = at(2, 15))
+        show(ScheduleUiState.Ready(listOf(r), emptyList(), 0, conflicted = setOf("a"), today = today))
+        compose.onNodeWithTag(ScheduleTags.row("a"), useUnmergedTree = false).assert(androidx.compose.ui.test.hasContentDescription("Overlaps with something else", substring = true))
     }
 }

@@ -50,6 +50,9 @@ object SettingKeys {
     /** When the pause in force began; kept with [GLOBAL_PAUSE_UNTIL] so that only what came due inside the pause is blamed on it. */
     const val GLOBAL_PAUSE_SINCE = "global_pause_since"
 
+    /** "true" while the calendar permission is known to be gone, so that its loss is logged once and not every hour. */
+    const val CALENDAR_PERMISSION_LOST = "calendar_permission_lost"
+
     const val LEGACY_IMPORT_DONE = "legacy_import_done"
     const val AI_DAILY_BUDGET = "ai_daily_budget"
     const val ALARM_ROUTE_POLICY = "alarm_route_policy"
