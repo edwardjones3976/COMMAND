@@ -1,5 +1,6 @@
 package com.command.domain.alarm
 
+import com.command.domain.voice.Line
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.WorkKind
 
@@ -61,6 +62,8 @@ data class CheckInPrompt(
     val index: Int,
     val title: String,
     val started: Boolean,
+    /** The coaching line for this question, in the person's chosen voice; null asks the plain question. It may hold words the person wrote, so it stays off a locked screen. */
+    val line: Line? = null,
 )
 
 /** Posts a follow-up status question to the user (a notification with quick answers) and takes it away again. */

@@ -117,6 +117,11 @@ class DialEffectsTest {
     }
 
     @Test
+    fun `alert intensity sets the loudness target of a spoken line`() {
+        assertEquals(listOf(-16, -16, -16, -15, -14), (1..5).map { DialEffects.loudnessTargetLufs(it) })
+    }
+
+    @Test
     fun `follow-up persistence sets how many questions and how far apart`() {
         assertEquals(listOf(10 * minute), CheckInSchedule.forPersistence(1).gapsMs)
         assertEquals(listOf(10 * minute, 10 * minute), CheckInSchedule.forPersistence(2).gapsMs)
