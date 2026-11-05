@@ -71,12 +71,6 @@ object VoiceMastering {
     private const val ALARM_TOLERANCE_LU = 0.2
     private const val ALARM_SEARCH_STEPS = 8
 
-    /**
-     * How far past the gain a plain measurement asks for the search may push. Loudness comes first, so a line is driven hard to reach its target;
-     * this is what stops a target the ceiling makes impossible from raising breaths and hiss without end.
-     */
-    private const val MAX_DRIVE_DB = 30.0
-
     /** How one line is levelled. */
     sealed interface Profile {
         /** Something the person asked to hear: speech level [TARGET_SPEECH_DBFS] plus [boostDb]. */
@@ -110,7 +104,8 @@ object VoiceMastering {
     /**
      * Search for the one gain that lands on the target once the pre-limiter and the true-peak limiter have had their say: both take level away
      * from a hot line, which is why a single measurement is not enough (the old chain lost 5 dB to its limiter this way). Each step corrects
-     * by what the last one measured. A target the ceiling makes impossible ends at the loudest line that was found.
+     * by what the last one measured. Loudness comes first, so a line is driven as hard as its target needs, up to [MAX_ALARM_GAIN_DB]; a target
+     * the ceiling makes impossible ends at the line closest to it, at the cost of louder breaths and hiss.
      */
     private fun masterAlarm(input: ShortArray, sampleRate: Int, profile: Profile.ALARM): Result {
         if (input.isEmpty()) return Result(input, -96f, -96f)
@@ -123,9 +118,7 @@ object VoiceMastering {
         val start = LoudnessMeter.integratedLufs(x, sr)
         var best = x
         if (start.isFinite()) {
-            val direct = target - start
-            val most = minOf(direct + MAX_DRIVE_DB, MAX_ALARM_GAIN_DB)
-            var gainDb = direct.coerceIn(-MAX_ALARM_GAIN_DB, most)
+            var gainDb = (target - start).coerceIn(-MAX_ALARM_GAIN_DB, MAX_ALARM_GAIN_DB)
             var bestError = Double.MAX_VALUE
             for (step in 0 until ALARM_SEARCH_STEPS) {
                 val gain = dbToLin(gainDb.toFloat())
@@ -139,7 +132,7 @@ object VoiceMastering {
                 }
                 if (abs(error) <= ALARM_TOLERANCE_LU) break
                 // The limiters give back only part of a change in gain, so a shortfall is pushed harder than it measures.
-                val next = (gainDb + error * if (error > 0) 3.0 else 1.0).coerceIn(-MAX_ALARM_GAIN_DB, most)
+                val next = (gainDb + error * if (error > 0) 3.0 else 1.0).coerceIn(-MAX_ALARM_GAIN_DB, MAX_ALARM_GAIN_DB)
                 if (next == gainDb) break
                 gainDb = next
             }
