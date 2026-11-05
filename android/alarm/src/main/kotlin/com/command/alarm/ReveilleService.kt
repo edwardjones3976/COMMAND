@@ -20,6 +20,8 @@ import com.command.data.MissionBrief
 import com.command.data.OccurrenceRepository
 import com.command.data.SessionPlan
 import com.command.data.db.OccurrenceRow
+import com.command.domain.coaching.CoachingPhase
+import com.command.domain.voice.Line
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.EventPayload
 import com.command.domain.occurrence.EventType
@@ -292,6 +294,15 @@ class ReveilleService : Service() {
         }
     }
 
+    /** The coaching line. The plain words need no database: a failed read costs the coaching, never the line. */
+    private suspend fun openingLine(row: OccurrenceRow, brief: MissionBrief?): Line = try {
+        repository.lineFor(row, CoachingPhase.REVEILLE)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        lines.reveille(brief)
+    }
+
     /**
      * Says the opening line once, over the tone, unless the person asked for speech through a headset only and none is connected.
      * What happened is written down either way: that it was spoken and where, that the phone could not speak and why, or that the
@@ -307,7 +318,7 @@ class ReveilleService : Service() {
         // The tone is turned down only once the line is about to be heard: while the engine is starting up or writing the audio, which
         // can take seconds, the alarm is as loud as it ever is.
         val result = try {
-            speaker.speak(lines.reveille(brief), SpeechUsage.ALARM, policy) { output.duck(true) }
+            speaker.speak(openingLine(row, brief), SpeechUsage.ALARM, policy) { output.duck(true) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

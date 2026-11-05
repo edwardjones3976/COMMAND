@@ -6,6 +6,7 @@ import android.content.Context
 import androidx.core.app.NotificationCompat
 import androidx.test.core.app.ApplicationProvider
 import com.command.domain.alarm.CheckInPrompt
+import com.command.domain.voice.Line
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
@@ -48,6 +49,13 @@ class CheckInNotificationsTest {
         val n = CheckInNotifications.question(context, prompt(started = true))
         assertEquals("How is it going?", text(n))
         assertEquals(listOf("Still working", "Done", "Open check-in"), titles(n))
+    }
+
+    @Test
+    fun `a coaching line takes the place of the plain question, and stays off a locked screen`() {
+        val n = CheckInNotifications.question(context, prompt().copy(line = Line.of("My private wording.", carriesUserText = true)))
+        assertEquals("My private wording.", text(n))
+        assertEquals("Have you started?", text(n.publicVersion))
     }
 
     @Test

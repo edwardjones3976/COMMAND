@@ -11,6 +11,7 @@ import com.command.data.ConsentStore
 import com.command.data.OccurrenceRepository
 import com.command.data.db.CommandDb
 import com.command.data.db.OccurrenceRow
+import com.command.domain.coaching.DirectiveLint
 import com.command.domain.model.ConsentKey
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
@@ -102,8 +103,8 @@ class ReveilleServiceSpeechTest {
 
         val (line, usage) = speaker.spoken.single()
         assertEquals(SpeechUsage.ALARM, usage)
-        assertEquals("Time to start: Write the report. First step: Open the document.", line.text)
-        assertEquals("the words the person typed are marked as theirs", listOf(false, true, false, true), line.segments.map { it.carriesUserText })
+        assertEquals("the coaching line says the person's words, marked as theirs", listOf("Write the report.", "Open the document."), line.segments.filter { it.carriesUserText }.map { it.text })
+        assertTrue("the coaching engine's words, not the plain ones", DirectiveLint.check(line).isEmpty() && line.text != "Time to start: Write the report. First step: Open the document.")
         assertEquals("down while it speaks, up when it is done", listOf(true, false), output.ducks)
         assertTrue("the tone never stopped for it", output.ringing)
         assertEquals(1, events(o, EventType.AUDIO_ROUTE).size)

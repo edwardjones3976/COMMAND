@@ -36,6 +36,7 @@ abstract class CommandDb : RoomDatabase() {
     abstract fun calendarDao(): CalendarDao
     abstract fun directiveCacheDao(): DirectiveCacheDao
     abstract fun voiceRenderDao(): VoiceRenderDao
+    abstract fun templateOverrides(): TemplateOverrideDao
     abstract fun syncOutboxDao(): SyncOutboxDao
 
     companion object {
