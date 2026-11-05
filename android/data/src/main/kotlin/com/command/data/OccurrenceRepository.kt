@@ -260,14 +260,18 @@ class OccurrenceRepository @Inject constructor(
 
     /**
      * How loud an occurrence's spoken line is: what the ring was fired with, so that a profile edited while it sounds changes nothing. A ring
-     * from before these were pinned follows the profile.
+     * from before these were pinned follows the profile. A level that cannot be read costs the setting, never the line: it is the louder choice.
      */
-    suspend fun speechLevelOf(occurrence: OccurrenceRow): SpeechLevel {
+    suspend fun speechLevelOf(occurrence: OccurrenceRow): SpeechLevel = try {
         val pinned = Codec.decodeSession(occurrence.sessionJson)
         val mission = db.missions().get(occurrence.missionId)
         val intensity = pinned.alertIntensity ?: dialsFor(mission?.profileId).alertIntensity
         val trim = pinned.voiceTrimDb ?: voiceTrimOf(profileFor(mission?.profileId))
-        return SpeechLevel(intensity, trim)
+        SpeechLevel(intensity, trim)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        SpeechLevel.LOUDEST
     }
 
     /** The loudness trim of the profile's voice pack; none when it has no pack, or one that is gone. */

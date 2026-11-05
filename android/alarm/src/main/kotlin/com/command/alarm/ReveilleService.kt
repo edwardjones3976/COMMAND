@@ -32,7 +32,6 @@ import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.time.Clock
 import com.command.domain.voice.SpeakResult
 import com.command.domain.voice.Speaker
-import com.command.domain.voice.SpeechLevel
 import com.command.domain.voice.SpeechProblem
 import com.command.domain.voice.SpeechUsage
 import dagger.hilt.android.AndroidEntryPoint
@@ -311,15 +310,6 @@ class ReveilleService : Service() {
         lines.reveille(brief)
     }
 
-    /** A level that cannot be read costs the setting, never the line: it is said at the louder choice. */
-    private suspend fun levelOf(row: OccurrenceRow): SpeechLevel = try {
-        repository.speechLevelOf(row)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        SpeechLevel.LOUDEST
-    }
-
     /**
      * Says the opening line once, over the tone, unless the person asked for speech through a headset only and none is connected.
      * What happened is written down either way: that it was spoken and where, that the phone could not speak and why, or that the
@@ -335,7 +325,7 @@ class ReveilleService : Service() {
         // The tone is turned down only once the line is about to be heard: while the engine is starting up or writing the audio, which
         // can take seconds, the alarm is as loud as it ever is.
         val result = try {
-            speaker.speak(openingLine(row, brief), SpeechUsage.ALARM, policy, levelOf(row)) { output.duck(true) }
+            speaker.speak(openingLine(row, brief), SpeechUsage.ALARM, policy, repository.speechLevelOf(row)) { output.duck(true) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

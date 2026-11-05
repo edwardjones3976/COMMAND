@@ -20,7 +20,6 @@ import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.voice.RoutePolicy
 import com.command.domain.voice.SpeakResult
-import com.command.domain.voice.SpeechLevel
 import com.command.domain.voice.SpeechProblem
 import com.command.domain.voice.SpeechUsage
 import com.command.testing.android.FakeAlarmModule
@@ -108,24 +107,6 @@ class ReveilleServiceSpeechTest {
         startService(fired)
         awaitUntil(message = "spoken") { speaker.levels.isNotEmpty() }
         assertEquals(pinned, speaker.levels.single())
-    }
-
-    @Test
-    fun `a loudness that cannot be read costs the setting, never the line`() {
-        val o = armed()
-        runBlocking { repo.apply(o.id, OccurrenceCommand.Fire, EventSource.SYSTEM) }
-        val sql = db.openHelper.writableDatabase
-        // A ring from before the level was pinned reads the profile, and this profile is from a newer version of the app.
-        sql.execSQL("UPDATE occurrences SET session_json = '{}' WHERE id = ?", arrayOf(o.id))
-        sql.execSQL("UPDATE execution_profiles SET personality = 'FROM_A_NEWER_VERSION'")
-        val fired = runBlocking { repo.get(o.id)!! }
-
-        startService(fired)
-        awaitUntil(message = "the line is said, or the log says it could not be") {
-            speaker.levels.isNotEmpty() || events(o, EventType.TTS_UNAVAILABLE).isNotEmpty()
-        }
-
-        assertEquals("the plain line, at the louder choice", listOf(SpeechLevel.LOUDEST), speaker.levels)
     }
 
     @Test

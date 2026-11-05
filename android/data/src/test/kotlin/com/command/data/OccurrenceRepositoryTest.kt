@@ -241,6 +241,14 @@ class OccurrenceRepositoryTest {
     }
 
     @Test
+    fun `a level that cannot be read costs the setting, never the line`() = run {
+        val m = f.mission(profileId = "builtin_command")
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        f.db.openHelper.writableDatabase.execSQL("UPDATE execution_profiles SET personality = 'FROM_THE_FUTURE'")
+        assertEquals(SpeechLevel.LOUDEST, f.repo.speechLevelOf(o))
+    }
+
+    @Test
     fun `a chain the person saved is pinned when the alarm fires, so editing it, or going back to the standard, while it sounds changes nothing for the person in the middle of it`() = run {
         val profiles = ProfileRepository(f.db)
         val mine = ChainSpec(ChainOp.OR, listOf(StepSpec(HandshakeMode.TYPING, 3, 90), StepSpec(HandshakeMode.HOLD, 2, 45, 5)))
