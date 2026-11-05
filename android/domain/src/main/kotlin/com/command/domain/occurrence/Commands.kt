@@ -45,8 +45,11 @@ sealed class OccurrenceCommand(val label: String) {
         init { require(minutes in 1..MAX_DELAY_MINUTES) { "reschedule must be 1..$MAX_DELAY_MINUTES minutes" } }
     }
 
-    /** A follow-up alarm fired. The index must match the next expected check-in, so stale alarms are ignored. */
-    data class CheckInDue(val index: Int) : OccurrenceCommand("CHECK_IN_DUE")
+    /**
+     * A follow-up alarm fired. The index must match the next expected check-in, so stale alarms are ignored. [lateMs] is how long after
+     * its time the platform delivered it (a dozing phone may hold an alarm back); it is stored with the question.
+     */
+    data class CheckInDue(val index: Int, val lateMs: Long = 0) : OccurrenceCommand("CHECK_IN_DUE")
 
     /** A prompt (a recovery offer) went unanswered. */
     data object NoResponse : OccurrenceCommand("NO_RESPONSE")
@@ -60,7 +63,7 @@ sealed class OccurrenceCommand(val label: String) {
     companion object {
         const val MAX_DELAY_MINUTES = 24 * 60
 
-        /** "Tomorrow": the same time the next day. */
+        /** "Tomorrow, at this time": the same local time as now on the next calendar day (not 24 hours later: on a day the clocks change that is an hour off). */
         const val TOMORROW_MINUTES = 24 * 60
     }
 }
@@ -78,6 +81,8 @@ data class OccurrenceSnapshot(
      * While set, follow-up questions are deferred to after it ends instead of being asked or silently lost.
      */
     val restEndsAtUtc: Long? = null,
+    /** The zone the occurrence's times are kept in, for what is said in local terms: "tomorrow, at the same time". */
+    val zoneId: String = "UTC",
 )
 
 sealed interface TransitionResult {

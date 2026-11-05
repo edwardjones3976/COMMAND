@@ -3,8 +3,11 @@ package com.command.alarm
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.media.AudioManager
+import android.util.Log
 import com.command.data.OccurrenceRepository
+import com.command.domain.alarm.CheckInPoster
 import com.command.domain.alarm.RingController
+import com.command.domain.time.Clock
 import com.command.domain.voice.Speaker
 import com.command.voice.AndroidSpeechSynthesizer
 import com.command.voice.AudioTrackPlayer
@@ -17,6 +20,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,6 +36,8 @@ interface AlarmEntryPoint {
     fun arming(): ArmingReconciler
     fun ringController(): RingController
     fun scheduler(): com.command.domain.alarm.AlarmScheduler
+    fun checkInPoster(): CheckInPoster
+    fun clock(): Clock
 
     companion object {
         fun from(context: Context): AlarmEntryPoint =
@@ -39,11 +45,18 @@ interface AlarmEntryPoint {
     }
 }
 
-/** Runs [block] off the main thread while keeping the receiver alive until it finishes. */
+private const val RECEIVER_TAG = "AlarmReceivers"
+
+/**
+ * Runs [block] off the main thread while keeping the receiver alive until it finishes. Nothing that goes wrong in it may take the
+ * process down: the same process may be ringing another alarm, and a receiver is not worth that. A failure is logged; the next
+ * reconcile, or the next alarm, puts right what it can.
+ */
 internal fun BroadcastReceiver.runAsync(context: Context, block: suspend (AlarmEntryPoint) -> Unit) {
     val pending = goAsync() // null when a test calls onReceive directly
     val entry = AlarmEntryPoint.from(context)
-    CoroutineScope(SupervisorJob() + Dispatchers.Default).launch {
+    val failed = CoroutineExceptionHandler { _, e -> Log.w(RECEIVER_TAG, "a broadcast could not be handled: ${e.javaClass.simpleName}", e) }
+    CoroutineScope(SupervisorJob() + Dispatchers.Default + failed).launch {
         try {
             block(entry)
         } finally {
@@ -60,6 +73,7 @@ abstract class AlarmBindings {
     @Binds abstract fun ringOutput(impl: AndroidRingOutput): RingOutput
     @Binds abstract fun reliabilityMonitor(impl: PlatformReliabilityMonitor): ReliabilityMonitor
     @Binds abstract fun audioRoutes(impl: AndroidAudioRoutes): AudioRoutes
+    @Binds abstract fun checkInPoster(impl: AndroidCheckInPoster): CheckInPoster
 }
 
 /**
@@ -77,8 +91,7 @@ object VoiceProviders {
 
 /**
  * Ports whose real implementation arrives in a later milestone. They do nothing, on purpose and visibly: the state
- * machine's effects for them are simply not carried out yet (work enqueueing and window top-up in M5, follow-up
- * notifications in M7).
+ * machine's effects for them are simply not carried out yet (work enqueueing and window top-up).
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -88,8 +101,4 @@ object PendingPorts {
     }
 
     @Provides fun roller(): com.command.domain.alarm.WindowRoller = com.command.domain.alarm.WindowRoller { }
-
-    @Provides fun poster(): com.command.domain.alarm.CheckInPoster = object : com.command.domain.alarm.CheckInPoster {
-        override fun post(occurrenceId: String, requestCode: Int, index: Int) = Unit
-    }
 }

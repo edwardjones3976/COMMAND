@@ -12,5 +12,11 @@
                 <action android:name="com.command.debug.RING" />
             </intent-filter>
         </receiver>
+        <receiver android:name="com.command.debug.DebugCheckInReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.command.debug.CHECKIN_DUE" />
+                <action android:name="com.command.debug.CHECKIN_ARM" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

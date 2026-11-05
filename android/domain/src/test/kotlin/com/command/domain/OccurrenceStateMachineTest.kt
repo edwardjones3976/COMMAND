@@ -78,7 +78,8 @@ class OccurrenceStateMachineTest {
         recoveryOffers: Int = 0,
         asked: Int = 0,
         restEndsAt: Long? = null,
-    ) = OccurrenceSnapshot(state, dials, lock, recoveryOffers, asked, restEndsAt)
+        zoneId: String = "UTC",
+    ) = OccurrenceSnapshot(state, dials, lock, recoveryOffers, asked, restEndsAt, zoneId)
 
     private fun run(s: OccurrenceSnapshot, c: OccurrenceCommand) = OccurrenceStateMachine.transition(s, c, now)
 
@@ -507,5 +508,46 @@ class OccurrenceStateMachineTest {
         val copy = before.copy()
         applied(before, RequestRecovery)
         assertEquals(copy, before)
+    }
+
+    @Test
+    fun `a question that arrives late says how late, and one that is on time says nothing`() {
+        val late = applied(snap(GUIDED_START), CheckInDue(0, lateMs = 95_000))
+        val note = late.events.single { it.type == EventType.CHECKIN_LATE }
+        assertEquals("95", note.payload.values["late_s"])
+        assertEquals("0", note.payload.values["index"])
+        assertTrue("it was asked all the same", late.effects.any { it is Effect.PostCheckIn })
+
+        val onTime = applied(snap(GUIDED_START), CheckInDue(0, lateMs = 2_000))
+        assertTrue(onTime.events.none { it.type == EventType.CHECKIN_LATE })
+    }
+
+    @Test
+    fun `a late alarm inside protected time is deferred, and is not noted as a late question because none was asked`() {
+        val restEnds = now + 3_600_000
+        val deferred = applied(snap(GUIDED_START, restEndsAt = restEnds), CheckInDue(0, lateMs = 95_000))
+        assertTrue(deferred.events.none { it.type == EventType.CHECKIN_LATE })
+        assertTrue(deferred.effects.none { it is Effect.PostCheckIn })
+    }
+
+    @Test
+    fun `tomorrow is the same local time on the next calendar day, also across a change of the clocks`() {
+        val four = snap(RECOVERY_OFFERED, command.copy(recoveryStructure = 4), zoneId = "America/New_York")
+        val ny = java.time.ZoneId.of("America/New_York")
+        fun at(y: Int, m: Int, d: Int) = java.time.ZonedDateTime.of(y, m, d, 9, 0, 0, 0, ny).toInstant().toEpochMilli()
+        fun tomorrowFrom(nowMs: Long): Long {
+            val r = OccurrenceStateMachine.transition(four, RescheduleRecovery(OccurrenceCommand.TOMORROW_MINUTES), nowMs) as TransitionResult.Applied
+            return r.effects.filterIsInstance<Effect.ArmChild>().single().atUtcMs
+        }
+        assertEquals("the clocks go back on 2026-11-01, so that day is 25 hours long", at(2026, 11, 1), tomorrowFrom(at(2026, 10, 31)))
+        assertEquals("the clocks go forward on 2026-03-08, so that day is 23 hours long", at(2026, 3, 8), tomorrowFrom(at(2026, 3, 7)))
+        assertEquals("an ordinary day is 24 hours", at(2026, 6, 11), tomorrowFrom(at(2026, 6, 10)))
+    }
+
+    @Test
+    fun `a zone nobody has heard of falls back to UTC instead of failing the choice`() {
+        val four = snap(RECOVERY_OFFERED, command.copy(recoveryStructure = 4), zoneId = "Not/AZone")
+        val r = applied(four, RescheduleRecovery(OccurrenceCommand.TOMORROW_MINUTES))
+        assertTrue(Effect.ArmChild(ChildKind.DELAY, now + 24 * 60 * minute) in r.effects)
     }
 }

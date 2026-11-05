@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
+import com.command.data.ApplyResult
+import com.command.domain.model.CheckInAnswer
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.EventPayload
 import com.command.domain.occurrence.EventType
@@ -66,14 +68,41 @@ class SilenceReceiver : BroadcastReceiver() {
     }
 }
 
-/** A follow-up alarm fired: ask the next question (or record the silence after the last one). */
+/**
+ * A follow-up alarm fired: ask the next question (or record the silence after the last one). How long after its time the platform
+ * delivered it goes with the question, because a dozing phone may hold an alarm back and the record should say so.
+ */
 class CheckInReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val id = AlarmContract.occurrenceId(intent) ?: return
         val index = intent.getIntExtra(AlarmContract.EXTRA_INDEX, -1)
         if (index < 0) return
+        val dueAt = intent.getLongExtra(AlarmContract.EXTRA_AT, 0)
         runAsync(context) { entry ->
-            entry.repository().apply(id, OccurrenceCommand.CheckInDue(index), EventSource.RECEIVER)
+            val lateMs = if (dueAt > 0) (entry.clock().nowMs() - dueAt).coerceAtLeast(0) else 0
+            entry.repository().apply(id, OccurrenceCommand.CheckInDue(index, lateMs), EventSource.RECEIVER)
+        }
+    }
+}
+
+/**
+ * A quick answer tapped on a check-in notification: started, still working or done. The question leaves the shade whether or not the
+ * answer was still legal (a notification can outlive its occurrence), and an answer that is not one of the three is ignored.
+ */
+class CheckInAnswerReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val id = AlarmContract.occurrenceId(intent) ?: return
+        val command = when (intent.getStringExtra(AlarmContract.EXTRA_ANSWER)) {
+            CheckInAnswer.STARTED.name -> OccurrenceCommand.ReportStarted
+            CheckInAnswer.WORKING.name -> OccurrenceCommand.ReportWorking
+            CheckInAnswer.DONE.name -> OccurrenceCommand.ReportDone
+            else -> return
+        }
+        runAsync(context) { entry ->
+            // An answer that was applied took the question out of the shade itself, in the repository's turn for the occurrence, and doing it
+            // again out here could remove the next question, which a follow-up alarm may have posted in between. One that was refused (its
+            // notification outlived the occurrence) left the question behind, and that is the one to take away.
+            if (entry.repository().apply(id, command, EventSource.USER) !is ApplyResult.Applied) entry.checkInPoster().cancel(id)
         }
     }
 }

@@ -275,7 +275,7 @@ private fun Closed(message: String, onClose: () -> Unit, title: String? = null) 
 
 /** Mission Lock, kept minimal until the full flow lands: exactly as much friction as the mission asks for. */
 @Composable
-private fun FrictionDialog(required: LockPolicy, reasons: List<SkipReasonCode>, onConfirm: (FrictionEvidence) -> Unit, onDismiss: () -> Unit) {
+internal fun FrictionDialog(required: LockPolicy, reasons: List<SkipReasonCode>, onConfirm: (FrictionEvidence) -> Unit, onDismiss: () -> Unit) {
     val title = when (required) {
         LockPolicy.REASON -> stringResource(R.string.reveille_friction_reason_title)
         LockPolicy.RECOVERY_OFFER -> stringResource(R.string.reveille_friction_recovery_title)

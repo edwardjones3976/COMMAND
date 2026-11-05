@@ -48,9 +48,24 @@ interface WorkEnqueuer {
     fun enqueue(kind: WorkKind, occurrenceId: String)
 }
 
-/** Posts a follow-up status question to the user (a notification with quick answers). */
+/**
+ * One follow-up question: which occurrence, which question of the series, the mission's title for the wording, and whether the person
+ * ever reported starting (the first question asks "have you started?", later ones "how is it going?").
+ */
+data class CheckInPrompt(
+    val occurrenceId: String,
+    val requestCode: Int,
+    val index: Int,
+    val title: String,
+    val started: Boolean,
+)
+
+/** Posts a follow-up status question to the user (a notification with quick answers) and takes it away again. */
 interface CheckInPoster {
-    fun post(occurrenceId: String, requestCode: Int, index: Int)
+    fun post(prompt: CheckInPrompt)
+
+    /** Removes the question of [occurrenceId] from the shade: it was answered, or its occurrence is over. Harmless when there is none. */
+    fun cancel(occurrenceId: String)
 }
 
 /** Tops up the rolling window of armed alarms after one fires. */

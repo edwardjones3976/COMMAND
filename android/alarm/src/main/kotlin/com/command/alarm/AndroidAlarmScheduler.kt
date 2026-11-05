@@ -72,6 +72,7 @@ class AndroidAlarmScheduler @Inject constructor(
             .putExtra(AlarmContract.EXTRA_OCCURRENCE_ID, request.occurrenceId)
             .putExtra(AlarmContract.EXTRA_REQUEST_CODE, request.requestCode)
             .putExtra(AlarmContract.EXTRA_INDEX, request.index)
+            .putExtra(AlarmContract.EXTRA_AT, request.atUtcMs)
         val flags = PendingIntent.FLAG_IMMUTABLE or if (create) PendingIntent.FLAG_UPDATE_CURRENT else PendingIntent.FLAG_NO_CREATE
         return PendingIntent.getBroadcast(context, request.requestCode, intent, flags)
     }

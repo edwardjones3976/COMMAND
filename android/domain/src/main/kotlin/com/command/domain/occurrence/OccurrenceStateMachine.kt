@@ -1,5 +1,9 @@
 package com.command.domain.occurrence
 
+import java.time.DateTimeException
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZoneOffset
 import com.command.domain.dials.DialEffects
 import com.command.domain.dials.RecoveryOption
 import com.command.domain.occurrence.OccurrenceCommand.AcceptRecovery
@@ -55,6 +59,9 @@ object OccurrenceStateMachine {
     private val FOLLOW_UP = setOf(GUIDED_START, STARTED_SELF_REPORTED, WORKING_SELF_REPORTED)
 
     private const val MINUTE_MS = 60_000L
+
+    /** A follow-up question that reaches the person this much after its time is worth a line in the log. */
+    private const val LATE_NOTICE_MS = 10_000L
 
     private class Run(val s: OccurrenceSnapshot, val cmd: OccurrenceCommand, val now: Long) {
         private var state = s.state
@@ -117,7 +124,7 @@ object OccurrenceStateMachine {
                 RequestRecovery -> requestRecovery()
                 is AcceptRecovery -> acceptRecovery(cmd)
                 is RescheduleRecovery -> rescheduleRecovery(cmd)
-                is CheckInDue -> checkInDue(cmd.index)
+                is CheckInDue -> checkInDue(cmd.index, cmd.lateMs)
                 NoResponse -> noResponse()
                 is Delay -> delay(cmd)
                 is Skip -> skip(cmd)
@@ -226,7 +233,7 @@ object OccurrenceStateMachine {
             return enterGuidance()
         }
 
-        private fun checkInDue(index: Int): TransitionResult {
+        private fun checkInDue(index: Int, lateMs: Long): TransitionResult {
             if (s.state !in FOLLOW_UP) return illegal()
             val nextQuestion = index == asked && index < schedule.count
             val finalTimeout = index == schedule.count && asked == schedule.count
@@ -239,6 +246,7 @@ object OccurrenceStateMachine {
             if (finalTimeout) return unanswered()
             asked = index + 1
             events += DomainEvent(EventType.CHECK_IN_ASKED, EventPayload.of("index" to index))
+            if (lateMs >= LATE_NOTICE_MS) events += DomainEvent(EventType.CHECKIN_LATE, EventPayload.of("index" to index, "late_s" to lateMs / 1000))
             effects += Effect.PostCheckIn(index)
             // After the last question, one more interval of silence is the final timeout.
             scheduleCheckIn(asked)
@@ -277,7 +285,7 @@ object OccurrenceStateMachine {
             events += DomainEvent(EventType.RECOVERY_ACCEPTED, EventPayload.of("choice" to "RESCHEDULE", "minutes" to command.minutes))
             go(DELAYED)
             leaveActive()
-            effects += Effect.ArmChild(ChildKind.DELAY, now + command.minutes * MINUTE_MS)
+            effects += Effect.ArmChild(ChildKind.DELAY, if (tomorrow) sameTimeTomorrow(now, s.zoneId) else now + command.minutes * MINUTE_MS)
             return applied()
         }
 
@@ -315,4 +323,17 @@ object OccurrenceStateMachine {
             }
         }
     }
+}
+
+/**
+ * The same local time on the next calendar day in [zoneId]. Not 24 hours later: on a day the clocks change that is an hour off. A zone that
+ * is not known falls back to UTC, which has no such days.
+ */
+private fun sameTimeTomorrow(nowMs: Long, zoneId: String): Long {
+    val zone: ZoneId = try {
+        ZoneId.of(zoneId)
+    } catch (e: DateTimeException) {
+        ZoneOffset.UTC
+    }
+    return Instant.ofEpochMilli(nowMs).atZone(zone).plusDays(1).toInstant().toEpochMilli()
 }
