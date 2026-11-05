@@ -13,6 +13,7 @@ import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.schedule.Frequency
 import com.command.domain.schedule.RRule
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -210,6 +211,37 @@ class MissionRepositoryTest {
 
         assertEquals(OccurrenceState.FIRING, f.db.occurrences().get(occurrence.id)!!.state)
         assertEquals("and the new time got its own occurrence", 2, occurrencesOf(id).size)
+    }
+
+    @Test
+    fun `a delay that lands on another coming occurrence shows as an overlap while the screen watches, and goes when it is answered`() = run {
+        val delayed = occurrencesOf(saved(draft(schedule = ScheduleDraft.Once(at(2 * hour))))).single()
+        val other = occurrencesOf(saved(draft(title = "The other one", schedule = ScheduleDraft.Once(at(20 * 60_000L))))).single()
+        assertTrue("they do not overlap yet", f.db.calendarDao().conflicts().isEmpty())
+
+        val gone = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val watching = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val appeared = kotlinx.coroutines.CompletableDeferred<Set<String>>()
+        val watcher = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+            missions.observeConflicted().collect { ids ->
+                watching.complete(Unit)
+                if (ids.isNotEmpty()) appeared.complete(ids)
+                if (appeared.isCompleted && ids.isEmpty()) gone.complete(Unit)
+            }
+        }
+        try {
+            kotlinx.coroutines.withTimeout(10_000) { watching.await() }
+            f.repo.apply(delayed.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+            f.repo.apply(delayed.id, OccurrenceCommand.Delay(15), EventSource.USER)
+            val child = occurrencesOf(delayed.missionId).single { it.parentOccurrenceId == delayed.id }
+
+            assertEquals(setOf(child.id, other.id), kotlinx.coroutines.withTimeout(10_000) { appeared.await() })
+
+            f.repo.apply(child.id, OccurrenceCommand.Skip(com.command.domain.occurrence.SkipReason.USER), EventSource.USER)
+            kotlinx.coroutines.withTimeout(10_000) { gone.await() }
+        } finally {
+            watcher.cancel()
+        }
     }
 
     @Test

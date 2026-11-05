@@ -185,8 +185,8 @@ class CalendarSync @Inject constructor(
                 if (tx.apply(skip.occurrenceId, OccurrenceCommand.Skip(skip.reason), EventSource.WORKER) is ApplyResult.Applied) dao.deleteLink(skip.occurrenceId)
             }
 
-            // A series moved as a whole lands each instance on the next one's slot, so whichever has a free slot goes first. What is still
-            // blocked at the end (two swapped instances) stays where it is until the next sync.
+            // A series moved as a whole lands each instance on the next one's slot, so whichever has a free slot goes first. Instances that
+            // block only each other (two swapped ones) stay where they are until the next sync.
             var pending = plan.moves
             while (pending.isNotEmpty()) {
                 val blocked = pending.filter { move ->
@@ -200,18 +200,23 @@ class CalendarSync @Inject constructor(
                     !done
                 }
                 if (blocked.size == pending.size) {
-                    // Blocked by something already rung or answered at that very time: that instant has had its say, and an alarm left at
-                    // the old time would be wrong. Two instances swapping places block each other instead, and wait for the next sync.
-                    for (move in blocked) {
-                        val own = db.occurrences().get(move.occurrenceId) ?: continue
-                        val occupant = db.occurrences().find(own.missionId, move.instance.beginMs) ?: continue
-                        if (occupant.state != OccurrenceState.SCHEDULED && occupant.state != OccurrenceState.ARMED) {
-                            if (tx.apply(own.id, OccurrenceCommand.Skip(SkipReason.CALENDAR_REMOVED), EventSource.WORKER) is ApplyResult.Applied) dao.deleteLink(own.id)
-                        }
+                    // Blocked by something that is not going to move: rung or answered at that very time, or a sibling that stays and will ring
+                    // then anyway. That instant has its alarm, and one left at the old time would be wrong. Decided before any is given up, because
+                    // giving one up changes what the next one finds. Whatever was waiting behind those gets its turn; only a cycle is left to wait.
+                    val waiting = blocked.map { it.occurrenceId }.toSet()
+                    val givenUp = blocked.filter { move ->
+                        val own = db.occurrences().get(move.occurrenceId)
+                        val occupant = own?.let { db.occurrences().find(it.missionId, move.instance.beginMs) }
+                        occupant != null && occupant.id !in waiting
                     }
-                    break
+                    if (givenUp.isEmpty()) break
+                    for (move in givenUp) {
+                        if (tx.apply(move.occurrenceId, OccurrenceCommand.Skip(SkipReason.CALENDAR_REMOVED), EventSource.WORKER) is ApplyResult.Applied) dao.deleteLink(move.occurrenceId)
+                    }
+                    pending = blocked - givenUp.toSet()
+                } else {
+                    pending = blocked
                 }
-                pending = blocked
             }
 
             // Last: a new instance may want a slot that a skip or a move above has just left.

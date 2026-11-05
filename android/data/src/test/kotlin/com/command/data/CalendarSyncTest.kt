@@ -329,6 +329,82 @@ class CalendarSyncTest {
     }
 
     @Test
+    fun `a move onto a sibling that stays armed leaves no alarm at the old time, however often it syncs`() = run {
+        switchOn()
+        val a = f.t0 + HOUR
+        val b = f.t0 + 2 * HOUR
+        reads(instance(begin = a), instance(begin = b))
+        sync.run()
+        val moving = rows().single { it.scheduledAtUtc == a }
+        val sibling = rows().single { it.scheduledAtUtc == b }
+
+        reads(instance(begin = b, event = 555, original = 100, originalAt = a), instance(begin = b))
+        sync.run()
+
+        assertOneArmedAt(b)
+        assertEquals("the sibling rings for both", OccurrenceState.ARMED, f.db.occurrences().get(sibling.id)!!.state)
+        assertEquals(SkipReason.CALENDAR_REMOVED, f.db.occurrences().get(moving.id)!!.skipReason)
+
+        sync.run()
+        assertOneArmedAt(b)
+    }
+
+    @Test
+    fun `and when that sibling goes, the instance that moved there still rings`() = run {
+        switchOn()
+        val a = f.t0 + HOUR
+        val b = f.t0 + 2 * HOUR
+        reads(instance(begin = a), instance(begin = b))
+        sync.run()
+        reads(instance(begin = b, event = 555, original = 100, originalAt = a), instance(begin = b))
+        sync.run()
+
+        reads(instance(begin = b, event = 555, original = 100, originalAt = a))
+        repeat(3) { sync.run() }
+
+        assertOneArmedAt(b)
+    }
+
+    @Test
+    fun `a chain of moves that ends on a sibling that stays lands all it can in one sync`() = run {
+        switchOn()
+        val a = f.t0 + HOUR
+        val b = f.t0 + 2 * HOUR
+        val c = f.t0 + 3 * HOUR
+        reads(instance(begin = a), instance(begin = b), instance(begin = c))
+        sync.run()
+
+        reads(
+            instance(begin = b, event = 555, original = 100, originalAt = a),
+            instance(begin = c, event = 556, original = 100, originalAt = b),
+            instance(begin = c),
+        )
+        sync.run()
+
+        val live = rows().filter { it.state == OccurrenceState.ARMED }.map { it.scheduledAtUtc }.sorted()
+        assertEquals(listOf(b, c), live)
+        assertEquals(listOf(b, c), f.scheduler.armed.values.map { it.atUtcMs }.sorted())
+    }
+
+    @Test
+    fun `two instances swapping times both wait, and neither is given up`() = run {
+        switchOn()
+        val a = f.t0 + HOUR
+        val b = f.t0 + 2 * HOUR
+        reads(instance(begin = a), instance(begin = b))
+        sync.run()
+
+        reads(
+            instance(begin = b, event = 555, original = 100, originalAt = a),
+            instance(begin = a, event = 556, original = 100, originalAt = b),
+        )
+        sync.run()
+
+        assertEquals(listOf(a, b), rows().filter { it.state == OccurrenceState.ARMED }.map { it.scheduledAtUtc }.sorted())
+        assertFalse(rows().any { it.state == OccurrenceState.SKIPPED })
+    }
+
+    @Test
     fun `instances moved along a chain all land`() = run {
         switchOn()
         val a = f.t0 + HOUR

@@ -29,9 +29,13 @@ import com.command.domain.schedule.RRuleParse
 import com.command.domain.schedule.RRuleParser
 import com.command.domain.schedule.StartRule
 import com.command.domain.time.Clock
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.DateTimeException
@@ -150,9 +154,21 @@ class MissionRepository @Inject constructor(
         )
     }
 
-    /** The ids of the occurrences that overlap another one still to come. */
-    fun observeConflicted(): Flow<Set<String>> =
-        db.calendarDao().observeConflicts().map { rows -> rows.flatMap { listOf(it.occA, it.occB) }.toSet() }
+    /**
+     * The ids of the occurrences that overlap another one still to come. A delay or an answer changes what is coming without any mission
+     * being saved, so the overlaps are worked out again whenever what is coming changes, for as long as somebody is watching.
+     */
+    fun observeConflicted(): Flow<Set<String>> = channelFlow {
+        // Never on the collector's dispatcher, which is the main thread on the schedule screen: this holds [writes] across database calls, and
+        // a lock held by the main thread's queue is never let go if anything on that thread is waiting for the same lock.
+        launch(Dispatchers.Default) {
+            db.occurrences().observeFrom(listOf(OccurrenceState.SCHEDULED, OccurrenceState.ARMED), 0L, Int.MAX_VALUE)
+                .map { rows -> rows.map { it.id to it.scheduledAtUtc } }
+                .distinctUntilChanged()
+                .collect { writes.withLock { refreshConflicts(clock.nowMs()) } }
+        }
+        db.calendarDao().observeConflicts().collect { rows -> send(rows.flatMap { listOf(it.occA, it.occB) }.toSet()) }
+    }
 
     /** How many of this mission's coming occurrences overlap another one. */
     suspend fun conflictsOf(missionId: String): Int {
