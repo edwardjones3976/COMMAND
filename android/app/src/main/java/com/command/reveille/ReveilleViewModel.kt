@@ -403,7 +403,14 @@ class ReveilleViewModel @Inject constructor(
         publish()
     }
 
-    /** Starts the clock on the try on screen, once: it is begun, and if it is not finished in the step's time it counts as a try. */
+    /**
+     * Starts the clock on the try on screen, once: it is begun, and if it is not finished in the step's time it counts as a try.
+     *
+     * A time-out is an event like any other and is handled in the order it came (the lock is fair). One that is already waiting for its turn
+     * when the person turns to another way is handled before the turn, for the try it is about; one that comes after finds another try on
+     * screen and changes nothing. Handling the turn stops the clock before the person can see the other way, so no time-out can be queued
+     * behind both the turn away and the turn back to a try with the same identity.
+     */
     private fun startTimer(state: ChainState, tryId: TryId) {
         if (began == null) began = clock.nowMs()
         if (timer?.isActive == true) return

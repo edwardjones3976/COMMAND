@@ -79,6 +79,9 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
     /** A seam for tests: runs before a save is written, so that a slow write can be made to come after something else (a return to the standard). */
     internal var beforeSaveWrite: suspend () -> Unit = {}
 
+    /** A seam for tests: runs after the standard chain has been written back and before the profile is read again, so that something can land between the two. */
+    internal var afterUseDefault: suspend () -> Unit = {}
+
     fun open(id: String) {
         if (profileId == id) return
         profileId = id
@@ -236,17 +239,25 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
         }
     }
 
-    /** Goes back to the standard chain of the profile's difficulty, and shows it. The screen asks first: this deletes what was saved. */
+    /**
+     * Goes back to the standard chain of the profile's difficulty, and shows it. The screen asks first: this deletes what was saved, and the
+     * changes that were not saved with it. The editor waits for the answer, so that nothing can be edited (the answer would throw it away)
+     * or saved (the write would race the one that goes back) in the meantime. The note says "back on the standard" only if the profile that
+     * is read back is on it: a save that landed between the two leaves its own chain, and no such note.
+     */
     fun useStandard() {
         val id = profileId ?: return
+        if (_state.value !is HandshakeEditorUiState.Editing) return
+        _state.value = HandshakeEditorUiState.Loading
         viewModelScope.launch {
             if (!profiles.useDefault(id)) {
                 if (profileId == id) _state.value = HandshakeEditorUiState.NotFound
                 return@launch
             }
+            afterUseDefault()
             val profile = profiles.get(id)
             if (profileId != id) return@launch
-            if (profile == null) _state.value = HandshakeEditorUiState.NotFound else show(profile, inUse, restored = true)
+            if (profile == null) _state.value = HandshakeEditorUiState.NotFound else show(profile, inUse, restored = profile.own == null)
         }
     }
 

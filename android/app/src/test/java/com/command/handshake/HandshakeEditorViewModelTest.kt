@@ -634,6 +634,42 @@ class HandshakeEditorViewModelTest {
     }
 
     @Test
+    fun `while the return to the standard is going on the editor waits, so nothing can be edited or saved meanwhile`() {
+        open("builtin_steady")
+        vm.addStep() // a change that was not saved, which going back to the standard throws away
+        val gate = CompletableDeferred<Unit>()
+        vm.afterUseDefault = { gate.await() } // the write that goes back has landed; the profile is not read again yet
+
+        vm.useStandard()
+        assertEquals("the editor waits for the answer", HandshakeEditorUiState.Loading, vm.state.value)
+        vm.addStep()
+        vm.save()
+        assertEquals("an edit or a save made meanwhile does nothing", HandshakeEditorUiState.Loading, vm.state.value)
+        gate.complete(Unit)
+
+        awaitUntil(message = "back on the standard") { (vm.state.value as? HandshakeEditorUiState.Editing)?.restored == true }
+        pumpFor(300) // a save that had been started meanwhile would have written by now
+        assertNull("nothing was saved meanwhile", stored("builtin_steady").own)
+        assertEquals("the answer is the standard chain", DialEffects.defaultChain(2).steps, editing().steps.map { it.toSpec() })
+        assertFalse(editing().changed)
+    }
+
+    @Test
+    fun `a save that lands between the return to the standard and the read that follows it is not shown as the standard`() {
+        open("builtin_steady")
+        val custom = DialEffects.defaultChain(4)
+        vm.afterUseDefault = { profiles.saveChain("builtin_steady", custom) } // a save lands after the write that goes back and before the read
+
+        vm.useStandard()
+
+        awaitUntil(message = "the profile is shown again") { vm.state.value is HandshakeEditorUiState.Editing }
+        assertFalse("the chain that landed last is in force, so the profile is not back on the standard", editing().restored)
+        assertFalse(editing().usingStandard)
+        assertEquals(custom.steps, editing().steps.map { it.toSpec() })
+        assertFalse("and the draft is what is in force", editing().changed)
+    }
+
+    @Test
     fun `an edit that changes nothing leaves the note of the save, and one that changes something takes it away`() {
         open("builtin_steady")
         vm.addStep()
