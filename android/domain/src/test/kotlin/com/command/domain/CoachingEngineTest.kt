@@ -165,6 +165,31 @@ class CoachingEngineTest {
     }
 
     @Test
+    fun `no call is said more than three times, closer included, anywhere`() {
+        for (p in Personality.values()) for (phase in CoachingPhase.values()) for (firm in 1..5) for (attempt in 0..3) {
+            val text = compose(p, phase, Dials(firm, 5, 3, 3, 3, 3, 3), attempt = attempt, seed = "").text
+            val most = Regex("""[^.!?]+[.!?]""").findAll(text).map { it.value.trim() }.groupingBy { it }.eachCount().values.max()
+            assertTrue(text, most <= 3)
+        }
+    }
+
+    @Test
+    fun `noise never interrupts the sentence of an override between its lead-in and the person's words`() {
+        val all = (0 until 4).associate { TemplateOverrides.Key(Personality.DRILL_SERGEANT, CoachingPhase.CHECK_IN, it) to "Go. First: {first_action}!" }
+        val text = compose(Personality.DRILL_SERGEANT, CoachingPhase.CHECK_IN, quiet.with(Dial.OBNOXIOUSNESS, 5), CoachingContext(firstAction = "Open file"), overrides = TemplateOverrides(all)).text
+        assertTrue(text, text.contains("First: Open file!"))
+    }
+
+    @Test
+    fun `without the mission's words the phases a screen shows still have four different wordings`() {
+        val shown = listOf(CoachingPhase.DIRECTION, CoachingPhase.CHECK_IN, CoachingPhase.RECOVERY_RESET, CoachingPhase.RECOVERY_RESCHEDULE, CoachingPhase.UNCONFIRMED)
+        for (p in Personality.values()) for (phase in shown) {
+            val lines = (0 until 4).map { compose(p, phase, c = CoachingContext(minutes = 5), attempt = it).text }
+            assertEquals("$p $phase $lines", 4, lines.toSet().size)
+        }
+    }
+
+    @Test
     fun `the other five dials do not change a word`() {
         for (dial in listOf(Dial.ALERT_INTENSITY, Dial.FOLLOW_UP_PERSISTENCE, Dial.HANDSHAKE_DIFFICULTY, Dial.SCHEDULE_RIGIDITY, Dial.RECOVERY_STRUCTURE)) {
             assertEquals("$dial", compose(dials = quiet.with(dial, 1)), compose(dials = quiet.with(dial, 5)))

@@ -168,7 +168,7 @@ object TemplateBank {
                 "Noted. Thank you for confirming.",
             ),
             DIRECTION to listOf(
-                "Please proceed. Next action: {first_action}. Allocate {minutes}.",
+                "Next, please. Next action: {first_action}. Allocate {minutes}.",
                 "Please proceed. First action: {first_action}. Allocate {minutes}.",
                 "Here is the plan. First action: {first_action}. Budget {minutes}.",
                 "One priority now. First action: {first_action}. Budget {minutes}.",
@@ -330,7 +330,7 @@ object TemplateBank {
             DIRECTION to listOf(
                 "Okay. Here is what you said comes first: {first_action}. Give it {minutes}.",
                 "As we planned. First step: {first_action}. Give it {minutes}.",
-                "Okay. Your plan says this first: {first_action}. Give it {minutes}.",
+                "This is your plan. It says this first: {first_action}. Give it {minutes}.",
                 "Let us do what you planned. First step: {first_action}. Give it {minutes}.",
             ),
             STARTER_START to listOf(
@@ -429,9 +429,9 @@ object TemplateBank {
             HANDSHAKE_SUCCESS to listOf("Acknowledged.", "Thank you. That is confirmed.", "Confirmed. Well done.", "Got it. Thank you."),
             DIRECTION to listOf(
                 "Next. First step: {first_action}. Try {minutes}.",
-                "Next. Do this: {first_action}. Give it {minutes}.",
-                "Next. Here is the first step: {first_action}. Try {minutes}.",
-                "Next. Start with this: {first_action}. Give it {minutes}.",
+                "Moving on. Do this: {first_action}. Give it {minutes}.",
+                "Here we go. Here is the first step: {first_action}. Try {minutes}.",
+                "Ready. Start with this: {first_action}. Give it {minutes}.",
             ),
             STARTER_START to listOf("The starter is on. It runs {minutes}.", "Go ahead. It runs {minutes}.", "Timer on. It runs {minutes}.", "Begin now. It runs {minutes}."),
             STARTER_MIDPOINT to listOf("You are halfway.", "Halfway there.", "That is half.", "Midpoint reached."),

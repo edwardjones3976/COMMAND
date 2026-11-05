@@ -29,7 +29,7 @@ object CoachingEngine {
     const val MINIMALIST_MAX_WORDS = 12
 
     private enum class Kind { NOISE, CLOSER, FIRST_ACTION, BODY }
-    private class Part(val text: String, val user: Boolean, val kind: Kind)
+    private class Part(val text: String, val user: Boolean, val kind: Kind, val closesSentence: Boolean = true)
 
     /** Lines a person acts on; the firmness dial sets how they close. A question, a piece of news or a recovery has nothing to be firm about. */
     private val DIRECTIVE = setOf(
@@ -69,7 +69,7 @@ object CoachingEngine {
             var next = 1
             for (part in body) {
                 parts += part
-                if (next < said.size && (part.user || part.text.last() in ".!?")) parts += Part(said[next++], false, Kind.NOISE)
+                if (next < said.size && part.closesSentence) parts += Part(said[next++], false, Kind.NOISE)
             }
             // Repetition is of the app's last call, at most DialEffects' cap of two extra sayings, and never of the person's words.
             repeat(noise.maxRepeats) { parts += Part(said[next - 1], false, Kind.NOISE) }
@@ -98,7 +98,7 @@ object CoachingEngine {
                         val kind = if (name == TemplateBank.FIRST_ACTION) Kind.FIRST_ACTION else Kind.BODY
                         val before = sentence.substring(0, placeholder.range.first).trim()
                         val mark = sentence.substring(placeholder.range.last + 1).trim()
-                        if (before.isNotEmpty()) out += Part(before, personalWords, kind)
+                        if (before.isNotEmpty()) out += Part(before, personalWords, kind, closesSentence = false)
                         out += Part(if (value.last() in "?!") value else value + mark, true, kind)
                     }
                 }
@@ -160,7 +160,7 @@ object CoachingEngine {
                 ImperativeTier.INVITE -> "Let's get going."
                 ImperativeTier.DIRECT -> "Get going."
                 ImperativeTier.FIRM -> "Get going now."
-                ImperativeTier.COMMANDING -> "Do it now. Move!"
+                ImperativeTier.COMMANDING -> "Do it now!"
             }
         } else {
             when (tier) {

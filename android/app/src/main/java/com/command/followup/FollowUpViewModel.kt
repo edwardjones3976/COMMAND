@@ -116,7 +116,7 @@ class FollowUpViewModel @Inject constructor(
             OccurrenceState.UNCONFIRMED -> FollowUpUiState.Ask(brief.title, brief.firstAction, started = false, unconfirmed = true, coaching = repository.lineFor(row, CoachingPhase.UNCONFIRMED, withMissionWords = false).text)
             OccurrenceState.RECOVERY_OFFERED -> {
                 val policy = DialEffects.recoveryPolicy(repository.dialsOf(row).recoveryStructure)
-                FollowUpUiState.Recovery(brief.title, brief.firstAction, policy.menu, policy.rescheduleMinutes, policy.offerTomorrow, repository.lineFor(row, recoveryPhase(policy.menu.first()), withMissionWords = false).text)
+                FollowUpUiState.Recovery(brief.title, brief.firstAction, policy.menu, policy.rescheduleMinutes, policy.offerTomorrow, repository.lineFor(row, recoveryPhase(policy.menu), withMissionWords = false).text)
             }
             OccurrenceState.COMPLETED_SELF_REPORTED -> FollowUpUiState.Finished(brief.title, FollowUpOutcome.DONE)
             OccurrenceState.SKIPPED -> FollowUpUiState.Finished(brief.title, FollowUpOutcome.SKIPPED)
@@ -126,12 +126,9 @@ class FollowUpViewModel @Inject constructor(
         }
     }
 
-    /** The words match what the menu offers first. */
-    private fun recoveryPhase(first: RecoveryOption): CoachingPhase = when (first) {
-        RecoveryOption.RESET -> CoachingPhase.RECOVERY_RESET
-        RecoveryOption.SMALLER -> CoachingPhase.RECOVERY_SMALLER
-        RecoveryOption.RESCHEDULE -> CoachingPhase.RECOVERY_RESCHEDULE
-    }
+    /** The words match the first option on the screen, which does not show Smaller until something can make the step smaller (see FollowUpScreens). */
+    private fun recoveryPhase(menu: List<RecoveryOption>): CoachingPhase =
+        if (menu.first { it != RecoveryOption.SMALLER } == RecoveryOption.RESCHEDULE) CoachingPhase.RECOVERY_RESCHEDULE else CoachingPhase.RECOVERY_RESET
 
     // --- the answers --------------------------------------------------------------------------------------------
 

@@ -185,7 +185,7 @@ class FollowUpViewModelTest {
     }
 
     @Test
-    fun `the recovery line matches what the menu offers first`() {
+    fun `the recovery line matches the first option on the screen, which never shows Smaller`() {
         val reset = guided()
         vm.show(reset.id)
         awaitUi("ask") { it is FollowUpUiState.Ask }
@@ -201,7 +201,7 @@ class FollowUpViewModelTest {
         awaitUntil(message = "ask") { second.state.value is FollowUpUiState.Ask }
         second.needReset()
         awaitUntil(message = "menu") { second.state.value is FollowUpUiState.Recovery }
-        val first = runBlocking { repo.lineFor(repo.get(smaller.id)!!, CoachingPhase.RECOVERY_SMALLER, withMissionWords = false) }
+        val first = runBlocking { repo.lineFor(repo.get(smaller.id)!!, CoachingPhase.RECOVERY_RESET, withMissionWords = false) }
         assertEquals(RecoveryOption.SMALLER, (second.state.value as FollowUpUiState.Recovery).options.first())
         assertEquals(first.text, (second.state.value as FollowUpUiState.Recovery).coaching)
     }
