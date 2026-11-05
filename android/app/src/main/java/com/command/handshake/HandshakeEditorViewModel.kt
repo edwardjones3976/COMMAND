@@ -74,6 +74,9 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
     private var inForce: ChainSpec? = null
     private var inUse = true
     private var opening: Job? = null
+
+    /** The last save asked for. Saves run one after another, and a return to the standard waits for them: what the person asked for last is what stays. */
+    private var saving: Job? = null
     private var nextKey = 0
 
     /** A seam for tests: runs before a save is written, so that a slow write can be made to come after something else (a return to the standard). */
@@ -221,7 +224,9 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
         val current = _state.value as? HandshakeEditorUiState.Editing ?: return
         if (!current.canSave) return
         val spec = ChainSpec(current.op, current.steps.map { it.toSpec() })
-        viewModelScope.launch {
+        val earlier = saving
+        saving = viewModelScope.launch {
+            earlier?.join()
             beforeSaveWrite()
             val result = profiles.saveChain(id, spec)
             if (profileId != id) return@launch
@@ -230,7 +235,7 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
                     inForce = spec
                     edit { cur ->
                         val now = cur.with()
-                        now.copy(usingStandard = false, storedUnusable = false, saved = !now.changed, restored = false)
+                        now.copy(usingStandard = false, storedUnusable = false, saved = !now.changed)
                     }
                 }
                 is SaveChainResult.Invalid -> edit { it.copy(issues = result.issues) }
@@ -242,14 +247,16 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
     /**
      * Goes back to the standard chain of the profile's difficulty, and shows it. The screen asks first: this deletes what was saved, and the
      * changes that were not saved with it. The editor waits for the answer, so that nothing can be edited (the answer would throw it away)
-     * or saved (the write would race the one that goes back) in the meantime. The note says "back on the standard" only if the profile that
-     * is read back is on it: a save that landed between the two leaves its own chain, and no such note.
+     * and no save can be started in the meantime. A save that is already going finishes first, so that it cannot bring back what the person
+     * has just asked to delete. The note says "back on the standard" only if the profile that is read back is on it.
      */
     fun useStandard() {
         val id = profileId ?: return
         if (_state.value !is HandshakeEditorUiState.Editing) return
         _state.value = HandshakeEditorUiState.Loading
+        val earlier = saving
         viewModelScope.launch {
+            earlier?.join()
             if (!profiles.useDefault(id)) {
                 if (profileId == id) _state.value = HandshakeEditorUiState.NotFound
                 return@launch

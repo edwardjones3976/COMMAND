@@ -615,22 +615,44 @@ class HandshakeEditorViewModelTest {
     }
 
     @Test
-    fun `a save whose write comes after the return to the standard does not leave the note of the reset up over a draft that is not the standard`() {
+    fun `a save that is still going when the person goes back to the standard finishes first, and the standard stays`() {
         open("builtin_steady")
         vm.addStep()
         val gate = CompletableDeferred<Unit>()
-        vm.beforeSaveWrite = { gate.await() } // a slow write: it will come after the person has gone back to the standard
+        vm.beforeSaveWrite = { gate.await() } // a slow write
 
         vm.save()
         vm.useStandard()
-        awaitUntil(message = "back on the standard") { (vm.state.value as? HandshakeEditorUiState.Editing)?.restored == true }
-        assertFalse("nothing is changed in the draft, which is the standard", editing().changed)
+        pumpFor(300)
+        assertEquals("the return waits for the save", HandshakeEditorUiState.Loading, vm.state.value)
         gate.complete(Unit)
 
-        awaitUntil(message = "the answer of the save") { (vm.state.value as? HandshakeEditorUiState.Editing)?.changed == true }
-        assertFalse("the save came last, so the profile is not back on the standard", editing().restored)
-        assertFalse("and the draft is not what was written", editing().saved)
-        assertEquals("what the save wrote is in force", 2, stored("builtin_steady").own!!.steps.size)
+        awaitUntil(message = "back on the standard") { (vm.state.value as? HandshakeEditorUiState.Editing)?.restored == true }
+        pumpFor(300) // a save that came after the return would have written by now
+        assertNull("what the person asked for last stays", stored("builtin_steady").own)
+        assertTrue(editing().usingStandard)
+        assertFalse(editing().changed)
+    }
+
+    @Test
+    fun `saves run one after another, so an earlier slow one cannot undo the return to the standard either`() {
+        open("builtin_steady")
+        vm.addStep()
+        val gate = CompletableDeferred<Unit>()
+        var writes = 0
+        vm.beforeSaveWrite = { if (writes++ == 0) gate.await() } // only the first write is slow
+
+        vm.save()
+        vm.addStep()
+        vm.save()
+        vm.useStandard()
+        pumpFor(300)
+        gate.complete(Unit)
+
+        awaitUntil(message = "back on the standard") { (vm.state.value as? HandshakeEditorUiState.Editing)?.restored == true }
+        pumpFor(300)
+        assertEquals("both saves were written", 2, writes)
+        assertNull("and the standard came last", stored("builtin_steady").own)
     }
 
     @Test
