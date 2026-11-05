@@ -8,13 +8,18 @@ import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
 import com.command.domain.alarm.CheckInPoster
 import com.command.domain.alarm.CheckInPrompt
+import com.command.domain.dials.AlertPlan
 import com.command.domain.dials.ChainOp
+import com.command.domain.dials.ChainSpec
+import com.command.domain.dials.DialEffects
 import com.command.domain.dials.Dials
 import com.command.domain.dials.Flexibility
 import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.HandshakeMode
 import com.command.domain.dials.LockPolicy
+import com.command.domain.dials.StepSpec
 import com.command.domain.dials.Personality
+import com.command.domain.dials.PresetOrigin
 import com.command.domain.handshake.Attempt
 import com.command.domain.model.ChallengeOutcome
 import com.command.domain.model.CheckInAnswer
@@ -29,6 +34,7 @@ import com.command.domain.occurrence.SkipReason
 import com.command.domain.occurrence.WorkKind
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.CountDownLatch
@@ -190,6 +196,203 @@ class OccurrenceRepositoryTest {
         assertEquals("still the typing it was fired with", listOf(HandshakeMode.TYPING), plan.chain.steps.map { it.mode })
         assertEquals("and in the same words", Personality.ACCOUNTABILITY_PARTNER, plan.personality)
         assertEquals("it was the profile that was edited", 1, f.db.profiles().get("builtin_command")!!.handshakeDifficulty)
+    }
+
+    @Test
+    fun `a chain the person saved is pinned when the alarm fires, so editing it, or going back to the standard, while it sounds changes nothing for the person in the middle of it`() = run {
+        val profiles = ProfileRepository(f.db)
+        val mine = ChainSpec(ChainOp.OR, listOf(StepSpec(HandshakeMode.TYPING, 3, 90), StepSpec(HandshakeMode.HOLD, 2, 45, 5)))
+        assertEquals(SaveChainResult.Saved, profiles.saveChain("builtin_command", mine))
+        val m = f.mission(profileId = "builtin_command")
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+
+        val other = ChainSpec(ChainOp.SEQUENCE, listOf(StepSpec(HandshakeMode.CONFIRM_SEQUENCE, 4, 60)))
+        assertEquals(SaveChainResult.Saved, profiles.saveChain("builtin_command", other))
+        assertEquals("still the chain it was fired with", mine, f.repo.handshakeOf(f.repo.get(o.id)!!).chain)
+
+        assertTrue(profiles.useDefault("builtin_command"))
+        assertEquals("and still, with the profile back on the standard handshake", mine, f.repo.handshakeOf(f.repo.get(o.id)!!).chain)
+    }
+
+    @Test
+    fun `an alarm fired on the standard handshake keeps it when the profile gets a chain of its own afterwards`() = run {
+        val profiles = ProfileRepository(f.db)
+        val m = f.mission(profileId = "builtin_command")
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+
+        val mine = ChainSpec(ChainOp.OR, listOf(StepSpec(HandshakeMode.HOLD, 2, 45, 5)))
+        assertEquals(SaveChainResult.Saved, profiles.saveChain("builtin_command", mine))
+
+        assertEquals("still the standard chain of the difficulty it was fired with", DialEffects.defaultChain(3), f.repo.handshakeOf(f.repo.get(o.id)!!).chain)
+        val next = f.repo.createOccurrence(m.id, f.t0 + 120_000, "UTC").occurrence
+        assertEquals("while one that has not fired follows the profile", mine, f.repo.handshakeOf(next).chain)
+    }
+
+    @Test
+    fun `a mission that names no profile, which is every mission the app can make, is pinned to the active profile's chain and words when the alarm fires`() = run {
+        val profiles = ProfileRepository(f.db)
+        f.db.settings().put(SettingRow(SettingKeys.ACTIVE_PROFILE_ID, "\"builtin_command\""))
+        val mine = ChainSpec(ChainOp.OR, listOf(StepSpec(HandshakeMode.TYPING, 3, 90), StepSpec(HandshakeMode.HOLD, 2, 45, 5)))
+        assertEquals(SaveChainResult.Saved, profiles.saveChain("builtin_command", mine))
+        val m = f.mission() // names no profile: it has the active one's
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+
+        val written = Codec.decodeSession(f.repo.get(o.id)!!.sessionJson)
+        assertNotNull("the chain is written into the ring when it fires", written.handshakeChainJson)
+        assertEquals("the person's own words, not a plain default", Personality.ACCOUNTABILITY_PARTNER.name, written.handshakePersonality)
+        assertEquals("what was saved for the active profile is what the ring asks for", mine, f.repo.handshakeOf(f.repo.get(o.id)!!).chain)
+
+        // Whatever happens to the profile, or to which profile is active, while it sounds changes nothing for the person in front of it.
+        val other = ChainSpec(ChainOp.SEQUENCE, listOf(StepSpec(HandshakeMode.CONFIRM_SEQUENCE, 4, 60)))
+        assertEquals(SaveChainResult.Saved, profiles.saveChain("builtin_command", other))
+        f.db.profiles().upsert(f.db.profiles().get("builtin_command")!!.copy(personality = Personality.MINIMALIST))
+        f.db.settings().put(SettingRow(SettingKeys.ACTIVE_PROFILE_ID, "\"builtin_reveille_max\""))
+        val after = f.repo.handshakeOf(f.repo.get(o.id)!!)
+        assertEquals("still the chain it was fired with", mine, after.chain)
+        assertEquals("and still in the same words", Personality.ACCOUNTABILITY_PARTNER, after.personality)
+        assertTrue(profiles.useDefault("builtin_command"))
+        assertEquals("and with the profile back on the standard handshake", mine, f.repo.handshakeOf(f.repo.get(o.id)!!).chain)
+    }
+
+    @Test
+    fun `on a fresh install the first alarm of a mission that names no profile asks for the chain saved on the profile that was active from the start`() = run {
+        val profiles = ProfileRepository(f.db)
+        val mine = ChainSpec(ChainOp.AND, listOf(StepSpec(HandshakeMode.TYPING, 2, 45), StepSpec(HandshakeMode.HOLD, 2, 45, 4)))
+        // Nothing was chosen: the profile that is active is the one the database was created with.
+        assertEquals(SaveChainResult.Saved, profiles.saveChain("builtin_steady", mine))
+        val m = f.mission()
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+
+        val plan = f.repo.handshakeOf(f.repo.get(o.id)!!)
+        assertEquals(mine, plan.chain)
+        assertEquals(Personality.EXECUTIVE_DIRECTOR, plan.personality)
+        assertTrue(profiles.useDefault("builtin_steady"))
+        assertEquals("pinned: going back to the standard while it sounds changes nothing", mine, f.repo.handshakeOf(f.repo.get(o.id)!!).chain)
+    }
+
+    @Test
+    fun `a chain that could not be used when the alarm fired stays the standard one when the profile is fixed while it sounds`() = run {
+        val profiles = ProfileRepository(f.db)
+        // Text that a newer version wrote, or that went wrong: the standard chain of the difficulty is what runs.
+        f.db.profiles().setChainJson("builtin_command", "{\"op\":\"OR\",\"steps\":[{\"mode\":\"HOLOGRAM\",\"tries\":3,\"timeoutSeconds\":90}]}")
+        val m = f.mission(profileId = "builtin_command")
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+        assertEquals("the standard chain of the difficulty runs", DialEffects.defaultChain(3), f.repo.handshakeOf(f.repo.get(o.id)!!).chain)
+
+        // The person fixes it in the editor while the alarm sounds: the chain under them must not change in the middle of the handshake.
+        val mine = ChainSpec(ChainOp.OR, listOf(StepSpec(HandshakeMode.HOLD, 2, 45, 5)))
+        assertEquals(SaveChainResult.Saved, profiles.saveChain("builtin_command", mine))
+
+        assertEquals("still the standard chain it was fired with", DialEffects.defaultChain(3), f.repo.handshakeOf(f.repo.get(o.id)!!).chain)
+        val next = f.repo.createOccurrence(m.id, f.t0 + 120_000, "UTC").occurrence
+        assertEquals("while one that has not fired follows the profile", mine, f.repo.handshakeOf(next).chain)
+    }
+
+    @Test
+    fun `a mission that names no profile is fired with the dials of the active profile and not with Steady's, the difficulty and the length of the ring included`() = run {
+        // The common case: the active profile has saved no chain, so everything the ring asks for comes from its dials (it is also what a
+        // person who came from the previous version with dials of their own gets, because the importer makes that profile the active one).
+        f.db.settings().put(SettingRow(SettingKeys.ACTIVE_PROFILE_ID, "\"builtin_reveille_max\""))
+        val m = f.mission() // names no profile
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+
+        val fired = f.repo.get(o.id)!!
+        val written = Codec.decodeSession(fired.sessionJson)
+        assertEquals("Reveille Max asks for difficulty 4, Steady for 2", 4, written.handshakeDifficulty)
+        assertEquals(DialEffects.defaultChain(4), f.repo.handshakeOf(fired).chain)
+        assertNotEquals("the two plans differ, or this proves nothing", AlertPlan.forIntensity(2).totalMs, AlertPlan.forIntensity(5).totalMs)
+        assertEquals("and it rings for as long as alert intensity 5 does", f.t0 + AlertPlan.forIntensity(5).totalMs, written.planEndUtc)
+        assertEquals("in the cycles the service sounds", AlertPlan.forIntensity(5).cycleWindows(), SessionPlan.of(fired)!!.cycleWindows)
+
+        // Which profile is active while it sounds changes nothing for the person in front of it.
+        f.db.settings().put(SettingRow(SettingKeys.ACTIVE_PROFILE_ID, "\"builtin_nudge\""))
+        assertEquals(DialEffects.defaultChain(4), f.repo.handshakeOf(f.repo.get(o.id)!!).chain)
+        assertEquals(4, Codec.decodeSession(f.repo.get(o.id)!!.sessionJson).handshakeDifficulty)
+    }
+
+    @Test
+    fun `and it is the row's own dials that count, as the importer writes them for a person who came from the previous version`() = run {
+        // The importer makes a profile of the person's own the active one when the old dials had changed; no preset has these.
+        val imported = f.db.profiles().get("builtin_steady")!!.copy(
+            id = "imported_settings", name = "Imported settings", origin = PresetOrigin.CUSTOM, isBuiltin = false, handshakeChainJson = null,
+            firmness = 5, obnoxiousness = 1, alertIntensity = 4, followUpPersistence = 5, handshakeDifficulty = 5, scheduleRigidity = 1, recoveryStructure = 5,
+        )
+        f.db.profiles().upsert(imported)
+        f.db.settings().put(SettingRow(SettingKeys.ACTIVE_PROFILE_ID, "\"imported_settings\""))
+        val m = f.mission() // the importer's missions name no profile
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+
+        val fired = f.repo.get(o.id)!!
+        assertEquals(5, Codec.decodeSession(fired.sessionJson).handshakeDifficulty)
+        assertEquals(DialEffects.defaultChain(5), f.repo.handshakeOf(fired).chain)
+        assertEquals(AlertPlan.forIntensity(4).cycleWindows(), SessionPlan.of(fired)!!.cycleWindows)
+        assertEquals(f.t0 + AlertPlan.forIntensity(4).totalMs, SessionPlan.of(fired)!!.endUtc)
+    }
+
+    @Test
+    fun `a mission that is switched off but whose alarm is armed still rings with its profile, and the profile counts as in use`() = run {
+        val profiles = ProfileRepository(f.db)
+        val mine = ChainSpec(ChainOp.OR, listOf(StepSpec(HandshakeMode.TYPING, 4, 60)))
+        assertEquals(SaveChainResult.Saved, profiles.saveChain("builtin_nudge", mine))
+        val m = f.mission(profileId = "builtin_nudge")
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT))
+        f.db.missions().update(m.copy(enabled = false)) // nothing in the app does this yet; the alarm is armed all the same
+
+        apply(o, OccurrenceCommand.Fire)
+
+        assertEquals("the ring is fired with the profile the mission names", mine, f.repo.handshakeOf(f.repo.get(o.id)!!).chain)
+        assertTrue("and that profile is in use", "builtin_nudge" in profiles.observeInUse().first())
+    }
+
+    @Test
+    fun `the profile a ring is fired with is the profile that is said to be in use, however the setting or the mission names it`() = run {
+        val profiles = ProfileRepository(f.db)
+        // Every built-in profile gets a chain of its own, so that the chain a ring is pinned to says which profile it came from.
+        val own = listOf("builtin_nudge", "builtin_steady", "builtin_command", "builtin_reveille_max").withIndex().associate { (i, id) ->
+            id to ChainSpec(ChainOp.OR, listOf(StepSpec(HandshakeMode.TYPING, 2 + i, 45 + i)))
+        }
+        for ((id, chain) in own) assertEquals(SaveChainResult.Saved, profiles.saveChain(id, chain))
+
+        // rings: the profile that the ring of the mission that names none came from, then that of the mission that names [named] (null: none)
+        class Setup(val label: String, val setting: String?, val named: String?, val rings: List<String?>)
+        val setups = listOf(
+            Setup("the setting as it is stored, in quotes", "\"builtin_command\"", null, listOf("builtin_command", "builtin_command")),
+            Setup("the setting without quotes", "builtin_command", null, listOf("builtin_command", "builtin_command")),
+            Setup("a blank setting in quotes", "\"\"", null, listOf(null, null)),
+            Setup("a setting with nothing in it", "", null, listOf(null, null)),
+            Setup("no setting at all", null, null, listOf(null, null)),
+            Setup("a setting that names a profile that is not there", "\"builtin_ghost\"", null, listOf(null, null)),
+            Setup("a mission that names another profile", "\"builtin_command\"", "builtin_nudge", listOf("builtin_command", "builtin_nudge")),
+            Setup("a mission that names a profile that is not there rings with the active one", "\"builtin_command\"", "builtin_ghost", listOf("builtin_command", "builtin_command")),
+            Setup("a mission that names a profile that is not there, and no active profile", null, "builtin_ghost", listOf(null, null)),
+        )
+        var at = f.t0
+        for (setup in setups) {
+            if (setup.setting == null) f.db.settings().remove(SettingKeys.ACTIVE_PROFILE_ID)
+            else f.db.settings().put(SettingRow(SettingKeys.ACTIVE_PROFILE_ID, setup.setting))
+            val missions = listOf(f.mission(), f.mission(profileId = setup.named))
+            val rings = mutableListOf<String?>()
+            for (m in missions) {
+                at += 60_000
+                val o = f.repo.createOccurrence(m.id, at, "UTC").occurrence
+                assertTrue("${setup.label}: armed", apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)) is ApplyResult.Applied)
+                assertTrue("${setup.label}: fired", apply(o, OccurrenceCommand.Fire) is ApplyResult.Applied)
+                val chain = f.repo.handshakeOf(f.repo.get(o.id)!!).chain
+                rings += own.entries.firstOrNull { it.value == chain }?.key
+            }
+
+            assertEquals("${setup.label}: the profile each ring was fired with", setup.rings, rings)
+            assertEquals("${setup.label}: and those are the profiles in use", rings.filterNotNull().toSet(), profiles.observeInUse().first().filter { it in own.keys }.toSet())
+            for (m in missions) f.db.missions().softDelete(m.id, f.t0) // the next setup starts from the missions of its own
+        }
     }
 
     @Test
@@ -479,7 +682,7 @@ class OccurrenceRepositoryTest {
     }
 
     @Test
-    fun `dials come from the mission profile, falling back to the active one`() = run {
+    fun `a mission that names a profile is fired with that profile's dials`() = run {
         val m = f.mission(profileId = "builtin_reveille_max")
         val o = f.repo.createOccurrence(m.id, f.t0 + 1_000, "UTC").occurrence
         apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)

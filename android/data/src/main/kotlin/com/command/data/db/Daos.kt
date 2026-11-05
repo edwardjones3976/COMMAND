@@ -271,6 +271,17 @@ interface ProfileDao {
 
     @Query("SELECT * FROM execution_profiles ORDER BY is_builtin DESC, name")
     suspend fun all(): List<ProfileRow>
+
+    /** In the order a person thinks of them: the built-in ones first, by how hard a handshake they ask for and then by name, then the rest in the same order. */
+    @Query("SELECT * FROM execution_profiles ORDER BY is_builtin DESC, handshake_difficulty, name")
+    fun observeAll(): kotlinx.coroutines.flow.Flow<List<ProfileRow>>
+
+    /**
+     * Sets the chain of one profile and nothing else, in one statement: reading the row and writing it back would undo a change that
+     * another writer made to the rest of it in between. Returns the number of profiles changed (0 when there is no such profile).
+     */
+    @Query("UPDATE execution_profiles SET handshake_chain_json = :json WHERE id = :id")
+    suspend fun setChainJson(id: String, json: String?): Int
 }
 
 @Dao

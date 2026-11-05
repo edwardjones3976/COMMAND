@@ -42,6 +42,13 @@ sealed interface Challenge {
 data class ChainProgress(val step: Int, val steps: Int)
 
 /**
+ * Another step of the chain that the person may turn to now. [instead] says that it takes the place of the one on screen (any one of the steps
+ * is enough); otherwise it is only done first (all are needed, in any order). [assistive] is a press whose tries are used up: what it leads to
+ * is the three taps that stand in for the press, and the button says so, not "Hold the button".
+ */
+data class Alternative(val position: Int, val mode: com.command.domain.dials.HandshakeMode, val instead: Boolean, val assistive: Boolean = false)
+
+/**
  * The phrases a personality's typing challenge asks for. They are words, so they are resources: a phone in another language asks in it.
  * Never empty: the typing challenge must always have something to ask.
  */

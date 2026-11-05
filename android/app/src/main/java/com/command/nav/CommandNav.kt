@@ -20,6 +20,8 @@ import com.command.consents.ConsentCenterRoute
 import com.command.detail.OccurrenceDetailRoute
 import com.command.editor.MissionEditorRoute
 import com.command.followup.FollowUpRoute
+import com.command.handshake.HandshakeEditorRoute
+import com.command.handshake.HandshakeProfilesRoute
 import com.command.history.HistoryRoute
 import com.command.onboarding.FirstMissionRoute
 import com.command.onboarding.PermissionsRoute
@@ -39,7 +41,9 @@ object Routes {
     const val HISTORY = "history"
     const val SETTINGS = "settings"
     const val DATA = "data"
+    const val HANDSHAKES = "handshakes"
     const val ARG_ID = "id"
+    private const val HANDSHAKE_EDITOR = "handshake"
     private const val DETAIL = "detail"
     private const val EDITOR = "mission"
     private const val FOLLOW_UP = "followup"
@@ -58,6 +62,11 @@ object Routes {
     const val EDITOR_PATTERN = "$EDITOR?$ARG_ID={$ARG_ID}"
 
     fun editor(missionId: String? = null): String = if (missionId == null) EDITOR else "$EDITOR?$ARG_ID=$missionId"
+
+    /** The handshake editor of the profile with this id. */
+    const val HANDSHAKE_EDITOR_PATTERN = "$HANDSHAKE_EDITOR/{$ARG_ID}"
+
+    fun handshakeEditor(profileId: String): String = "$HANDSHAKE_EDITOR/$profileId"
 }
 
 /** The screens of the app and the ways between them. The lock-screen flow is a separate activity and is not part of this. */
@@ -130,7 +139,17 @@ private fun CommandNavHost(
                 onOpenReliability = { navController.navigate(Routes.RELIABILITY) },
                 onOpenConsents = { navController.navigate(Routes.CONSENTS) },
                 onOpenData = { navController.navigate(Routes.DATA) },
+                onOpenHandshakes = { navController.navigate(Routes.HANDSHAKES) },
             )
+        }
+        composable(Routes.HANDSHAKES) {
+            HandshakeProfilesRoute(onBack = { navController.popBackStack() }, onEdit = { navController.navigate(Routes.handshakeEditor(it)) })
+        }
+        composable(
+            Routes.HANDSHAKE_EDITOR_PATTERN,
+            arguments = listOf(navArgument(Routes.ARG_ID) { type = NavType.StringType }),
+        ) { entry ->
+            HandshakeEditorRoute(profileId = entry.arguments?.getString(Routes.ARG_ID).orEmpty(), onBack = { navController.popBackStack() })
         }
         composable(Routes.DATA) { DataRoute(onBack = { navController.popBackStack() }) }
         composable(

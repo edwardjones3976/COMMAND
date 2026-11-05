@@ -148,6 +148,7 @@ class SettingsScreenTest {
         var back = 0
         val pauses = ArrayList<Int>()
         var endPause = 0
+        var handshakes = 0
     }
 
     private val today = LocalDate.of(2026, 11, 2)
@@ -168,6 +169,7 @@ class SettingsScreenTest {
                     onOpenReliability = { taps.reliability++ },
                     onOpenConsents = { taps.consents++ },
                     onOpenData = { taps.data++ },
+                    onOpenHandshakes = { taps.handshakes++ },
                     version = "4.0",
                     onPause = { taps.pauses += it },
                     onEndPause = { taps.endPause++ },
@@ -205,6 +207,13 @@ class SettingsScreenTest {
         assertEquals(1, taps.history)
         assertEquals(1, taps.reliability)
         assertEquals(1, taps.consents)
+    }
+
+    @Test
+    fun `the handshakes are one tap away`() {
+        val taps = show()
+        compose.onNodeWithTag(SettingsTags.LINK_HANDSHAKES).performClick()
+        assertEquals(1, taps.handshakes)
     }
 
     @Test

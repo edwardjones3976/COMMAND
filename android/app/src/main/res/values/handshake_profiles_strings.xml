@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="handshake_profiles_title">Handshakes</string>
+    <string name="handshake_back">Back</string>
+    <string name="handshake_profiles_intro">A handshake is what you do to answer an alarm: hold a button, type a phrase, tap numbers in order, or say what you will do first. Each profile asks for its own. Safety silence is one tap, whatever the handshake.</string>
+    <string name="handshake_profile_standard">The standard handshake for difficulty %1$d</string>
+    <string name="handshake_profile_own">A handshake of your own</string>
+    <string name="handshake_profile_unusable">What was saved for this profile could not be used, so the standard handshake is in force.</string>
+    <string name="handshake_profile_edit">Edit</string>
+    <!-- What a screen reader says for the button, so that four buttons are not all "Edit"; it still contains the word on the button. -->
+    <string name="handshake_profile_edit_named">Edit %1$s</string>
+    <string name="handshake_profile_in_use">Your alarms use this profile.</string>
+    <string name="handshake_profile_unused">No alarm uses this profile yet.</string>
+
+    <string name="handshake_editor_bar_title">Handshake</string>
+    <string name="handshake_not_found">That profile is gone.</string>
+    <string name="handshake_editor_intro">Choose what the alarm asks of you. When a way does not work out after its tries, another way is offered. Silence, a delay or a skip are never behind a step.</string>
+    <string name="handshake_editor_unusable">What was saved for this profile could not be used, so the standard handshake is in force. Change something and save to replace it, or use the standard handshake below to clear it.</string>
+    <string name="handshake_editor_silence">Safety silence is always one tap away, whatever you choose here.</string>
+
+    <string name="handshake_combine_title">How the steps go together</string>
+    <string name="handshake_combine_or">Any one of them</string>
+    <string name="handshake_combine_or_detail">Doing one of them is enough.</string>
+    <string name="handshake_combine_and">All of them, in any order</string>
+    <string name="handshake_combine_and_detail">Each must be done, and you pick the order.</string>
+    <string name="handshake_combine_sequence">All of them, one after another</string>
+    <string name="handshake_combine_sequence_detail">Each must be done, in the order listed.</string>
+
+    <string name="handshake_step_number">Step %1$d</string>
+    <string name="handshake_move_up">Move step %1$d up</string>
+    <!-- "down" is a direction, not a noun that has a plural: lint takes any word after a number for one. -->
+    <string name="handshake_move_down" tools:ignore="PluralsCandidate">Move step %1$d down</string>
+    <string name="handshake_remove_step">Remove step %1$d</string>
+    <string name="handshake_add_step">Add a step</string>
+
+    <string name="handshake_mode_hold">Hold the button</string>
+    <string name="handshake_mode_sequence">Tap the numbers in order</string>
+    <string name="handshake_mode_typing">Type a phrase</string>
+    <string name="handshake_mode_two_step">Say what you will do first</string>
+    <string name="handshake_mode_qr">Scan a code</string>
+    <string name="handshake_mode_nfc">Touch a tag</string>
+    <string name="handshake_mode_voice">Say a phrase</string>
+    <string name="handshake_mode_planned">%1$s (planned)</string>
+    <string name="handshake_mode_used_in_step">Used in step %1$d</string>
+    <!-- %1$s is the name of the way the alarm asks for in its place. -->
+    <string name="handshake_planned_runs_as">This way is not built yet. For now the alarm asks for this instead: %1$s.</string>
+
+    <plurals name="handshake_step_hold">
+        <item quantity="one">Hold the button for %d second</item>
+        <item quantity="other">Hold the button for %d seconds</item>
+    </plurals>
+    <string name="handshake_chain_or">Any one of: %1$s</string>
+    <string name="handshake_chain_and">All of these, in any order: %1$s</string>
+    <string name="handshake_chain_sequence">One after another: %1$s</string>
+    <!-- Between the steps of a chain in a sentence; quoted so that the space after the comma is kept. -->
+    <string name="handshake_list_separator">", "</string>
+    <!-- A way that is only planned, named in a list: the ring asks for the way that takes its place. -->
+    <string name="handshake_step_runs_as">%1$s (planned; for now: %2$s)</string>
+
+    <plurals name="handshake_tries_label">
+        <item quantity="one">%d try to get it right</item>
+        <item quantity="other">%d tries to get it right</item>
+    </plurals>
+    <string name="handshake_tries_less">Fewer tries</string>
+    <string name="handshake_tries_more">More tries</string>
+    <plurals name="handshake_time_label">
+        <item quantity="one">A try may take %d second</item>
+        <item quantity="other">A try may take %d seconds</item>
+    </plurals>
+    <!-- A hold, and a two-step that begins with one, have no clock of their own; the time is for the three taps of the confirmation that stands in for a hold. -->
+    <plurals name="handshake_time_label_taps">
+        <item quantity="one">If you cannot hold, the three confirming taps may take %d second</item>
+        <item quantity="other">If you cannot hold, the three confirming taps may take %d seconds</item>
+    </plurals>
+    <!-- A two-step later in an ordered chain: the step before it has acknowledged the alarm, so it is only the question. -->
+    <string name="handshake_two_step_only_question">This step only asks what you will do first, after the step before it. It has no tries and no clock.</string>
+    <!-- A two-step that nothing has to precede: it begins with a hold, and the tries and the time below are for that hold. %d is the seconds of the press. -->
+    <plurals name="handshake_two_step_begins_with_hold">
+        <item quantity="one">It begins with a hold of %d second.</item>
+        <item quantity="other">It begins with a hold of %d seconds.</item>
+    </plurals>
+    <!-- The same, where every step is needed: a step that passes first has acknowledged the alarm for the two-step, which then asks only its question. -->
+    <plurals name="handshake_two_step_begins_with_hold_unless">
+        <item quantity="one">It begins with a hold of %d second, unless another step has shown that you are awake first.</item>
+        <item quantity="other">It begins with a hold of %d seconds, unless another step has shown that you are awake first.</item>
+    </plurals>
+    <string name="handshake_time_less">Shorter time for a try</string>
+    <string name="handshake_time_more">Longer time for a try</string>
+    <plurals name="handshake_hold_label">
+        <item quantity="one">Hold for %d second</item>
+        <item quantity="other">Hold for %d seconds</item>
+    </plurals>
+    <string name="handshake_hold_less">Shorter hold</string>
+    <string name="handshake_hold_more">Longer hold</string>
+    <string name="handshake_at_least">This is the least</string>
+    <string name="handshake_at_most">This is the most</string>
+    <string name="handshake_minus">−</string>
+    <string name="handshake_plus">+</string>
+
+    <string name="handshake_save">Save</string>
+    <!-- Why Save is off, said to a screen reader. -->
+    <string name="handshake_save_unchanged">Nothing has changed</string>
+    <!-- Why Save is off right after a save: the note under the list says the rest. -->
+    <string name="handshake_save_saved">Saved</string>
+    <string name="handshake_save_blocked">Fix the problems first</string>
+    <string name="handshake_saved">Saved. The next alarm asks for this.</string>
+    <string name="handshake_saved_unused">Saved. No alarm uses this profile yet, so no alarm asks for this yet.</string>
+    <string name="handshake_use_standard">Use the standard handshake for difficulty %1$d</string>
+    <string name="handshake_restored">Back on the standard handshake for difficulty %1$d.</string>
+
+    <string name="handshake_leave_title">Leave without saving?</string>
+    <string name="handshake_leave_body">You changed this handshake and have not saved it. If you leave now, the changes are lost.</string>
+    <string name="handshake_leave_keep">Keep editing</string>
+    <string name="handshake_leave_confirm">Leave without saving</string>
+    <string name="handshake_standard_title">Use the standard handshake?</string>
+    <string name="handshake_standard_body">This replaces the handshake you saved for this profile with the standard one for difficulty %1$d. Changes you have not saved are lost, and this cannot be undone.</string>
+    <string name="handshake_standard_keep">Keep my handshake</string>
+    <string name="handshake_standard_confirm">Use the standard handshake</string>
+
+    <string name="handshake_problem_no_steps">A handshake needs at least one step.</string>
+    <!-- The numbers of these four are limits (`ChainLimits`: at most 4 steps; tries 2 to 9; 10 to 300 seconds; 1 to 10 seconds), which
+         `ChainValidationTest` writes out. A range is not a count (its noun follows the last number, which is never 1), and the one count,
+         of steps, is the limit 4: that test has to change before it can be 1. -->
+    <string name="handshake_problem_too_many" tools:ignore="PluralsCandidate">A handshake has at most %1$d steps.</string>
+    <string name="handshake_problem_tries" tools:ignore="PluralsCandidate">The tries must be between %1$d and %2$d.</string>
+    <string name="handshake_problem_time" tools:ignore="PluralsCandidate">A try may take between %1$d and %2$d seconds.</string>
+    <string name="handshake_problem_hold" tools:ignore="PluralsCandidate">A press lasts between %1$d and %2$d seconds.</string>
+    <string name="handshake_problem_same">The same way twice in one handshake asks for the same thing twice.</string>
+
+    <string name="handshake_alternatives_instead">Or try another way:</string>
+    <string name="handshake_alternatives_order">You can do these in any order. Do next:</string>
+    <!-- The button for a press whose tries are used up: what it leads to is the three taps that stand in for it. -->
+    <string name="handshake_alternative_taps">Confirm with three taps</string>
+    <string name="settings_link_handshakes">Handshakes</string>
+</resources>

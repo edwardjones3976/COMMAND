@@ -37,6 +37,7 @@ import org.robolectric.annotation.GraphicsMode
 class ReveilleLargeTypeTest {
 
     @get:Rule val compose = createComposeRule()
+    private val shown = ShownDirection()
 
     private val firing = ReveilleUiState.Firing("occ-1", "Write the report", Challenge.Hold(TryId(0, 1), 3, earlyRelease = false, assistive = false, acknowledging = false))
 
@@ -50,6 +51,7 @@ class ReveilleLargeTypeTest {
         var dispatcher: OnBackPressedDispatcher? = null
         compose.setContent {
             dispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            shown.RecordDirection()
             CommandTheme(darkTheme = true) {
                 ReveilleContent(firing, friction, SkipReasonCode.values().toList(), actions(), {}, {})
             }
@@ -106,9 +108,10 @@ class ReveilleLargeTypeTest {
     }
 
     @Test
-    @Config(fontScale = 2f, qualifiers = "ldrtl-w360dp-h640dp-xxhdpi")
+    @Config(fontScale = 2f, qualifiers = "he-ldrtl-w360dp-h640dp-xxhdpi")
     fun `the delay choices are read whole at twice the type size when the text runs from right to left`() {
         showWayOut()
+        shown.assertRtl()
         assertRead(2f)
     }
 
@@ -155,9 +158,10 @@ class ReveilleLargeTypeTest {
     }
 
     @Test
-    @Config(fontScale = 2f, qualifiers = "ldrtl-w360dp-h640dp-xxhdpi")
+    @Config(fontScale = 2f, qualifiers = "he-ldrtl-w360dp-h640dp-xxhdpi")
     fun `at twice the type size with the text running from right to left the silence is still in view when the choices have been scrolled to the end`() {
         showWayOut()
+        shown.assertRtl()
 
         compose.onNode(hasText("Choose what is true", substring = true)).performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag(ReveilleTags.ESCAPE_SILENCE).assertIsDisplayed()
@@ -165,9 +169,10 @@ class ReveilleLargeTypeTest {
     }
 
     @Test
-    @Config(fontScale = 2f, qualifiers = "ldrtl-w360dp-h640dp-xxhdpi")
+    @Config(fontScale = 2f, qualifiers = "he-ldrtl-w360dp-h640dp-xxhdpi")
     fun `at twice the type size with the text running from right to left the silence of a question is still in view when the reasons have been scrolled to the end`() {
         showWayOut(friction = FrictionPrompt(LockPolicy.REASON) { })
+        shown.assertRtl()
 
         compose.onNodeWithText("Other").performScrollTo().assertIsDisplayed()
         compose.onNodeWithTag(ReveilleTags.FRICTION_SILENCE).assertIsDisplayed()

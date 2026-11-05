@@ -31,6 +31,7 @@ import org.robolectric.annotation.GraphicsMode
 class RingInsetsTest {
 
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+    private val shown = ShownDirection()
 
     private val density = 3 // xxhdpi: 3 px to a dp
     private val statusBar = 24 * density
@@ -58,6 +59,7 @@ class RingInsetsTest {
     private fun show(state: ReveilleUiState, window: Window) {
         WindowCompat.setDecorFitsSystemWindows(compose.activity.window, false)
         compose.setContent {
+            shown.RecordDirection()
             CommandTheme(darkTheme = true) { ReveilleContent(state, null, emptyList(), actions(), {}, {}) }
         }
         val insets = WindowInsetsCompat.Builder()
@@ -113,10 +115,11 @@ class RingInsetsTest {
     }
 
     @Test
-    @Config(qualifiers = "ldrtl-w360dp-h640dp-xxhdpi")
+    @Config(qualifiers = "he-ldrtl-w360dp-h640dp-xxhdpi")
     fun `right to left the insets are the same physical sides`() {
         val notch = 36 * density
         show(typing, Window(status = statusBar, navigation = navigationBar, cutout = Insets.of(notch, 0, 0, 0)))
+        shown.assertRtl()
 
         assertTrue("a notch on the left is on the left in a right-to-left layout too: ${area().left}", area().left >= notch)
     }

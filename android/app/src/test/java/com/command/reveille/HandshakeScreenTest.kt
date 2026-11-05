@@ -13,6 +13,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.center
 import androidx.compose.ui.test.down
@@ -57,6 +58,7 @@ class HandshakeScreenTest {
         val indicated = ArrayList<TryId>()
         val assistive = ArrayList<TryId>()
         val assistiveBegun = ArrayList<TryId>()
+        val switched = ArrayList<Int>()
         val completed = ArrayList<TryId>()
         val early = ArrayList<TryId>()
         var silenced = 0
@@ -70,12 +72,14 @@ class HandshakeScreenTest {
             onTypingSubmitted = { at, text -> submitted += at to text },
             onSequenceTapped = { at, number -> tapped += at to number },
             onTwoStepIndicated = { indicated += it },
+            onSwitch = { switched += it },
             onSilence = { silenced++ },
             onResume = {}, onStarted = {}, onDelay = {}, onSkip = {}, onClose = {},
         )
     }
 
-    private fun firing(challenge: Challenge, progress: ChainProgress? = null) = ReveilleUiState.Firing("occ-1", "Write the report", challenge, progress)
+    private fun firing(challenge: Challenge, progress: ChainProgress? = null, alternatives: List<Alternative> = emptyList()) =
+        ReveilleUiState.Firing("occ-1", "Write the report", challenge, progress, alternatives = alternatives)
 
     private fun typing(tryNo: Int = 1, triesLeft: Int = 3, mistaken: Boolean = false, slow: Boolean = false) =
         Challenge.Typing(TryId(0, tryNo), "Up and starting", triesLeft, mistaken, slow)
@@ -446,6 +450,100 @@ class HandshakeScreenTest {
 
         assertEquals(listOf(TryId(0, 1)), r.assistive)
         assertEquals("and only the first tap does", listOf(TryId(0, 1)), r.assistiveBegun)
+    }
+
+    // --- another way ----------------------------------------------------------------------------------------------------
+
+    private val instead = listOf(Alternative(1, com.command.domain.dials.HandshakeMode.CONFIRM_SEQUENCE, instead = true), Alternative(2, com.command.domain.dials.HandshakeMode.TWO_STEP, instead = true))
+
+    private fun assertOffersOtherWays(challenge: Challenge) {
+        val r = Recorder()
+        show(firing(challenge, alternatives = instead), r)
+
+        compose.onNodeWithText("Or try another way:").assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.alternative(1)).assertIsDisplayed().assertTextEquals("Tap the numbers in order").assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag(ReveilleTags.alternative(2)).assertIsDisplayed().assertTextEquals("Say what you will do first").assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag(ReveilleTags.alternative(2)).performClick()
+        assertEquals(listOf(2), r.switched)
+    }
+
+    @Test
+    fun `under a phrase to type another way is offered by its name, and choosing it reports where it is in the chain`() = assertOffersOtherWays(typing())
+
+    @Test
+    fun `under the numbers another way is offered by its name, and choosing it reports where it is in the chain`() = assertOffersOtherWays(sequence())
+
+    @Test
+    fun `under the two-step another way is offered by its name, and choosing it reports where it is in the chain`() =
+        assertOffersOtherWays(Challenge.TwoStep(TryId(1, 1), "Open the document"))
+
+    @Test
+    fun `where every step is needed the other ways are to be done next, in any order, and not instead`() {
+        val r = Recorder()
+        show(firing(typing(), alternatives = listOf(Alternative(0, com.command.domain.dials.HandshakeMode.HOLD, instead = false))), r)
+
+        compose.onNodeWithText("You can do these in any order. Do next:").assertIsDisplayed()
+        compose.onNodeWithText("Or try another way:").assertDoesNotExist()
+        compose.onNodeWithTag(ReveilleTags.alternative(0)).performClick()
+        assertEquals(listOf(0), r.switched)
+    }
+
+    @Test
+    fun `without another way nothing is offered`() {
+        show(firing(typing()), Recorder())
+
+        compose.onNodeWithText("Or try another way:").assertDoesNotExist()
+        compose.onNodeWithText("You can do these in any order. Do next:").assertDoesNotExist()
+        compose.onNodeWithTag(ReveilleTags.alternative(1)).assertDoesNotExist()
+    }
+
+    @Test
+    fun `another way is offered with a hold too, and Safety silence is still there`() {
+        val r = Recorder()
+        val hold = Challenge.Hold(TryId(0, 1), 3, earlyRelease = false, assistive = false, acknowledging = false)
+        show(firing(hold, alternatives = listOf(Alternative(1, com.command.domain.dials.HandshakeMode.TYPING, instead = true))), r)
+
+        compose.onNodeWithTag(ReveilleTags.HOLD).assertIsDisplayed()
+        compose.onNodeWithTag(ReveilleTags.alternative(1)).assertIsDisplayed().performClick()
+        assertEquals(listOf(1), r.switched)
+        compose.onNodeWithTag(ReveilleTags.SILENCE).assertIsDisplayed()
+    }
+
+    @Test
+    fun `a press whose tries are used up is offered as the three taps it has become, by that name and not as the press`() {
+        val r = Recorder()
+        show(firing(typing(), alternatives = listOf(Alternative(0, com.command.domain.dials.HandshakeMode.HOLD, instead = true, assistive = true))), r)
+
+        compose.onNodeWithTag(ReveilleTags.alternative(0)).assertIsDisplayed().assertTextEquals("Confirm with three taps").assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithText("Hold the button").assertDoesNotExist()
+        compose.onNodeWithTag(ReveilleTags.alternative(0)).performClick()
+        assertEquals(listOf(0), r.switched)
+    }
+
+    @Test
+    fun `a press that can still be held is offered as the press`() {
+        show(firing(typing(), alternatives = listOf(Alternative(0, com.command.domain.dials.HandshakeMode.HOLD, instead = true))), Recorder())
+
+        compose.onNodeWithTag(ReveilleTags.alternative(0)).assertTextEquals("Hold the button")
+        compose.onNodeWithText("Confirm with three taps").assertDoesNotExist()
+    }
+
+    @Test
+    fun `a press of one second is told in the singular, to a screen reader and in the hint after it was let go early`() {
+        val hold = Challenge.Hold(TryId(0, 1), 1, earlyRelease = true, assistive = false, acknowledging = false)
+        show(firing(hold), Recorder())
+
+        compose.onNode(hasTestTag(ReveilleTags.HOLD) and hasContentDescription("Press and hold for 1 second to acknowledge the alarm")).assertIsDisplayed()
+        compose.onNodeWithText("Released early. Hold the full 1 second.").assertIsDisplayed()
+    }
+
+    @Test
+    fun `and a press of several seconds in the plural`() {
+        val hold = Challenge.Hold(TryId(0, 1), 4, earlyRelease = true, assistive = false, acknowledging = false)
+        show(firing(hold), Recorder())
+
+        compose.onNode(hasTestTag(ReveilleTags.HOLD) and hasContentDescription("Press and hold for 4 seconds to acknowledge the alarm")).assertIsDisplayed()
+        compose.onNodeWithText("Released early. Hold the full 4 seconds.").assertIsDisplayed()
     }
 
     @Test

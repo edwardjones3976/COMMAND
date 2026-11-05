@@ -54,6 +54,7 @@ object SettingsTags {
     const val LINK_RELIABILITY = "settings_link_reliability"
     const val LINK_CONSENTS = "settings_link_consents"
     const val LINK_DATA = "settings_link_data"
+    const val LINK_HANDSHAKES = "settings_link_handshakes"
     const val PAUSE_1H = "settings_pause_1h"
     const val PAUSE_4H = "settings_pause_4h"
     const val PAUSE_12H = "settings_pause_12h"
@@ -69,6 +70,7 @@ fun SettingsRoute(
     onOpenReliability: () -> Unit,
     onOpenConsents: () -> Unit,
     onOpenData: () -> Unit = {},
+    onOpenHandshakes: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -80,6 +82,7 @@ fun SettingsRoute(
         onOpenReliability = onOpenReliability,
         onOpenConsents = onOpenConsents,
         onOpenData = onOpenData,
+        onOpenHandshakes = onOpenHandshakes,
         version = com.example.BuildConfig.VERSION_NAME,
         onPause = viewModel::pauseFor,
         onEndPause = viewModel::endPause,
@@ -102,6 +105,7 @@ fun SettingsScreen(
     zone: ZoneId = ZoneId.systemDefault(),
     today: LocalDate = LocalDate.now(zone),
     onOpenData: () -> Unit = {},
+    onOpenHandshakes: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -152,6 +156,7 @@ fun SettingsScreen(
                         modifier = Modifier.padding(top = 16.dp).semantics { heading() },
                     )
                 }
+                item { Link(R.string.settings_link_handshakes, onOpenHandshakes, SettingsTags.LINK_HANDSHAKES) }
                 item { Link(R.string.settings_link_history, onOpenHistory, SettingsTags.LINK_HISTORY) }
                 item { Link(R.string.settings_link_reliability, onOpenReliability, SettingsTags.LINK_RELIABILITY) }
                 item { Link(R.string.settings_link_consents, onOpenConsents, SettingsTags.LINK_CONSENTS) }

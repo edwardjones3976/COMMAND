@@ -20,11 +20,17 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ApplicationProvider
 import com.command.alarm.AlarmContract
 import com.command.data.OccurrenceRepository
+import com.command.data.ProfileRepository
+import com.command.data.SaveChainResult
 import com.command.data.db.CommandDb
 import com.command.data.db.OccurrenceRow
 import com.command.data.db.ProfileRow
+import com.command.domain.dials.ChainOp
+import com.command.domain.dials.ChainSpec
+import com.command.domain.dials.HandshakeMode
 import com.command.domain.dials.Personality
 import com.command.domain.dials.PresetOrigin
+import com.command.domain.dials.StepSpec
 import com.command.domain.model.ChallengeOutcome
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
@@ -69,6 +75,7 @@ class ReveilleActivityHandshakeTest {
 
     @Inject lateinit var repo: OccurrenceRepository
     @Inject lateinit var db: CommandDb
+    @Inject lateinit var profiles: ProfileRepository
 
     @Before
     fun setUp() {
@@ -435,6 +442,27 @@ class ReveilleActivityHandshakeTest {
         compose.onNodeWithTag(ReveilleTags.SKIP).performClick()
 
         compose.waitUntil(timeoutMillis = 30_000) { stateOf(o) == OccurrenceState.SKIPPED }
+    }
+
+    @Test
+    fun `a chain of the person's own that allows another way offers it, and taking it leads to the same acknowledgement`() {
+        val chain = ChainSpec(ChainOp.OR, listOf(StepSpec(HandshakeMode.HOLD, 3, 90, 3), StepSpec(HandshakeMode.TYPING, 3, 90)))
+        assertEquals(SaveChainResult.Saved, runBlocking { profiles.saveChain("builtin_steady", chain) })
+        val o = ringing("builtin_steady")
+        val controller = open(o)
+        waitForTag(ReveilleTags.HOLD)
+        waitForTag(ReveilleTags.alternative(1))
+        assertTrue("or try another way", seenText("Or try another way:"))
+
+        compose.onNodeWithTag(ReveilleTags.alternative(1)).performClick()
+        waitForTag(ReveilleTags.TYPING_PHRASE)
+        compose.onNodeWithTag(ReveilleTags.TYPING_FIELD).performTextInput(phraseOnScreen())
+        compose.onNodeWithTag(ReveilleTags.TYPING_DONE).performClick()
+
+        waitForText("Open the document")
+        assertEquals(OccurrenceState.GUIDED_START, stateOf(o))
+        assertEquals(listOf(ChallengeOutcome.SUCCESS), outcomes(o))
+        controller.pause().stop().destroy()
     }
 
     @Test
