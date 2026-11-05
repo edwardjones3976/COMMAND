@@ -93,6 +93,8 @@ class ReveilleServiceTest {
         .setAction(AlarmContract.ACTION_FIRE)
         .setData(Uri.parse("command://occurrence/${o.id}"))
         .putExtra(AlarmContract.EXTRA_OCCURRENCE_ID, o.id)
+        // As the platform delivers it: every real alarm says what time it was set for.
+        .putExtra(AlarmContract.EXTRA_AT, o.scheduledAtUtc)
         .putExtra(AlarmContract.EXTRA_REQUEST_CODE, o.requestCode)
 
     private fun startService(intent: Intent) =
@@ -582,6 +584,8 @@ class ReveilleServiceTest {
     @Test
     fun `an alarm from before its occurrence moved rings nothing and is set again for the new time`() {
         val o = armed()
+        // The platform has used this alarm up by delivering it, which the fake does not do by itself: only a new arm can bring it back.
+        scheduler.armed.clear()
         val service = startService(fireIntent(o).putExtra(AlarmContract.EXTRA_AT, o.scheduledAtUtc - 3_600_000L)).get()
         awaitUntil(message = "stop") { shadowOf(service).isStoppedBySelf }
         assertFalse(output.ringing)
@@ -595,6 +599,13 @@ class ReveilleServiceTest {
     fun `an alarm whose time matches its occurrence rings`() {
         val o = armed()
         startService(fireIntent(o).putExtra(AlarmContract.EXTRA_AT, o.scheduledAtUtc)).get()
+        awaitUntil(message = "ringing") { stateOf(o) == OccurrenceState.FIRING }
+    }
+
+    @Test
+    fun `an alarm that does not say its time, as one set by an older version, still rings`() {
+        val o = armed()
+        startService(fireIntent(o).apply { removeExtra(AlarmContract.EXTRA_AT) }).get()
         awaitUntil(message = "ringing") { stateOf(o) == OccurrenceState.FIRING }
     }
 }
