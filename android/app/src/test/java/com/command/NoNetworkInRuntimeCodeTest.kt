@@ -7,8 +7,8 @@ import java.io.File
 /**
  * The first screen tells a new person that everything stays on the phone unless they turn on an optional feature that says
  * otherwise. Until the features that talk to the network arrive (each behind its own consent, with its own test), nothing the
- * app runs may open a connection, so this scans the code that runs for the ways of doing so. The previous version's voice engine
- * is quarantined under com/example and is not reachable from the app; it is not scanned.
+ * app runs may open a connection, so this scans the code that runs for the ways of doing so. That includes the voice engine in :voice:
+ * its one way to Gemini is an interface, and the Firebase side of it is in :cloud, which the app does not depend on yet.
  */
 class NoNetworkInRuntimeCodeTest {
 

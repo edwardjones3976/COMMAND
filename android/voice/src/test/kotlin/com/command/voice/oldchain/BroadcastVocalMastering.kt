@@ -1,5 +1,5 @@
 // Copied verbatim from the original AI Studio export (command.zip) for old-vs-new audio comparison only.
-package com.example.oldchain
+package com.command.voice.oldchain
 
 import kotlin.math.PI
 import kotlin.math.abs

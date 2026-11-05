@@ -1,2 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The voice engine's cue haptics. :alarm already declares it, so the app gains no permission from this. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+</manifest>

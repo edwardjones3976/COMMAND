@@ -1,5 +1,7 @@
 package com.command.voice
 
+import com.command.domain.voice.LoudnessMeter
+import com.command.domain.voice.SpeechLevel
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -58,11 +60,148 @@ object VoiceMastering {
     const val MAX_BOOST_DB = 8f
     private const val EDGE_FADE_MS = 5
 
+    /** Fast pre-limiter of the alarm chain: above this level the signal rises a quarter as fast. */
+    internal const val PRE_LIMIT_THRESHOLD_DBFS = -12f
+    internal const val PRE_LIMIT_RATIO = 4f
+    private const val PRE_LIMIT_ATTACK_S = 0.001
+    private const val PRE_LIMIT_RELEASE_S = 0.050
+
+    /** Most gain the alarm chain will add looking for its target: a line this far below it is a very quiet engine, not silence. */
+    private const val MAX_ALARM_GAIN_DB = 40.0
+    private const val ALARM_TOLERANCE_LU = 0.2
+    private const val ALARM_SEARCH_STEPS = 6
+
+    /** Below this much loudness for each dB of gain the line has met the ceiling, and pushing on only does harm. */
+    private const val MIN_LU_PER_DB = 0.15
+
+    /** How one line is levelled. */
+    sealed interface Profile {
+        /** Something the person asked to hear: speech level [TARGET_SPEECH_DBFS] plus [boostDb]. */
+        data class PREVIEW(val boostDb: Float = 0f) : Profile
+
+        /** A ringing alarm: [targetLufs] (BS.1770, gated) plus the pack's [trimDb] (0 to [MAX_BOOST_DB]), under the -1 dBTP ceiling. */
+        data class ALARM(val targetLufs: Float, val trimDb: Float = 0f) : Profile
+    }
+
+    /** The alarm profile of an alert intensity: -16 LUFS at 1 to 3, -15 at 4, -14 at 5, plus the pack's trim. */
+    fun alarmProfile(level: SpeechLevel): Profile.ALARM {
+        val target = when {
+            level.alertIntensity >= 5 -> -14f
+            level.alertIntensity == 4 -> -15f
+            else -> -16f
+        }
+        return Profile.ALARM(target, level.trimDb)
+    }
+
     data class Result(
         val pcm: ShortArray,
         val speechRmsDbfs: Float,
         val peakDbfs: Float
     )
+
+    fun master(input: ShortArray, sampleRate: Int, profile: Profile): Result = when (profile) {
+        is Profile.PREVIEW -> master(input, sampleRate, profile.boostDb)
+        is Profile.ALARM -> masterAlarm(input, sampleRate, profile)
+    }
+
+    /**
+     * Search for the one gain that lands on the target once the pre-limiter and the true-peak limiter have had their say: both take level away
+     * from a hot line, which is why a single measurement is not enough (the old chain lost 5 dB to its limiter this way). Each step corrects
+     * by what the last one measured. A target the ceiling makes impossible ends at the loudest line that was found.
+     */
+    private fun masterAlarm(input: ShortArray, sampleRate: Int, profile: Profile.ALARM): Result {
+        if (input.isEmpty()) return Result(input, -96f, -96f)
+        val sr = sampleRate.coerceIn(8000, 96000)
+        val x = FloatArray(input.size) { input[it] / 32768f }
+        highPass(x, sr, HIGH_PASS_HZ)
+        compress(x, sr)
+
+        val target = profile.targetLufs + profile.trimDb.coerceIn(0f, MAX_BOOST_DB).toDouble()
+        val start = LoudnessMeter.integratedLufs(x, sr)
+        var best = x
+        if (start.isFinite()) {
+            var gainDb = (target - start).coerceIn(-MAX_ALARM_GAIN_DB, MAX_ALARM_GAIN_DB)
+            var bestError = Double.MAX_VALUE
+            var lastGainDb = Double.NaN
+            var lastLufs = Double.NaN
+            for (step in 0 until ALARM_SEARCH_STEPS) {
+                val gain = dbToLin(gainDb.toFloat())
+                val y = FloatArray(x.size) { x[it] * gain }
+                preLimit(y, sr)
+                limit(y, sr, dbToLin(PEAK_CEILING_DBFS - TRUE_PEAK_MARGIN_DB))
+                val lufs = LoudnessMeter.integratedLufs(y, sr)
+                // Against the ceiling more gain buys no loudness, only crushed syllables and louder breaths: the line stays as it was.
+                if (step > 0 && gainDb > lastGainDb && (lufs - lastLufs) / (gainDb - lastGainDb) < MIN_LU_PER_DB) break
+                val error = target - lufs
+                if (abs(error) < bestError) {
+                    bestError = abs(error)
+                    best = y
+                }
+                if (abs(error) <= ALARM_TOLERANCE_LU) break
+                lastGainDb = gainDb
+                lastLufs = lufs
+                // The limiters give back only part of a change in gain, so a shortfall is pushed harder than it measures.
+                val next = (gainDb + error * if (error > 0) 2.0 else 1.0).coerceIn(-MAX_ALARM_GAIN_DB, MAX_ALARM_GAIN_DB)
+                if (next == gainDb) break
+                gainDb = next
+            }
+            holdUnderCeiling(best)
+        }
+        return finish(best, sr)
+    }
+
+    /**
+     * The last word on the ceiling: the peaks between the samples, read finer than the limiter reads them (sibilants near the top of the band
+     * get past its 4x detector), and one small gain for the whole line if any is over.
+     */
+    private fun holdUnderCeiling(x: FloatArray) {
+        val peak = finePeak(x)
+        val ceiling = dbToLin(PEAK_CEILING_DBFS - TRUE_PEAK_MARGIN_DB)
+        if (peak > ceiling) {
+            val gain = ceiling / peak
+            for (i in x.indices) x[i] *= gain
+        }
+    }
+
+    /** The largest absolute value of the waveform, on a grid eight times finer than the samples (windowed sinc, 64 taps). */
+    private fun finePeak(x: FloatArray): Float {
+        val taps = 32
+        var peak = 0f
+        for (v in x) peak = max(peak, abs(v))
+        for (phase in 1 until 8) {
+            val frac = phase / 8.0
+            val kernel = FloatArray(2 * taps) { j ->
+                val t = (j - taps + 1) - frac
+                (sin(PI * t) / (PI * t) * (0.5 + 0.5 * cos(PI * t / taps))).toFloat()
+            }
+            for (i in x.indices) {
+                var acc = 0f
+                for (j in kernel.indices) {
+                    val idx = i + j - taps + 1
+                    if (idx in x.indices) acc += x[idx] * kernel[j]
+                }
+                peak = max(peak, abs(acc))
+            }
+        }
+        return peak
+    }
+
+    /**
+     * The fast pre-limiter: 4:1 above -12 dBFS, 1 ms attack, 50 ms release. It takes the tops off the syllables so that the true-peak limiter
+     * behind it, whose job is only the ceiling, has little left to do and the line keeps its level.
+     */
+    internal fun preLimit(x: FloatArray, sampleRate: Int) {
+        val attack = exp(-1.0 / (sampleRate * PRE_LIMIT_ATTACK_S)).toFloat()
+        val release = exp(-1.0 / (sampleRate * PRE_LIMIT_RELEASE_S)).toFloat()
+        var env = 0f
+        for (i in x.indices) {
+            val a = abs(x[i])
+            val coeff = if (a > env) attack else release
+            env = coeff * env + (1f - coeff) * a
+            val over = linToDb(env) - PRE_LIMIT_THRESHOLD_DBFS
+            if (over > 0f) x[i] *= dbToLin(-over * (1f - 1f / PRE_LIMIT_RATIO))
+        }
+    }
 
     /**
      * @param boostDb extra loudness above the target (the voice pack's boost slider). Peaks that
@@ -84,7 +223,11 @@ object VoiceMastering {
         val gain = dbToLin(wantedDb)
         for (i in x.indices) x[i] *= gain
         limit(x, sr, dbToLin(PEAK_CEILING_DBFS - TRUE_PEAK_MARGIN_DB))
+        return finish(x, sr)
+    }
 
+    /** The edge fade, the rounding to 16 bits and the measurements of what comes out. */
+    private fun finish(x: FloatArray, sr: Int): Result {
         val fade = (sr * EDGE_FADE_MS / 1000).coerceAtMost(x.size / 2)
         val out = ShortArray(x.size) { i ->
             val edge = when {

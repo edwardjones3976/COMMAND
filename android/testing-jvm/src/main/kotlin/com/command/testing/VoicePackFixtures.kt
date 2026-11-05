@@ -1,10 +1,16 @@
-package com.example.data
+package com.command.testing
+
+import com.command.domain.voice.CadenceStyle
+import com.command.domain.voice.EmotionalTone
+import com.command.domain.voice.EqPreset
+import com.command.domain.voice.VoiceModelType
+import com.command.domain.voice.VoicePackEntity
 
 /**
- * The ten voice packs of the previous version (voice settings and scripts only), kept until the voice pipeline moves into
- * :voice in M9. The licence, attribution and recorded-voice claims the old data carried are gone: no recording stood behind them.
+ * The ten voice packs of the previous version (voice settings and scripts only), which the voice tests are written against. The
+ * licence, attribution and recorded-voice claims the old data carried are gone: no recording stood behind them.
  */
-object LegacyVoicePacks {
+object VoicePackFixtures {
     fun defaultVoicePacks(): List<VoicePackEntity> = listOf(
             VoicePackEntity(
                 id = "pack_marcus_vance",

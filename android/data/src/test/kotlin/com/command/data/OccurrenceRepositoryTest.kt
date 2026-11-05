@@ -8,6 +8,8 @@ import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
 import com.command.domain.alarm.CheckInPoster
 import com.command.domain.alarm.CheckInPrompt
+import com.command.domain.voice.SpeechLevel
+import com.command.data.db.VoicePackRow
 import com.command.domain.dials.AlertPlan
 import com.command.domain.dials.ChainOp
 import com.command.domain.dials.ChainSpec
@@ -196,6 +198,45 @@ class OccurrenceRepositoryTest {
         assertEquals("still the typing it was fired with", listOf(HandshakeMode.TYPING), plan.chain.steps.map { it.mode })
         assertEquals("and in the same words", Personality.ACCOUNTABILITY_PARTNER, plan.personality)
         assertEquals("it was the profile that was edited", 1, f.db.profiles().get("builtin_command")!!.handshakeDifficulty)
+    }
+
+    @Test
+    fun `the loudness is pinned when the alarm fires, the intensity and the pack's trim, so an edit while it sounds changes neither`() = run {
+        f.db.voicePacks().upsert(
+            VoicePackRow("pack_loud", "Loud", com.command.domain.model.VoiceEngine.LOCAL_TTS, null, null, "en-US", 1f, 1f, 6f, Personality.CUSTOM, true, null),
+        )
+        val profile = f.db.profiles().get("builtin_command")!!.copy(alertIntensity = 4, voicePackId = "pack_loud")
+        f.db.profiles().upsert(profile)
+        val m = f.mission(profileId = profile.id)
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT))
+
+        // Not fired yet: it follows the profile, as a ring from before the pin does.
+        f.db.profiles().upsert(profile.copy(alertIntensity = 5))
+        assertEquals(SpeechLevel(5, 6f), f.repo.speechLevelOf(f.repo.get(o.id)!!))
+        f.db.profiles().upsert(profile)
+
+        apply(o, OccurrenceCommand.Fire)
+        f.db.profiles().upsert(profile.copy(alertIntensity = 1, voicePackId = null))
+        assertEquals(SpeechLevel(4, 6f), f.repo.speechLevelOf(f.repo.get(o.id)!!))
+    }
+
+    @Test
+    fun `the voice engine's quiet window is the person's rest windows`() = run {
+        val policy = RestWindowQuietPolicy(f.db, f.clock)
+        assertEquals("no window saved, no quiet", false, policy.isQuiet(f.t0))
+        f.restWindowCoveringNow()
+        assertEquals(true, policy.isQuiet(f.t0))
+        assertEquals("three hours on it has ended", false, policy.isQuiet(f.t0 + 3 * 3_600_000))
+    }
+
+    @Test
+    fun `a pack that is gone, or no pack, means no trim and not a failure`() = run {
+        val profile = f.db.profiles().get("builtin_command")!!.copy(voicePackId = "pack_gone")
+        f.db.profiles().upsert(profile)
+        val m = f.mission(profileId = profile.id)
+        val o = f.repo.createOccurrence(m.id, f.t0 + 60_000, "UTC").occurrence
+        assertEquals(0f, f.repo.speechLevelOf(o).trimDb, 0f)
     }
 
     @Test

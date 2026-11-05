@@ -184,7 +184,7 @@ class DeleteLeavesNothingTest {
         write(File(context.cacheDir, "director_voice/line.wav"))
         write(File(context.cacheDir, "utterance-1.wav"))
         write(File(context.noBackupFilesDir, "token.bin"))
-        write(File(context.getExternalFilesDir("voice_debug")!!, "capture.wav"))
+        write(File(context.getExternalFilesDir(com.command.voice.VoiceDirectorEngine.DEBUG_CAPTURE_FOLDER)!!, "capture.wav"))
         write(File(context.getExternalFilesDir(null)!!, "other.txt"))
         write(File(context.externalCacheDir!!, "tmp.bin"))
         write(File(context.dataDir, "app_webview/Default/Cookies"))

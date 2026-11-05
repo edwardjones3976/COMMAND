@@ -42,7 +42,7 @@ data class ErasureReport(val occurrences: Int, val leftovers: List<String>, val 
 /**
  * Takes everything COMMAND holds off the phone, from a list of what it holds: every alarm that was set, every ring and every notice,
  * the queued work, the alarm volume if a ring had raised it, both databases (this version's and the previous version's), and every file
- * the app has written (its own folders, the caches, the preferences, the external folders). The list is the point: the answer to "did
+ * the app has written (its own folders, the caches, the preferences, the external folders, among them the voice engine's debug captures). The list is the point: the answer to "did
  * it delete everything?" is a test that sets one of each and looks (DeleteLeavesNothingTest), and the report says what is left, if
  * anything is, so that the screen never says more than is true.
  *

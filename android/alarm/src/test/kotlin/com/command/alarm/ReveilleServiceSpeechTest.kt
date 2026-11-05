@@ -95,6 +95,20 @@ class ReveilleServiceSpeechTest {
     // --- the line --------------------------------------------------------------------------------------------------------------
 
     @Test
+    fun `the line is asked for at the loudness the ring was fired with, whatever the profile says by then`() {
+        val o = armed()
+        runBlocking { repo.apply(o.id, OccurrenceCommand.Fire, EventSource.SYSTEM) }
+        val fired = runBlocking { repo.get(o.id)!! }
+        val pinned = runBlocking { repo.speechLevelOf(fired) }
+        runBlocking {
+            for (profile in db.profiles().all()) db.profiles().upsert(profile.copy(alertIntensity = if (pinned.alertIntensity == 1) 2 else 1))
+        }
+        startService(fired)
+        awaitUntil(message = "spoken") { speaker.levels.isNotEmpty() }
+        assertEquals(pinned, speaker.levels.single())
+    }
+
+    @Test
     fun `the opening line is spoken over the tone, which is turned down while it is said and back up after`() {
         val o = armed()
         val controller = startService(o)

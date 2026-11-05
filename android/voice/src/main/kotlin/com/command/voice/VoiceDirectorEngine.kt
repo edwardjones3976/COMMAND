@@ -1,7 +1,6 @@
-package com.example.service
+package com.command.voice
 
 import android.content.Context
-import com.command.voice.VoiceMastering
 import android.content.pm.ApplicationInfo
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
@@ -16,17 +15,10 @@ import android.os.VibratorManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
-import com.example.data.VoiceModelType
-import com.example.data.VoicePackEntity
-import com.google.firebase.Firebase
-import com.google.firebase.ai.GenerativeModel
-import com.google.firebase.ai.ai
-import com.google.firebase.ai.type.InlineDataPart
-import com.google.firebase.ai.type.PublicPreviewAPI
-import com.google.firebase.ai.type.ResponseModality
-import com.google.firebase.ai.type.SpeechConfig
-import com.google.firebase.ai.type.Voice
-import com.google.firebase.ai.type.generationConfig
+import com.command.domain.voice.QuietWindowPolicy
+import com.command.domain.voice.SpeechUsage
+import com.command.domain.voice.VoiceModelType
+import com.command.domain.voice.VoicePackEntity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -42,7 +34,6 @@ import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
-import java.util.Calendar
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -52,8 +43,6 @@ import kotlin.math.sin
 
 private const val TAG = "VoiceDirectorEngine"
 
-/** Gemini text-to-speech model (Firebase AI Logic). Preview: verify the name if requests start failing. */
-private const val GEMINI_TTS_MODEL = "gemini-3.1-flash-tts-preview"
 private const val GEMINI_TIMEOUT_MS = 8_000L
 private const val GEMINI_BACKOFF_MS = 120_000L
 private const val GEMINI_DEFAULT_SAMPLE_RATE = 24_000
@@ -98,39 +87,17 @@ internal class RenderedLine(val pcm: ShortArray, val sampleRate: Int, val source
 /** One Gemini speech reply: the audio bytes and their MIME type (e.g. "audio/L16;rate=24000" or "audio/wav"). */
 class GeminiAudio(val bytes: ByteArray, val mimeType: String)
 
-/** Where Gemini speech comes from. Production uses Firebase AI Logic; tests substitute a fake. */
+/** Where Gemini speech comes from. The real one is in :cloud, so that nothing in this module can reach the network; tests substitute a fake. */
 fun interface GeminiSpeechSource {
     /** Returns the first audio part of the reply, or null when the reply has none. May throw on failure. */
     suspend fun synthesize(voiceName: String, prompt: String): GeminiAudio?
 }
 
-/** Gemini TTS through Firebase AI Logic, one model per voice. */
-class FirebaseGeminiSpeechSource : GeminiSpeechSource {
-    private val models = ConcurrentHashMap<String, GenerativeModel>()
-
-    @OptIn(PublicPreviewAPI::class) // Speech output is a preview API in firebase-ai
-    private fun model(voiceName: String): GenerativeModel = models.getOrPut(voiceName) {
-        Firebase.ai.generativeModel(
-            modelName = GEMINI_TTS_MODEL,
-            generationConfig = generationConfig {
-                responseModalities = listOf(ResponseModality.AUDIO)
-                speechConfig = SpeechConfig(voice = Voice(voiceName))
-            }
-        )
-    }
-
-    override suspend fun synthesize(voiceName: String, prompt: String): GeminiAudio? =
-        model(voiceName).generateContent(prompt)
-            .candidates.firstOrNull()?.content?.parts
-            ?.filterIsInstance<InlineDataPart>()
-            ?.firstOrNull { it.mimeType.startsWith("audio") }
-            ?.let { GeminiAudio(it.inlineData, it.mimeType) }
-}
-
 class VoiceDirectorEngine(
     private val context: Context,
     private val scope: CoroutineScope,
-    private val gemini: GeminiSpeechSource = FirebaseGeminiSpeechSource(),
+    private val gemini: GeminiSpeechSource,
+    private val quietWindow: QuietWindowPolicy = QuietWindowPolicy.NEVER,
     private val nowMs: () -> Long = System::currentTimeMillis
 ) : TextToSpeech.OnInitListener {
 
@@ -190,7 +157,8 @@ class VoiceDirectorEngine(
         text: String,
         playAttentionChime: Boolean = false,
         headphoneOnlyMode: Boolean = false,
-        quietHoursDucking: Boolean = false
+        quietHoursDucking: Boolean = false,
+        usage: SpeechUsage = SpeechUsage.PREVIEW
     ): Boolean {
         stopSpeaking()
 
@@ -203,7 +171,7 @@ class VoiceDirectorEngine(
         }
 
         playbackJob = scope.launch(Dispatchers.IO) {
-            speakLine(voicePack, text, playAttentionChime, quietHoursDucking, abSlot = null)
+            speakLine(voicePack, text, playAttentionChime, quietHoursDucking, abSlot = null, usage = usage)
         }
         return true
     }
@@ -266,7 +234,8 @@ class VoiceDirectorEngine(
         text: String,
         playAttentionChime: Boolean,
         quietHoursDucking: Boolean,
-        abSlot: String?
+        abSlot: String?,
+        usage: SpeechUsage = SpeechUsage.PREVIEW
     ) {
         val lineId = lineCounter.incrementAndGet()
         val modelType = runCatching { VoiceModelType.valueOf(voicePack.voiceModelType) }
@@ -274,7 +243,7 @@ class VoiceDirectorEngine(
         val director = resolveDirectorVoice(voicePack)
         val displayLine = formatForVoiceModel(text, modelType, voicePack.aggressionPercent)
         val spokenLine = softenAllCaps(displayLine)
-        val volume = playbackVolume(voicePack, quietHoursDucking)
+        val volume = playbackVolume(quietHoursDucking, usage)
 
         _playbackState.value = VoicePlaybackState(
             isSpeaking = true,
@@ -312,7 +281,7 @@ class VoiceDirectorEngine(
             )
             if (isDebuggable) saveDebugCapture(director, rendered, mastered.pcm)
 
-            playPcm(mastered.pcm, rendered.sampleRate, volume)
+            playPcm(mastered.pcm, rendered.sampleRate, volume, usage)
         } finally {
             if (abSlot == null && lineCounter.get() == lineId) {
                 _playbackState.value = VoicePlaybackState()
@@ -478,12 +447,12 @@ class VoiceDirectorEngine(
     // Playback
     // ---------------------------------------------------------------------------------------
 
-    private suspend fun playPcm(samples: ShortArray, sampleRate: Int, volume: Float) {
+    private suspend fun playPcm(samples: ShortArray, sampleRate: Int, volume: Float, usage: SpeechUsage) {
         if (samples.isEmpty()) return
         val track = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setUsage(if (usage == SpeechUsage.ALARM) AudioAttributes.USAGE_ALARM else AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build()
             )
@@ -695,10 +664,12 @@ class VoiceDirectorEngine(
     // Device state
     // ---------------------------------------------------------------------------------------
 
-    /** Full volume; the boost slider is applied in mastering (see [boostDbFor]). Quiet hours still duck. */
-    @Suppress("UNUSED_PARAMETER")
-    private fun playbackVolume(voicePack: VoicePackEntity, quietHoursDucking: Boolean): Float =
-        if (quietHoursDucking && isQuietHours()) 0.45f else 1f
+    /**
+     * Full volume; the boost slider is applied in mastering (see [boostDbFor]). A preview the person asked to have ducked is ducked inside
+     * their rest windows. An alarm never is: it was set to sound.
+     */
+    private suspend fun playbackVolume(quietHoursDucking: Boolean, usage: SpeechUsage): Float =
+        if (usage != SpeechUsage.ALARM && quietHoursDucking && quietWindow.isQuiet(nowMs())) 0.45f else 1f
 
     private fun isHeadphoneConnected(): Boolean {
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return true
@@ -709,11 +680,6 @@ class VoiceDirectorEngine(
                 device.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
                 device.type == AudioDeviceInfo.TYPE_USB_HEADSET
         }
-    }
-
-    private fun isQuietHours(): Boolean {
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-        return hour >= 22 || hour < 7
     }
 
     private fun triggerDrillInstructorHaptics() = vibrate(longArrayOf(0, 90, 45, 90, 45, 140))
@@ -780,7 +746,7 @@ class VoiceDirectorEngine(
      */
     private fun saveDebugCapture(director: DirectorVoice, rendered: RenderedLine, mastered: ShortArray) {
         try {
-            val dir = context.getExternalFilesDir("voice_debug") ?: return
+            val dir = context.getExternalFilesDir(DEBUG_CAPTURE_FOLDER) ?: return
             val stamp = System.currentTimeMillis()
             writeWav(File(dir, "${stamp}_${director.id}_${rendered.source}_raw.wav"), rendered.pcm, rendered.sampleRate)
             writeWav(File(dir, "${stamp}_${director.id}_${rendered.source}_mastered.wav"), mastered, rendered.sampleRate)
@@ -790,6 +756,9 @@ class VoiceDirectorEngine(
     }
 
     companion object {
+        /** The external folder of the debug captures. [com.command.alarm.DataEraser] takes it with the rest, and DeleteLeavesNothingTest looks. */
+        const val DEBUG_CAPTURE_FOLDER = "voice_debug"
+
         internal fun clampSystemPitch(pitch: Float) = pitch.coerceIn(SYSTEM_TTS_MIN_PITCH, SYSTEM_TTS_MAX_PITCH)
         internal fun clampSystemRate(rate: Float) = rate.coerceIn(SYSTEM_TTS_MIN_RATE, SYSTEM_TTS_MAX_RATE)
 

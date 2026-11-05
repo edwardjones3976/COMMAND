@@ -20,6 +20,17 @@ data class Line(val segments: List<Segment>) {
 /** What the speech is for: an alarm that is ringing, or a preview the person asked to hear (which is never loud). */
 enum class SpeechUsage { ALARM, PREVIEW }
 
+/**
+ * How loud a ringing alarm's line is: the alert intensity (1 to 5) picks the loudness target, and [trimDb] is the voice pack's own extra (0 to
+ * 8 dB). Both are the values the ring was fired with. A preview uses only the trim.
+ */
+data class SpeechLevel(val alertIntensity: Int, val trimDb: Float = 0f) {
+    companion object {
+        /** When nothing says otherwise an alarm is as loud as an alarm can be asked to be without a trim. */
+        val LOUDEST = SpeechLevel(alertIntensity = 5)
+    }
+}
+
 /** Why nothing was spoken. Whoever asked shows the words on the screen instead, and the audit log records the reason. */
 enum class SpeechProblem {
     /** No speech engine on the phone, or it refused to start. */
@@ -75,6 +86,7 @@ interface Speaker {
         line: Line,
         usage: SpeechUsage,
         route: RoutePolicy = RoutePolicy.SPEAKER_AND_HEADSET,
+        level: SpeechLevel = SpeechLevel.LOUDEST,
         onAudible: () -> Unit = {},
     ): SpeakResult
 

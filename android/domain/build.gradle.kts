@@ -20,5 +20,6 @@ kotlin {
 
 dependencies {
   testImplementation(libs.junit)
+  testImplementation(libs.kotlinx.coroutines.core)
   testImplementation(project(":testing-jvm"))
 }

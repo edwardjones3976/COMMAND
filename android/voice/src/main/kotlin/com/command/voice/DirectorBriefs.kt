@@ -1,4 +1,4 @@
-package com.example.service
+package com.command.voice
 
 /**
  * Performance direction for each director, sent to the TTS model as the audio profile.

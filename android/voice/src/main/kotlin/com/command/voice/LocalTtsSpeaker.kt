@@ -4,6 +4,7 @@ import com.command.domain.voice.Line
 import com.command.domain.voice.RoutePolicy
 import com.command.domain.voice.SpeakResult
 import com.command.domain.voice.Speaker
+import com.command.domain.voice.SpeechLevel
 import com.command.domain.voice.SpeechProblem
 import com.command.domain.voice.SpeechUsage
 import kotlinx.coroutines.CancellationException
@@ -38,13 +39,13 @@ interface PcmPlayer {
 class LocalTtsSpeaker(
     private val synthesizer: SpeechSynthesizer,
     private val player: PcmPlayer,
-    private val master: (SpokenAudio) -> ShortArray = { VoiceMastering.master(it.pcm, it.sampleRate).pcm },
+    private val master: (SpokenAudio, VoiceMastering.Profile) -> ShortArray = { audio, profile -> VoiceMastering.master(audio.pcm, audio.sampleRate, profile).pcm },
 ) : Speaker {
 
     /** Counts the lines asked for and the stops, so that each line can tell whether it is still the current one. */
     private val generation = AtomicInteger()
 
-    override suspend fun speak(line: Line, usage: SpeechUsage, route: RoutePolicy, onAudible: () -> Unit): SpeakResult {
+    override suspend fun speak(line: Line, usage: SpeechUsage, route: RoutePolicy, level: SpeechLevel, onAudible: () -> Unit): SpeakResult {
         val mine = generation.incrementAndGet()
         fun superseded() = generation.get() != mine
         if (line.isEmpty) return SpeakResult.Spoken(0)
@@ -61,7 +62,7 @@ class LocalTtsSpeaker(
         }
         if (superseded()) return SpeakResult.Interrupted
         val leveled = try {
-            withContext(Dispatchers.Default) { master(audio) }
+            withContext(Dispatchers.Default) { master(audio, profileFor(usage, level)) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -92,9 +93,13 @@ class LocalTtsSpeaker(
     override fun release() = synthesizer.shutdown()
 }
 
+/** An alarm is levelled to the loudness its alert intensity asks for; a preview as it always was, with the pack's trim as its boost. */
+internal fun profileFor(usage: SpeechUsage, level: SpeechLevel): VoiceMastering.Profile =
+    if (usage == SpeechUsage.ALARM) VoiceMastering.alarmProfile(level) else VoiceMastering.Profile.PREVIEW(level.trimDb)
+
 /** For a phone with no speech engine at all: says nothing, and says why. */
 class SilentSpeaker : Speaker {
-    override suspend fun speak(line: Line, usage: SpeechUsage, route: RoutePolicy, onAudible: () -> Unit): SpeakResult =
+    override suspend fun speak(line: Line, usage: SpeechUsage, route: RoutePolicy, level: SpeechLevel, onAudible: () -> Unit): SpeakResult =
         SpeakResult.Unavailable(SpeechProblem.NO_ENGINE)
 
     override fun stop() = Unit

@@ -66,7 +66,17 @@ class LocalTtsSpeakerTest {
     private fun tone(amplitude: Int = 3_000, rate: Int = 24_000) =
         SpokenAudio(ShortArray(rate) { (sin(it * 2 * Math.PI * 220 / rate) * amplitude).toInt().toShort() }, rate)
 
-    private fun speaker(synth: FakeSynth, player: FakePlayer = FakePlayer(), master: ((SpokenAudio) -> ShortArray)? = null) =
+    @Test
+    fun `left to itself the speaker levels an alarm louder than a preview`() = runTest {
+        val player = FakePlayer()
+        val speaker = LocalTtsSpeaker(FakeSynth { Synthesis.Audio(tone()) }, player)
+        speaker.speak(Line.of("Hello"), SpeechUsage.ALARM)
+        speaker.speak(Line.of("Hello"), SpeechUsage.PREVIEW)
+        fun rms(pcm: ShortArray) = kotlin.math.sqrt(pcm.sumOf { it.toDouble() * it } / pcm.size)
+        assertTrue(rms(player.played[0].first) > rms(player.played[1].first) * 1.2)
+    }
+
+    private fun speaker(synth: FakeSynth, player: FakePlayer = FakePlayer(), master: ((SpokenAudio, VoiceMastering.Profile) -> ShortArray)? = null) =
         if (master == null) LocalTtsSpeaker(synth, player) else LocalTtsSpeaker(synth, player, master)
 
     @Test
@@ -166,7 +176,7 @@ class LocalTtsSpeakerTest {
     @Test
     fun `cancelling the coroutine that is speaking stops the sound and lets the cancellation through`() = runTest {
         val player = FakePlayer().apply { waitForStop = CompletableDeferred() }
-        val speaker = LocalTtsSpeaker(FakeSynth { Synthesis.Audio(tone()) }, player, master = { it.pcm })
+        val speaker = LocalTtsSpeaker(FakeSynth { Synthesis.Audio(tone()) }, player, master = { audio, _ -> audio.pcm })
         val job = async { speaker.speak(Line.of("Hello"), SpeechUsage.ALARM) }
         while (player.played.isEmpty()) kotlinx.coroutines.yield()
 
@@ -208,7 +218,7 @@ class LocalTtsSpeakerTest {
 
             override fun stop() = Unit
         }
-        val loud = LocalTtsSpeaker(synth, player) { order += "level"; it.pcm }
+        val loud = LocalTtsSpeaker(synth, player) { audio, _ -> order += "level"; audio.pcm }
 
         assertEquals(SpeakResult.Spoken(1_000), loud.speak(Line.of("Time to start."), SpeechUsage.ALARM) { order += "audible" })
         assertEquals(listOf("engine", "level", "audible", "play"), order)
@@ -227,7 +237,7 @@ class LocalTtsSpeakerTest {
 
         val fine = FakeSynth { Synthesis.Audio(tone()) }
         val player = FakePlayer()
-        val result = speaker(fine, player, master = { error("the audio could not be levelled") }).speak(Line.of("x"), SpeechUsage.ALARM)
+        val result = speaker(fine, player, master = { _, _ -> error("the audio could not be levelled") }).speak(Line.of("x"), SpeechUsage.ALARM)
         assertEquals(SpeakResult.Unavailable(SpeechProblem.PLAYBACK_FAILED), result)
         assertTrue("nothing was played", player.played.isEmpty())
     }
@@ -271,7 +281,7 @@ class LocalTtsSpeakerTest {
             override fun shutdown() = Unit
         }
         val player = FakePlayer()
-        val speaker = LocalTtsSpeaker(synth, player, master = { it.pcm })
+        val speaker = LocalTtsSpeaker(synth, player, master = { audio, _ -> audio.pcm })
         val audibleFor = ArrayList<String>()
 
         val a = async { speaker.speak(Line.of("First"), SpeechUsage.ALARM) { audibleFor += "first" } }

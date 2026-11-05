@@ -307,7 +307,7 @@ class ReveilleService : Service() {
         // The tone is turned down only once the line is about to be heard: while the engine is starting up or writing the audio, which
         // can take seconds, the alarm is as loud as it ever is.
         val result = try {
-            speaker.speak(lines.reveille(brief), SpeechUsage.ALARM, policy) { output.duck(true) }
+            speaker.speak(lines.reveille(brief), SpeechUsage.ALARM, policy, repository.speechLevelOf(row)) { output.duck(true) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

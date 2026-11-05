@@ -1,6 +1,6 @@
 // Copied from the original AI Studio export (command.zip, VoiceDirectorEngine.processClonedSpectralDsp and
 // resolveClonedProfile) for old-vs-new audio comparison only. The DSP body is unchanged.
-package com.example.oldchain
+package com.command.voice.oldchain
 
 import kotlin.math.PI
 import kotlin.math.abs

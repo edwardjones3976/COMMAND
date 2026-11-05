@@ -34,6 +34,12 @@ data class SessionData(
     val handshakePersonality: String? = null,
     /** The chain the person saved for the profile when the alarm fired, as [ChainJson] reads it; null when the profile has none of its own. */
     val handshakeChainJson: String? = null,
+    /**
+     * How loud the ring's spoken line is: the alert intensity and the voice pack's trim it was fired with, pinned like the handshake. A ring
+     * fired before this was pinned (null) follows the profile.
+     */
+    val alertIntensity: Int? = null,
+    val voiceTrimDb: Float? = null,
 )
 
 internal object Codec {
