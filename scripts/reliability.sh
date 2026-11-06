@@ -94,9 +94,11 @@ reset_app() {
 install_apk() { adb install -r -t "$1" >/dev/null; }
 
 arm() { # arm <title of one word> <seconds> : prints the occurrence's id once it is armed
-  adb shell am broadcast -a com.command.debug.RING -p "$PKG" -f 32 --ei seconds "$2" --es title "$1" >/dev/null
-  local id="" left=30
+  # Sent again if nothing was armed: a broadcast sent while the last case's ring screen is being torn down can be dropped with the dying process
+  # (measured on API 37: "Clearing invalid pending cold start").
+  local id="" left=36
   while [ -z "$id" ] && [ "$left" -gt 0 ]; do
+    if [ $((left % 12)) -eq 0 ]; then adb shell am broadcast -a com.command.debug.RING -p "$PKG" -f 32 --ei seconds "$2" --es title "$1" >/dev/null; fi
     sleep 2
     left=$((left - 2))
     id="$(sql "SELECT o.id FROM occurrences o JOIN missions m ON m.id = o.mission_id WHERE m.title = '$1' AND o.state = 'ARMED'" | head -1)"
@@ -184,30 +186,31 @@ case_forcestop() {
   fi
 }
 
-# The platform will not enter deep idle, and leaves it, while a wake-up alarm is due within min_time_to_alarm (force-idle answers "stopped at
-# INACTIVE"), so that constant is lowered for the case. PASS needs the device read as IDLE with the alarm already armed.
+# With an alarm clock this near the device will not enter deep idle (force-idle answers "stopped at INACTIVE", and lowering device_idle's
+# min_time_to_alarm did not change that), so idle comes first and the alarm is armed from inside it. Arming moved the device out of IDLE in the
+# runs measured, so this shows that an alarm armed from deep idle fires on time. It does NOT show one firing while the device is still IDLE.
 case_idle() {
   reset_app
-  adb shell device_config put device_idle min_time_to_alarm 5000
-  local id idle fired=yes awake
-  id="$(arm relidle 60)"
-  [ -n "$id" ] || { adb shell device_config delete device_idle min_time_to_alarm >/dev/null; result idle FAIL "the debug receiver armed nothing"; return; }
   adb shell dumpsys battery unplug
   adb shell dumpsys deviceidle enable >/dev/null
   adb shell input keyevent KEYCODE_SLEEP
   sleep 3
   say "idle: $(ash dumpsys deviceidle force-idle)"
+  local idle after="" id="" fired=yes awake=""
   idle="$(ash dumpsys deviceidle get deep)"
-  wait_for 120 state_is "$id" FIRING || fired=no
-  awake="$(ash dumpsys power | grep -m1 -E 'mWakefulness=' | tr -d ' ')"
+  if [ "$idle" = IDLE ]; then
+    id="$(arm relidle 45)"
+    after="$(ash dumpsys deviceidle get deep)"
+    if [ -n "$id" ]; then wait_for 120 state_is "$id" FIRING || fired=no; else fired=no; fi
+    awake="$(ash dumpsys power | grep -m1 -E 'mWakefulness=' | tr -d ' ')"
+  fi
   adb shell dumpsys deviceidle unforce >/dev/null
   adb shell dumpsys battery reset
-  adb shell device_config delete device_idle min_time_to_alarm >/dev/null
   adb shell input keyevent KEYCODE_WAKEUP
   adb shell wm dismiss-keyguard
-  if [ "$idle" != IDLE ]; then result idle FAIL "with the alarm armed the device stayed out of deep idle (it says '$idle'), so the case proves nothing"; return; fi
-  if [ "$fired" = no ]; then result idle FAIL "deep idle with the alarm armed; did not fire within 120 s"; return; fi
-  judge_ring idle "$id" "device read IDLE with the alarm armed; $awake after firing"
+  if [ "$idle" != IDLE ]; then result idle FAIL "the device did not enter deep idle (it says '$idle'), so the case proves nothing"; return; fi
+  if [ "$fired" = no ]; then result idle FAIL "armed from deep idle (state after arming: $after, id '$id'); did not fire within 120 s"; return; fi
+  judge_ring idle "$id" "armed from deep idle (state after arming: $after); $awake after firing"
 }
 
 case_revoke() {
