@@ -2,6 +2,7 @@ package com.command.voice
 
 import android.content.Context
 import com.command.domain.voice.SpeechProblem
+import com.command.domain.voice.SpeechVoice
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -18,8 +19,8 @@ import java.util.UUID
  * is asked, waited for no longer than [initTimeoutMs] (a cold Google engine took about six seconds to be ready on the API 36 emulator), and
  * let go with [shutdown].
  *
- * The person's words go only to a voice that works on the phone: the engine's own voice when it does, otherwise an installed offline voice of
- * the person's language ([OfflineVoices]), and when there is none nothing is said. Nothing here opens a connection. The engine handles one
+ * The person's words go only to a voice that works on the phone: the best installed offline voice for the pack, otherwise the engine's own
+ * voice when it does, otherwise an installed offline voice of the person's language ([OfflineVoices]), and when there is none nothing is said. Nothing here opens a connection. The engine handles one
  * line at a time, so a line that is abandoned (the ring ended, or a later ring took over) is stopped in the engine before the next is handed
  * over, and cannot hold it up.
  */
@@ -61,7 +62,7 @@ class AndroidSpeechSynthesizer internal constructor(
         runCatching { start() }
     }
 
-    override suspend fun synthesize(text: String): Synthesis {
+    override suspend fun synthesize(text: String, voice: SpeechVoice): Synthesis {
         val engine = start()
         val usable = withTimeoutOrNull(initTimeoutMs) { engine.ready.await() }
             ?: return Synthesis.Failed(SpeechProblem.INIT_TIMEOUT)
@@ -69,13 +70,14 @@ class AndroidSpeechSynthesizer internal constructor(
             shutdown() // a failed engine is not kept: the next ask tries again
             return Synthesis.Failed(SpeechProblem.NO_ENGINE)
         }
-        return gate.withLock { synthesizeOne(engine.engine, text) }
+        return gate.withLock { synthesizeOne(engine.engine, text, voice) }
     }
 
-    private suspend fun synthesizeOne(engine: TtsEngine, text: String): Synthesis {
-        val language = locale()
-        engine.setLanguage(language)
-        if (!OfflineVoices.pin(engine, language)) return Synthesis.Failed(SpeechProblem.NO_OFFLINE_VOICE)
+    private suspend fun synthesizeOne(engine: TtsEngine, text: String, voice: SpeechVoice): Synthesis {
+        if (!OfflineVoices.choose(engine, voice, locale())) return Synthesis.Failed(SpeechProblem.NO_OFFLINE_VOICE)
+        // Every line sets these, because the engine keeps them: a line with no pack must not sound like the one before it.
+        engine.setPitch(VoiceDirectorEngine.clampSystemPitch(voice.pitch))
+        engine.setSpeechRate(VoiceDirectorEngine.clampSystemRate(voice.rate))
         val utterance = UUID.randomUUID().toString()
         val file = File.createTempFile("line", ".wav", workDir)
         val finished = CompletableDeferred<Boolean>()

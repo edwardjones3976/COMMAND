@@ -1,11 +1,14 @@
 package com.command.voice
 
 import com.command.domain.voice.Line
+import com.command.domain.voice.LoudnessMeter
 import com.command.domain.voice.RoutePolicy
 import com.command.domain.voice.Segment
 import com.command.domain.voice.SpeakResult
 import com.command.domain.voice.SpeechProblem
+import com.command.domain.voice.SpeechLevel
 import com.command.domain.voice.SpeechUsage
+import com.command.domain.voice.SpeechVoice
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -24,14 +27,16 @@ class LocalTtsSpeakerTest {
 
     private class FakeSynth(private val result: () -> Synthesis) : SpeechSynthesizer {
         val asked = ArrayList<String>()
+        val voices = ArrayList<SpeechVoice>()
         var shutdowns = 0
         var prepares = 0
         override fun prepare() {
             prepares++
         }
 
-        override suspend fun synthesize(text: String): Synthesis {
+        override suspend fun synthesize(text: String, voice: SpeechVoice): Synthesis {
             asked += text
+            voices += voice
             return result()
         }
 
@@ -155,7 +160,7 @@ class LocalTtsSpeakerTest {
         val ready = CompletableDeferred<Unit>()
         lateinit var speaker: LocalTtsSpeaker
         val synth = object : SpeechSynthesizer {
-            override suspend fun synthesize(text: String): Synthesis {
+            override suspend fun synthesize(text: String, voice: SpeechVoice): Synthesis {
                 ready.await()
                 return Synthesis.Audio(tone())
             }
@@ -273,11 +278,48 @@ class LocalTtsSpeakerTest {
     }
 
     @Test
+    fun `the pack's voice reaches the engine for an alarm and for a preview, and with none the engine gets the default`() = runTest {
+        val synth = FakeSynth { Synthesis.Audio(tone()) }
+        val speaker = speaker(synth)
+        val voice = SpeechVoice("en-GB", 1.01f, 1.04f, female = true)
+
+        speaker.speak(Line.of("One"), SpeechUsage.ALARM, voice = voice)
+        speaker.speak(Line.of("Two"), SpeechUsage.PREVIEW, voice = voice)
+        speaker.speak(Line.of("Three"), SpeechUsage.ALARM)
+
+        assertEquals(listOf(voice, voice, SpeechVoice.DEFAULT), synth.voices)
+    }
+
+    /** Speech-like enough for the meter: a tone that comes and goes. */
+    private fun bursts(rate: Int = 24_000) = SpokenAudio(
+        ShortArray(rate * 3) { i ->
+            val on = (i / (rate / 4)) % 2 == 0
+            (if (on) sin(i * 2 * Math.PI * 440 / rate) * 2_000 else 0.0).toInt().toShort()
+        },
+        rate,
+    )
+
+    @Test
+    fun `the pack's trim makes the alarm louder, and more trim is never quieter`() = runTest {
+        suspend fun lufs(trim: Float): Double {
+            val player = FakePlayer()
+            speaker(FakeSynth { Synthesis.Audio(bursts()) }, player).speak(Line.of("Hello"), SpeechUsage.ALARM, level = SpeechLevel(2, trim))
+            val pcm = player.played.single().first
+            return LoudnessMeter.integratedLufs(FloatArray(pcm.size) { pcm[it] / 32768f }, 24_000)
+        }
+        val plain = lufs(0f)
+        val stone = lufs(4.5f)
+        // Not all of it on a line this dense: the limiters take some back (amendment 28).
+        assertTrue("0 dB gives $plain and 4.5 dB gives $stone", stone - plain > 2.5)
+        assertTrue(lufs(8f) >= stone)
+    }
+
+    @Test
     fun `a line asked for while an earlier one is still being prepared replaces it, and the earlier one never becomes audible`() = runTest {
         val first = CompletableDeferred<Synthesis>()
         var calls = 0
         val synth = object : SpeechSynthesizer {
-            override suspend fun synthesize(text: String): Synthesis = if (calls++ == 0) first.await() else Synthesis.Audio(tone())
+            override suspend fun synthesize(text: String, voice: SpeechVoice): Synthesis = if (calls++ == 0) first.await() else Synthesis.Audio(tone())
             override fun shutdown() = Unit
         }
         val player = FakePlayer()

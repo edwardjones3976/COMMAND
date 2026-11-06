@@ -16,6 +16,8 @@ class OfflineVoicesTest {
         override fun voices() = voices
         override fun currentVoice() = selected ?: current
         override fun setLanguage(locale: Locale) = Unit
+        override fun setPitch(pitch: Float) = Unit
+        override fun setSpeechRate(rate: Float) = Unit
         override fun selectVoice(voice: EngineVoice): Boolean { selected = voice; return true }
         override fun synthesizeToFile(text: String, file: File, utteranceId: String, finished: (Boolean) -> Unit) = true
         override fun stop() = Unit

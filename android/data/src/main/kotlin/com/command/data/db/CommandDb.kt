@@ -1,6 +1,8 @@
 package com.command.data.db
 
 import android.content.Context
+import android.database.SQLException
+import android.util.Log
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
@@ -10,6 +12,8 @@ import com.command.domain.dials.Personality
 import com.command.domain.dials.PresetOrigin
 import com.command.domain.dials.Presets
 import com.command.domain.model.SettingKeys
+import com.command.domain.model.VoiceEngine
+import com.command.domain.voice.BuiltInVoicePacks
 
 @Database(
     entities = [
@@ -30,6 +34,7 @@ abstract class CommandDb : RoomDatabase() {
     abstract fun consents(): ConsentDao
     abstract fun settings(): SettingDao
     abstract fun profiles(): ProfileDao
+    abstract fun activityProfiles(): ActivityProfileDao
     abstract fun restWindows(): RestWindowDao
     abstract fun voicePacks(): VoicePackDao
     abstract fun maintenance(): MaintenanceDao
@@ -53,15 +58,28 @@ abstract class CommandDb : RoomDatabase() {
             Room.inMemoryDatabaseBuilder(context.applicationContext, CommandDb::class.java).addCallback(Seed).build()
     }
 
-    /** First-run rows: the four built-in profiles and the settings every other part of the app expects to find. */
+    /**
+     * First-run rows: the four built-in profiles and the settings every other part of the app expects to find. The ten voice packs, and the
+     * built-ins' packs, are seeded whenever the database opens, because a v1 database made before there were any has to get them too and has no
+     * migration to bring them. That adds what is missing and touches nothing that is there, whatever the person changed.
+     */
     internal object Seed : RoomDatabase.Callback() {
         const val DEFAULT_PROFILE_ID = "builtin_steady"
+        private const val TAG = "CommandDb"
 
         private val builtins = listOf(
             Triple("builtin_nudge", "Nudge", PresetOrigin.NUDGE) to Personality.SUPPORTIVE_COACH,
             Triple(DEFAULT_PROFILE_ID, "Steady", PresetOrigin.STEADY) to Personality.EXECUTIVE_DIRECTOR,
             Triple("builtin_command", "Command", PresetOrigin.COMMAND) to Personality.ACCOUNTABILITY_PARTNER,
             Triple("builtin_reveille_max", "Reveille MAX", PresetOrigin.REVEILLE_MAX) to Personality.DRILL_SERGEANT,
+        )
+
+        /** Each built-in profile's pack: one whose personality is the profile's own. */
+        private val builtinPacks = mapOf(
+            "builtin_nudge" to "pack_coach_ray",
+            DEFAULT_PROFILE_ID to "pack_eleanor_vance",
+            "builtin_command" to "pack_sgt_brody",
+            "builtin_reveille_max" to "pack_major_stone",
         )
 
         override fun onCreate(db: SupportSQLiteDatabase) {
@@ -86,6 +104,37 @@ abstract class CommandDb : RoomDatabase() {
             )
             for ((key, json) in defaults) {
                 db.execSQL("INSERT INTO settings (`key`, value_json) VALUES (?, ?)", arrayOf<Any>(key, json))
+            }
+        }
+
+        /** The database opens on the way to a ring as well: packs that cannot be written cost the voice's settings until the next open, and never the ring. */
+        override fun onOpen(db: SupportSQLiteDatabase) {
+            try {
+                seedVoicePacks(db)
+            } catch (e: SQLException) {
+                Log.w(TAG, "the voice packs were not seeded", e)
+            }
+        }
+
+        private fun seedVoicePacks(db: SupportSQLiteDatabase) {
+            db.beginTransaction()
+            try {
+                for (pack in BuiltInVoicePacks.all) {
+                    db.execSQL(
+                        "INSERT OR IGNORE INTO voice_packs (id, name, engine, gemini_voice, brief_key, locale, pitch, rate, loudness_trim_db, " +
+                            "default_personality, is_custom, attribution) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 0, NULL)",
+                        arrayOf<Any?>(
+                            pack.id, pack.name, VoiceEngine.LOCAL_TTS.name, BuiltInVoicePacks.geminiVoiceOf(pack.id), pack.languageTag, pack.pitch, pack.speechRate,
+                            BuiltInVoicePacks.trimDb(pack), (BuiltInVoicePacks.personalityOf(pack.id) ?: Personality.CUSTOM).name,
+                        ),
+                    )
+                }
+                for ((profile, pack) in builtinPacks) {
+                    db.execSQL("UPDATE execution_profiles SET voice_pack_id = ? WHERE id = ? AND is_builtin = 1 AND voice_pack_id IS NULL", arrayOf<Any>(pack, profile))
+                }
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
             }
         }
     }

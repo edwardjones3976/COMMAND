@@ -5,10 +5,12 @@ import com.command.data.db.ChallengeRow
 import com.command.data.db.CheckInRow
 import com.command.data.db.CommandDb
 import com.command.data.db.EventRow
+import com.command.data.db.MissionRow
 import com.command.data.db.OccurrenceRow
 import com.command.data.db.ProfileRow
 import com.command.data.db.RestWindowRow
 import com.command.data.db.SettingRow
+import com.command.data.db.VoicePackRow
 import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
 import com.command.domain.alarm.AlarmScheduler
@@ -21,6 +23,7 @@ import com.command.domain.coaching.CoachingContext
 import com.command.domain.coaching.CoachingEngine
 import com.command.domain.coaching.CoachingPhase
 import com.command.domain.coaching.TemplateOverrides
+import com.command.domain.voice.BuiltInVoicePacks
 import com.command.domain.voice.Line
 import com.command.domain.dials.ChainSpec
 import com.command.domain.dials.CheckInSchedule
@@ -48,6 +51,7 @@ import com.command.domain.occurrence.OccurrenceStateMachine
 import com.command.domain.occurrence.SkipReason
 import com.command.domain.handshake.Attempt
 import com.command.domain.voice.SpeechLevel
+import com.command.domain.voice.SpeechVoice
 import com.command.domain.occurrence.TransitionResult
 import com.command.domain.schedule.RestWindow
 import com.command.domain.schedule.RestWindows
@@ -131,6 +135,8 @@ class OccurrenceRepository @Inject constructor(
     private val roller: WindowRoller,
     private val ringController: RingController,
 ) {
+    private val profiles = ProfileResolver(db)
+
     /**
      * A command's platform effects run after its transaction has committed, outside the database, so two commands for one occurrence must
      * not interleave there: a later cancel could otherwise be undone by an earlier command's effect that was still on its way (a question
@@ -238,7 +244,7 @@ class OccurrenceRepository @Inject constructor(
     }
 
     /** The seven dials in force for an occurrence: its mission's profile, else the active one. */
-    suspend fun dialsOf(occurrence: OccurrenceRow): Dials = dialsFor(db.missions().get(occurrence.missionId)?.profileId)
+    suspend fun dialsOf(occurrence: OccurrenceRow): Dials = dialsFor(db.missions().get(occurrence.missionId))
 
     /**
      * The handshake an occurrence asks for: the chain the person saved for its profile, if there is one that can be used ([ChainJson]),
@@ -249,7 +255,7 @@ class OccurrenceRepository @Inject constructor(
      */
     suspend fun handshakeOf(occurrence: OccurrenceRow): HandshakePlan {
         val pinned = Codec.decodeSession(occurrence.sessionJson)
-        val profile = profileFor(db.missions().get(occurrence.missionId)?.profileId)
+        val profile = profiles.resolve(db.missions().get(occurrence.missionId))
         val difficulty = pinned.handshakeDifficulty ?: profile?.handshakeDifficulty ?: Presets.dialsFor(PresetOrigin.STEADY).handshakeDifficulty
         val saved = if (pinned.handshakeDifficulty != null) pinned.handshakeChainJson else profile?.handshakeChainJson
         val personality = pinned.handshakePersonality?.let { name -> Personality.values().firstOrNull { it.name == name } }
@@ -265,8 +271,8 @@ class OccurrenceRepository @Inject constructor(
     suspend fun speechLevelOf(occurrence: OccurrenceRow): SpeechLevel = try {
         val pinned = Codec.decodeSession(occurrence.sessionJson)
         val mission = db.missions().get(occurrence.missionId)
-        val intensity = pinned.alertIntensity ?: dialsFor(mission?.profileId).alertIntensity
-        val trim = pinned.voiceTrimDb ?: voiceTrimOf(profileFor(mission?.profileId))
+        val intensity = pinned.alertIntensity ?: dialsFor(mission).alertIntensity
+        val trim = pinned.voiceTrimDb ?: voiceTrimOf(profiles.resolve(mission))
         SpeechLevel(intensity, trim)
     } catch (e: CancellationException) {
         throw e
@@ -274,9 +280,39 @@ class OccurrenceRepository @Inject constructor(
         SpeechLevel.LOUDEST
     }
 
+    /**
+     * Who says an occurrence's line: the voice the ring was fired with, so that a pack chosen or edited while it sounds changes nothing. A ring
+     * from before this was pinned follows the profile. A voice that cannot be read costs the setting, never the line.
+     */
+    suspend fun speechVoiceOf(occurrence: OccurrenceRow): SpeechVoice = try {
+        val pinned = Codec.decodeSession(occurrence.sessionJson)
+        val pitch = pinned.voicePitch
+        if (pitch != null) {
+            SpeechVoice(pinned.voiceLanguageTag, pitch, pinned.voiceRate ?: 1f, pinned.voiceFemale)
+        } else {
+            voiceOf(profiles.resolve(db.missions().get(occurrence.missionId)))
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        SpeechVoice.DEFAULT
+    }
+
+    /** The voice of the profile's pack; the phone's own when it has no pack, or one that is gone. */
+    private suspend fun voiceOf(profile: ProfileRow?): SpeechVoice =
+        packOf(profile)?.let { SpeechVoice(it.locale, it.pitch, it.rate, BuiltInVoicePacks.isFemale(it.id)) } ?: SpeechVoice.DEFAULT
+
     /** The loudness trim of the profile's voice pack; none when it has no pack, or one that is gone. */
-    private suspend fun voiceTrimOf(profile: ProfileRow?): Float =
-        profile?.voicePackId?.let { id -> db.voicePacks().all().firstOrNull { it.id == id } }?.loudnessTrimDb ?: 0f
+    private suspend fun voiceTrimOf(profile: ProfileRow?): Float = packOf(profile)?.loudnessTrimDb ?: 0f
+
+    /** The pack of a profile, if it can be read at all: a ring is fired inside this read, and a pack is not worth stopping a ring for. */
+    private suspend fun packOf(profile: ProfileRow?): VoicePackRow? = try {
+        profile?.voicePackId?.let { db.voicePacks().get(it) }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
 
     /** Every try recorded for [occurrenceId], oldest first: what a ring that is shown again is restored from. */
     suspend fun attemptsOf(occurrenceId: String): List<Attempt> =
@@ -385,7 +421,7 @@ class OccurrenceRepository @Inject constructor(
             pending += Pending(occ, Effect.ArmAlarm(occ.armMode), now)
             return ApplyResult.Rejected(occ.state, command.label)
         }
-        val dials = dialsFor(mission.profileId)
+        val dials = dialsFor(mission)
         val lock = MissionLock.effectivePolicy(mission.flexibility, mission.lockPolicy, dials.scheduleRigidity)
         val session = Codec.decodeSession(occ.sessionJson)
         // A test alarm is the one thing a pause lets through: the person asked for it, there and then.
@@ -415,6 +451,8 @@ class OccurrenceRepository @Inject constructor(
                 )
                 r.effects.filterIsInstance<Effect.ArmCycleEnd>().firstOrNull()?.let {
                     val ring = DialEffects.alertPlan(dials.alertIntensity)
+                    val profile = profiles.resolve(mission)
+                    val voice = voiceOf(profile)
                     newSession = newSession.copy(
                         planEndUtc = now + it.totalMs,
                         planEndElapsed = clock.elapsedRealtimeMs() + it.totalMs,
@@ -423,10 +461,14 @@ class OccurrenceRepository @Inject constructor(
                         ringCycleMs = ring.cycleMs,
                         ringGapMs = ring.gapMs,
                         handshakeDifficulty = dials.handshakeDifficulty,
-                        handshakePersonality = (profileFor(mission.profileId)?.personality ?: Personality.CUSTOM).name,
-                        handshakeChainJson = profileFor(mission.profileId)?.handshakeChainJson,
+                        handshakePersonality = (profile?.personality ?: Personality.CUSTOM).name,
+                        handshakeChainJson = profile?.handshakeChainJson,
                         alertIntensity = dials.alertIntensity,
-                        voiceTrimDb = voiceTrimOf(profileFor(mission.profileId)),
+                        voiceTrimDb = voiceTrimOf(profile),
+                        voiceLanguageTag = voice.languageTag,
+                        voicePitch = voice.pitch,
+                        voiceRate = voice.rate,
+                        voiceFemale = voice.female,
                     )
                 }
                 val armMode = r.effects.filterIsInstance<Effect.ArmAlarm>().firstOrNull()?.mode
@@ -568,13 +610,8 @@ class OccurrenceRepository @Inject constructor(
 
     // --- helpers -----------------------------------------------------------------------------------------------
 
-    /** The profile in force: the one the mission names (if there is one by that name), else the active one. */
-    private suspend fun profileFor(profileId: String?): ProfileRow? =
-        profileId?.let { db.profiles().get(it) }
-            ?: activeProfileIdOf(db.settings().get(SettingKeys.ACTIVE_PROFILE_ID))?.let { db.profiles().get(it) }
-
-    private suspend fun dialsFor(profileId: String?): Dials {
-        val profile: ProfileRow? = profileFor(profileId)
+    private suspend fun dialsFor(mission: MissionRow?): Dials {
+        val profile: ProfileRow? = profiles.resolve(mission)
         return profile?.let {
             Dials(it.firmness, it.obnoxiousness, it.alertIntensity, it.followUpPersistence, it.handshakeDifficulty, it.scheduleRigidity, it.recoveryStructure)
         } ?: Presets.dialsFor(PresetOrigin.STEADY)
