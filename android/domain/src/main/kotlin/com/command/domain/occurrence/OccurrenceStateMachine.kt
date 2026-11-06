@@ -9,6 +9,7 @@ import com.command.domain.dials.RecoveryOption
 import com.command.domain.occurrence.OccurrenceCommand.AcceptRecovery
 import com.command.domain.occurrence.OccurrenceCommand.Acknowledge
 import com.command.domain.occurrence.OccurrenceCommand.Arm
+import com.command.domain.occurrence.OccurrenceCommand.BeginStarter
 import com.command.domain.occurrence.OccurrenceCommand.CheckInDue
 import com.command.domain.occurrence.OccurrenceCommand.Delay
 import com.command.domain.occurrence.OccurrenceCommand.Disarm
@@ -67,6 +68,7 @@ object OccurrenceStateMachine {
         private var state = s.state
         private var recoveryOffers = s.recoveryOffers
         private var asked = s.checkInsAsked
+        private var starter = s.starter
         private val events = ArrayList<DomainEvent>()
         private val effects = ArrayList<Effect>()
         private val schedule = DialEffects.checkIns(s.dials.followUpPersistence)
@@ -118,6 +120,7 @@ object OccurrenceStateMachine {
 
                 is Miss -> miss(cmd.reason, cmd.lateMs)
                 StartGuidance -> if (from == ACKNOWLEDGED) enterGuidance() else illegal()
+                BeginStarter -> beginStarter()
                 Resume -> if (from == MISSED || from == SAFETY_SILENCED) enterGuidance() else illegal()
                 ReportStarted -> if (from == GUIDED_START || from == BLOCKED || from == UNCONFIRMED) answer(STARTED_SELF_REPORTED) else illegal()
                 ReportWorking -> if (from in FOLLOW_UP || from == UNCONFIRMED) answer(WORKING_SELF_REPORTED) else illegal()
@@ -144,7 +147,7 @@ object OccurrenceStateMachine {
         }
 
         private fun applied(): TransitionResult = TransitionResult.Applied(
-            snapshot = s.copy(state = state, recoveryOffers = recoveryOffers, checkInsAsked = asked),
+            snapshot = s.copy(state = state, recoveryOffers = recoveryOffers, checkInsAsked = asked, starter = starter),
             events = events,
             effects = effects,
         )
@@ -173,7 +176,16 @@ object OccurrenceStateMachine {
         private fun enterGuidance(): TransitionResult {
             go(GUIDED_START)
             asked = 0
+            starter = null
             scheduleNextCheckIn()
+            return applied()
+        }
+
+        /** Writes the starter's times down, once. No effect: its clock runs on the screen and the follow-up questions keep theirs. */
+        private fun beginStarter(): TransitionResult {
+            if (s.state != GUIDED_START || s.starter != null || s.starterMinutes < 1) return illegal()
+            starter = StarterWindow(now, now + s.starterMinutes * MINUTE_MS)
+            events += DomainEvent(EventType.STARTER_BEGUN, EventPayload.of("minutes" to s.starterMinutes, "deadline" to now + s.starterMinutes * MINUTE_MS))
             return applied()
         }
 

@@ -88,7 +88,7 @@ object TemplateBank {
                 "Handshake locked in. Good work!",
             ),
             DIRECTION to listOf(
-                "You finished the handshake. Fantastic. Now get to it: {first_action}. Give me {minutes}.",
+                "Right. Now get to it: {first_action}. Give me {minutes}.",
                 "Good. Here is your first move: {first_action}. Give me {minutes}.",
                 "Eyes front. First move: {first_action}. Just {minutes}.",
                 "Right, on to the job. First move: {first_action}. Give me {minutes}.",

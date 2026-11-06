@@ -46,6 +46,7 @@ import com.command.domain.occurrence.OccurrenceSnapshot
 import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.OccurrenceStateMachine
 import com.command.domain.occurrence.SkipReason
+import com.command.domain.occurrence.StarterWindow
 import com.command.domain.handshake.Attempt
 import com.command.domain.voice.SpeechLevel
 import com.command.domain.occurrence.TransitionResult
@@ -209,15 +210,38 @@ class OccurrenceRepository @Inject constructor(
      * the mission's title, first step and starter length and nothing else. [withMissionWords] false leaves the mission's words out, for a
      * place that already shows them.
      */
-    suspend fun lineFor(occurrence: OccurrenceRow, phase: CoachingPhase, attempt: Int = 0, withMissionWords: Boolean = true): Line {
+    suspend fun lineFor(occurrence: OccurrenceRow, phase: CoachingPhase, attempt: Int = 0, withMissionWords: Boolean = true, minutes: Int? = null): Line {
         val brief = missionBrief(occurrence.missionId)
         val ctx = CoachingContext(
             title = if (withMissionWords) brief?.title.orEmpty() else "",
             firstAction = if (withMissionWords) brief?.firstAction.orEmpty() else "",
-            minutes = brief?.starterMinutes ?: 0,
+            minutes = minutes ?: brief?.starterMinutes ?: 0,
         )
         return CoachingEngine.compose(handshakeOf(occurrence).personality, phase, dialsOf(occurrence), ctx, attempt, occurrence.id, overrides())
     }
+
+    /** The starter begun for [occurrence] in this round of guidance, as `session_json` has it; null when none is. */
+    fun starterOf(occurrence: OccurrenceRow): StarterWindow? = starterOf(Codec.decodeSession(occurrence.sessionJson))
+
+    private fun starterOf(session: SessionData): StarterWindow? {
+        val start = session.starterStartUtc ?: return null
+        val deadline = session.starterDeadlineUtc ?: return null
+        return StarterWindow(start, deadline)
+    }
+
+    /** True while the words "you passed the handshake" are true and news: it was acknowledged, and no recovery has come since. */
+    suspend fun handshakeJustPassed(occurrence: OccurrenceRow): Boolean =
+        Codec.decodeSession(occurrence.sessionJson).recoveryOffers == 0 && db.events().wasAcknowledged(occurrence.id)
+
+    /** Follows whether this ring's line was not heard (see [com.command.data.db.EventDao.observeLineNotSpoken]): from then on the screen shows it. */
+    fun observeLineNotSpoken(occurrenceId: String): Flow<Boolean> = db.events().observeLineNotSpoken(occurrenceId)
+
+    /**
+     * "Acknowledged without a start, N times": how many of the mission's occurrences before [beforeUtc] were acknowledged with no start reported,
+     * counting back to the last one with a start. Other missions do not count, and neither does the occurrence at [beforeUtc] itself, which has
+     * not had its chance yet.
+     */
+    suspend fun acknowledgedWithoutStart(missionId: String, beforeUtc: Long): Int = db.occurrences().acknowledgedWithoutStart(missionId, beforeUtc)
 
     /** A row that cannot be read (from a newer version, say) costs the person's own wording, never the line. */
     private suspend fun overrides(): TemplateOverrides = try {
@@ -399,6 +423,8 @@ class OccurrenceRepository @Inject constructor(
             restEndsAtUtc = restEndsAt(now, pausedUntil),
             zoneId = occ.zoneId,
             pausedUntilUtc = pausedUntil,
+            starterMinutes = mission.starterMinutes,
+            starter = starterOf(session),
         )
 
         when (val r = OccurrenceStateMachine.transition(snapshot, command, now)) {
@@ -412,6 +438,8 @@ class OccurrenceRepository @Inject constructor(
                 var newSession = session.copy(
                     recoveryOffers = r.snapshot.recoveryOffers,
                     checkInsAsked = r.snapshot.checkInsAsked,
+                    starterStartUtc = r.snapshot.starter?.startUtc,
+                    starterDeadlineUtc = r.snapshot.starter?.deadlineUtc,
                 )
                 r.effects.filterIsInstance<Effect.ArmCycleEnd>().firstOrNull()?.let {
                     val ring = DialEffects.alertPlan(dials.alertIntensity)
@@ -650,6 +678,9 @@ class OccurrenceRepository @Inject constructor(
         }
     }
 }
+
+/** After this many acknowledgements without a start the line offers something smaller, and nothing gets louder or harder (spec section 5). */
+const val REPEATED_ACK_NO_START_AFTER = 2
 
 /** How many locks there are to share out between occurrences by their id. */
 private const val OCCURRENCE_LOCKS = 64

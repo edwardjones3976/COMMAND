@@ -29,6 +29,12 @@ sealed class OccurrenceCommand(val label: String) {
 
     data object StartGuidance : OccurrenceCommand("START_GUIDANCE")
 
+    /**
+     * The person took the optional starter. The clock's length is the mission's, and it is written down once: a second tap does not move it.
+     * It is not a start, which stays the person's to report, and it changes neither the state nor the check-ins.
+     */
+    data object BeginStarter : OccurrenceCommand("BEGIN_STARTER")
+
     /** An explicit tap to pick up a missed or silenced occurrence. Never automatic. */
     data object Resume : OccurrenceCommand("RESUME")
 
@@ -92,6 +98,10 @@ data class OccurrenceSnapshot(
      * An alarm that is delivered while it is set is held back and does not ring, however it got past the taking down of the pause's alarms.
      */
     val pausedUntilUtc: Long? = null,
+    /** How long the mission's starter is; below one minute there is none to take. */
+    val starterMinutes: Int = 0,
+    /** The starter that was begun in this round of guidance, if any. */
+    val starter: StarterWindow? = null,
 )
 
 sealed interface TransitionResult {

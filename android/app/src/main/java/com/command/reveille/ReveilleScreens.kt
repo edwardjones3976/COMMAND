@@ -92,6 +92,15 @@ object ReveilleTags {
     const val ACKNOWLEDGING = "reveille_acknowledging"
     const val HOLD_WORDS = "reveille_hold_words"
     fun alternative(position: Int) = "reveille_alternative_$position"
+    const val HANDSHAKE_PROMPT = "reveille_handshake_prompt"
+    const val UNSPOKEN_LINE = "reveille_unspoken_line"
+    const val DIRECTION_COACHING = "reveille_direction_coaching"
+    const val DIRECTION_PRAISE = "reveille_direction_praise"
+    const val CLOSED_COACHING = "reveille_closed_coaching"
+    const val STARTER_BEGIN = "reveille_starter_begin"
+    const val STARTER_COUNTDOWN = "reveille_starter_countdown"
+    const val STARTER_LINE = "reveille_starter_line"
+    const val STARTER_OVER = "reveille_starter_over"
     const val RING_AREA = "reveille_ring_area"
     const val SCREEN_AREA = "reveille_screen_area"
     fun escapeDelay(minutes: Int) = "reveille_escape_delay_$minutes"
@@ -113,6 +122,7 @@ class ReveilleActions(
     val onSilence: () -> Unit,
     val onResume: () -> Unit,
     val onStarted: () -> Unit,
+    val onBeginStarter: () -> Unit = {},
     val onDelay: (Int) -> Unit,
     val onSkip: () -> Unit,
     val onClose: () -> Unit,
@@ -150,7 +160,8 @@ fun ReveilleContent(
                     ReveilleUiState.NotFound -> Closed(stringResource(R.string.reveille_not_found), actions.onClose)
                     is ReveilleUiState.Silenced -> Silenced(state, actions)
                     is ReveilleUiState.Direction -> Direction(state, actions)
-                    is ReveilleUiState.Closed -> Closed(closedText(state.outcome), actions.onClose, state.title)
+                    is ReveilleUiState.Starter -> Starter(state, actions)
+                    is ReveilleUiState.Closed -> Closed(closedText(state.outcome), actions.onClose, state.title, state.coaching)
                     is ReveilleUiState.Firing -> Unit
                 }
             }
@@ -298,6 +309,19 @@ private fun TitleBlock(state: ReveilleUiState.Firing, caption: String? = null) {
     }
     if (caption != null) {
         Text(caption, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center, modifier = Modifier.testTag(ReveilleTags.ACKNOWLEDGING))
+    }
+    // The ring's line, when it was not heard, in type as large as the title's: this is how it reaches the person. The words below the title
+    // scroll, so however long the line is, the target and the silence keep their room.
+    state.unspokenLine?.let {
+        Text(
+            it,
+            style = MaterialTheme.typography.headlineLarge,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().testTag(ReveilleTags.UNSPOKEN_LINE).semantics { liveRegion = LiveRegionMode.Polite },
+        )
+    }
+    if (state.prompt.isNotBlank() && state.challenge != Challenge.OutOfTries) {
+        Text(state.prompt, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().testTag(ReveilleTags.HANDSHAKE_PROMPT))
     }
 }
 
@@ -512,16 +536,64 @@ private fun Silenced(state: ReveilleUiState.Silenced, actions: ReveilleActions) 
 
 @Composable
 private fun Direction(state: ReveilleUiState.Direction, actions: ReveilleActions) {
-    Text(state.title, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
+    if (state.praise.isNotBlank()) {
+        Text(state.praise, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center, modifier = Modifier.testTag(ReveilleTags.DIRECTION_PRAISE))
+        Spacer(Modifier.height(16.dp))
+    }
+    FirstStep(state.title, state.firstAction)
+    if (state.coaching.isNotBlank()) {
+        Spacer(Modifier.height(16.dp))
+        Text(state.coaching, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center, modifier = Modifier.testTag(ReveilleTags.DIRECTION_COACHING))
+    }
+    Spacer(Modifier.height(40.dp))
+    if (state.offerStarter) {
+        // heightIn and not height: at large type the words take two lines, and the button must not clip them.
+        FilledTonalButton(onClick = actions.onBeginStarter, modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag(ReveilleTags.STARTER_BEGIN)) {
+            Text(pluralStringResource(R.plurals.reveille_starter_begin, state.starterMinutes, state.starterMinutes), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+    Answers(actions)
+}
+
+@Composable
+private fun FirstStep(title: String, firstAction: String) {
+    Text(title, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
     Spacer(Modifier.height(24.dp))
     Text(stringResource(R.string.reveille_direction_label), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
     Spacer(Modifier.height(8.dp))
-    Text(state.firstAction, style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 520.dp))
-    if (state.coaching.isNotBlank()) {
-        Spacer(Modifier.height(16.dp))
-        Text(state.coaching, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+    Text(firstAction, style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center, modifier = Modifier.widthIn(max = 520.dp))
+}
+
+/**
+ * The countdown, from what the view model says is left. The figures change every second, so a screen reader hears the minutes when it comes to
+ * them and is not told each second; the line, which changes once, is announced.
+ */
+@Composable
+private fun Starter(state: ReveilleUiState.Starter, actions: ReveilleActions) {
+    FirstStep(state.title, state.firstAction)
+    Spacer(Modifier.height(24.dp))
+    val minutesLeft = (state.remainingSeconds + 59) / 60
+    val spoken = pluralStringResource(R.plurals.reveille_starter_left, minutesLeft, minutesLeft)
+    Text(
+        stringResource(R.string.reveille_starter_clock, state.remainingSeconds / 60, state.remainingSeconds % 60),
+        style = MaterialTheme.typography.displayLarge,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.testTag(ReveilleTags.STARTER_COUNTDOWN).semantics { contentDescription = spoken },
+    )
+    Spacer(Modifier.height(16.dp))
+    if (state.remainingSeconds == 0) {
+        Text(stringResource(R.string.reveille_starter_over), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center, modifier = Modifier.testTag(ReveilleTags.STARTER_OVER).semantics { liveRegion = LiveRegionMode.Polite })
+    } else if (state.line.isNotBlank()) {
+        Text(state.line, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center, modifier = Modifier.testTag(ReveilleTags.STARTER_LINE).semantics { liveRegion = LiveRegionMode.Polite })
     }
     Spacer(Modifier.height(40.dp))
+    Answers(actions)
+}
+
+/** What can be answered once the alarm has been dealt with: a start is the person's to report, and a delay or a skip is recorded as what it is. */
+@Composable
+private fun Answers(actions: ReveilleActions) {
     Button(onClick = actions.onStarted, modifier = Modifier.fillMaxWidth().height(72.dp).testTag(ReveilleTags.STARTED)) {
         Text(stringResource(R.string.reveille_starting), style = MaterialTheme.typography.titleLarge)
     }
@@ -537,12 +609,16 @@ private fun Direction(state: ReveilleUiState.Direction, actions: ReveilleActions
 }
 
 @Composable
-private fun Closed(message: String, onClose: () -> Unit, title: String? = null) {
+private fun Closed(message: String, onClose: () -> Unit, title: String? = null, coaching: String = "") {
     if (title != null) {
         Text(title, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
         Spacer(Modifier.height(16.dp))
     }
     Text(message, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+    if (coaching.isNotBlank()) {
+        Spacer(Modifier.height(12.dp))
+        Text(coaching, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center, modifier = Modifier.testTag(ReveilleTags.CLOSED_COACHING))
+    }
     Spacer(Modifier.height(32.dp))
     Button(onClick = onClose, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text(stringResource(R.string.reveille_close)) }
 }

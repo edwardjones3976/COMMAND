@@ -48,7 +48,7 @@ sealed interface FollowUpUiState {
         val coaching: String = "",
     ) : FollowUpUiState
 
-    data class Finished(val title: String, val outcome: FollowUpOutcome) : FollowUpUiState
+    data class Finished(val title: String, val outcome: FollowUpOutcome, val coaching: String = "") : FollowUpUiState
 }
 
 /** The states in which the follow-up screen has something to ask: a start to report, a question to answer, a reset on offer. */
@@ -119,7 +119,8 @@ class FollowUpViewModel @Inject constructor(
                 FollowUpUiState.Recovery(brief.title, brief.firstAction, policy.menu, policy.rescheduleMinutes, policy.offerTomorrow, repository.lineFor(row, recoveryPhase(policy.menu), withMissionWords = false).text)
             }
             OccurrenceState.COMPLETED_SELF_REPORTED -> FollowUpUiState.Finished(brief.title, FollowUpOutcome.DONE)
-            OccurrenceState.SKIPPED -> FollowUpUiState.Finished(brief.title, FollowUpOutcome.SKIPPED)
+            // A skip the calendar made is not the person's, and there is nothing to answer.
+            OccurrenceState.SKIPPED -> FollowUpUiState.Finished(brief.title, FollowUpOutcome.SKIPPED, if (row.skipReason == SkipReason.USER) repository.lineFor(row, CoachingPhase.SKIP_ACK, withMissionWords = false).text else "")
             OccurrenceState.DELAYED -> FollowUpUiState.Finished(brief.title, FollowUpOutcome.DELAYED)
             OccurrenceState.SCHEDULED, OccurrenceState.ARMED, OccurrenceState.FIRING, OccurrenceState.MISSED, OccurrenceState.SAFETY_SILENCED ->
                 FollowUpUiState.Finished(brief.title, FollowUpOutcome.WAITING)

@@ -16,6 +16,7 @@ data class SessionData(
     val phase: String? = null,
     val chainStep: Int = 0,
     val starterDeadlineUtc: Long? = null,
+    val starterStartUtc: Long? = null,
     /** When the ring plan ends, in wall-clock and monotonic time; a restart past this must not ring again. */
     val planEndUtc: Long? = null,
     val planEndElapsed: Long? = null,

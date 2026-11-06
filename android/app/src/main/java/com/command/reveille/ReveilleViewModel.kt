@@ -7,6 +7,7 @@ import com.command.data.ApplyResult
 import com.command.data.ChallengeRecord
 import com.command.data.MissionBrief
 import com.command.data.OccurrenceRepository
+import com.command.data.REPEATED_ACK_NO_START_AFTER
 import com.command.data.db.OccurrenceRow
 import com.command.domain.coaching.CoachingPhase
 import com.command.domain.dials.ChainOp
@@ -29,6 +30,7 @@ import com.command.domain.model.EventSource
 import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.SkipReason
+import com.command.domain.occurrence.StarterWindow
 import com.command.domain.time.Clock
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -60,15 +62,32 @@ sealed interface ReveilleUiState {
         val progress: ChainProgress? = null,
         val offerAccessibleConfirm: Boolean = false,
         val alternatives: List<Alternative> = emptyList(),
+        /** The coaching line that asks for the handshake. */
+        val prompt: String = "",
+        /** The ring's own line when it was not heard (the phone could not speak, or the route said no), for the screen to show in large type. */
+        val unspokenLine: String? = null,
     ) : ReveilleUiState
 
     /** Silenced or missed: nothing was started. The user can pick it up again or let it go. */
     data class Silenced(val title: String, val missed: Boolean = false) : ReveilleUiState
 
-    /** Acknowledged: the one concrete first step, and the one-tap answers. */
-    data class Direction(val title: String, val firstAction: String, val starterMinutes: Int, val coaching: String = "") : ReveilleUiState
+    /**
+     * Acknowledged: the one concrete first step, and the one-tap answers. [praise] is the line for a handshake just passed. [offerStarter] puts
+     * the optional starter on the screen.
+     */
+    data class Direction(
+        val title: String,
+        val firstAction: String,
+        val starterMinutes: Int,
+        val coaching: String = "",
+        val praise: String = "",
+        val offerStarter: Boolean = false,
+    ) : ReveilleUiState
 
-    data class Closed(val title: String, val outcome: ClosedOutcome) : ReveilleUiState
+    /** The starter is running: the first step, what is left of the clock, and the line for this part of it. A start is still the person's to report. */
+    data class Starter(val title: String, val firstAction: String, val remainingSeconds: Int, val line: String) : ReveilleUiState
+
+    data class Closed(val title: String, val outcome: ClosedOutcome, val coaching: String = "") : ReveilleUiState
 }
 
 /** A skip or delay that needs the user to do a little more first (Mission Lock), and what. */
@@ -84,6 +103,11 @@ data class FrictionPrompt(val required: LockPolicy, val retry: (FrictionEvidence
  * ([ChainRunner.restore]). When the chain is satisfied the alarm is acknowledged and the guidance begins in one transaction. A try that is
  * begun and left unfinished runs out after the step's time, and counts as a try; doing nothing is not a try. Once the ring is over, however
  * it ended, nothing of its handshake goes on. The chain a ring is restored against is the one it was fired with ([OccurrenceRepository.handshakeOf]).
+ *
+ * *The starter.* [beginStarter] writes its times into the session, and the screen is drawn from those and the clock: nothing about the countdown
+ * is written or kept but the times, so a screen drawn again or a process restarted shows what the clock says, the midpoint's line included. It
+ * runs only while it is on screen, sets no alarm, and leaves the follow-up questions on their own schedule; they can end it, because the state
+ * they move decides what is shown.
  *
  * *Another way.* In a chain of alternatives (one step is enough) or of steps that are all needed in any order, the screen offers the other
  * steps that are still open ([switchTo]); an ordered chain offers none. Turning to one is not a try and writes nothing, and like every other
@@ -141,6 +165,14 @@ class ReveilleViewModel @Inject constructor(
     private var chain: ChainState? = null
     private var brief: MissionBrief? = null
     private var phrase = ""
+    private var prompt = ""
+
+    /** The ring's own line, the words the service reads out from the same place. */
+    private var ringLine: String? = null
+
+    /** The record says this ring's line was not heard. */
+    private var lineNotSpoken = false
+    private var voice: Job? = null
 
     /** How many of the sequence's numbers have been tapped rightly on this try. */
     private var tapped = 0
@@ -158,6 +190,9 @@ class ReveilleViewModel @Inject constructor(
     private var began: Long? = null
     private var timer: Job? = null
 
+    /** What the countdown waits for between two draws: a seam, so that a test decides when a second has gone by. */
+    internal var starterTick: suspend () -> Unit = { kotlinx.coroutines.delay(1000L) }
+
     /** What waits for a begun try to run out: a seam, so that a test need not wait ninety seconds. */
     internal var attemptTimer: suspend (seconds: Int) -> Unit = { kotlinx.coroutines.delay(it * 1000L) } // not `delay(it * 1000)`: an Int would bind to this class's own delay(minutes)
 
@@ -166,6 +201,8 @@ class ReveilleViewModel @Inject constructor(
         // Another occurrence replaces the one on screen: stop watching the old one, so it can never draw over the new one,
         // and forget anything that belonged to it.
         observing?.cancel()
+        voice?.cancel()
+        stopStarter()
         screen++
         timer?.cancel()
         timer = null
@@ -178,8 +215,20 @@ class ReveilleViewModel @Inject constructor(
         slow = false
         earlyRelease = false
         began = null
+        prompt = ""
+        ringLine = null
+        lineNotSpoken = false
         _friction.value = null
         _state.value = ReveilleUiState.Loading
+        // What the phone could not say is on the screen instead, as soon as that is written down, whenever that is in the ring.
+        voice = viewModelScope.launch {
+            repository.observeLineNotSpoken(id).collect { notSpoken ->
+                engine.withLock {
+                    lineNotSpoken = notSpoken
+                    publish()
+                }
+            }
+        }
         observing = viewModelScope.launch {
             repository.observe(id).collectLatest { row ->
                 if (row?.state == OccurrenceState.ACKNOWLEDGED) {
@@ -207,21 +256,80 @@ class ReveilleViewModel @Inject constructor(
         // Once the ring is over, however it ended (a silence, a skip, a delay, a miss, the notification), nothing of its handshake may go on:
         // a begun try's clock must not write a time-out for an alarm that has stopped.
         if (row.state != OccurrenceState.FIRING) engine.withLock { endHandshake() }
+        val starter = if (row.state == OccurrenceState.GUIDED_START) repository.starterOf(row) else null
+        if (starter == null) stopStarter()
         return when (row.state) {
             OccurrenceState.FIRING -> engine.withLock { firingOf(row, brief) }
             OccurrenceState.SAFETY_SILENCED -> ReveilleUiState.Silenced(brief.title)
             OccurrenceState.MISSED -> ReveilleUiState.Silenced(brief.title, missed = true)
             // Only right after the handshake: someone blocked, unanswered or offered a recovery gets the plain screen, no "well done, now move".
-            OccurrenceState.ACKNOWLEDGED, OccurrenceState.GUIDED_START ->
-                ReveilleUiState.Direction(brief.title, brief.firstAction, brief.starterMinutes, repository.lineFor(row, CoachingPhase.DIRECTION, withMissionWords = false).text)
+            OccurrenceState.ACKNOWLEDGED, OccurrenceState.GUIDED_START -> if (starter != null) starterScreen(row, brief, starter) else guidance(row, brief)
             OccurrenceState.UNCONFIRMED, OccurrenceState.BLOCKED, OccurrenceState.RECOVERY_OFFERED ->
                 ReveilleUiState.Direction(brief.title, brief.firstAction, brief.starterMinutes)
             OccurrenceState.STARTED_SELF_REPORTED, OccurrenceState.WORKING_SELF_REPORTED -> ReveilleUiState.Closed(brief.title, ClosedOutcome.STARTED)
             OccurrenceState.COMPLETED_SELF_REPORTED -> ReveilleUiState.Closed(brief.title, ClosedOutcome.DONE)
-            OccurrenceState.SKIPPED -> ReveilleUiState.Closed(brief.title, ClosedOutcome.SKIPPED)
+            // A skip the calendar made is not the person's, and there is nothing to answer.
+            OccurrenceState.SKIPPED -> ReveilleUiState.Closed(brief.title, ClosedOutcome.SKIPPED, if (row.skipReason == SkipReason.USER) repository.lineFor(row, CoachingPhase.SKIP_ACK, withMissionWords = false).text else "")
             OccurrenceState.DELAYED -> ReveilleUiState.Closed(brief.title, ClosedOutcome.DELAYED)
             OccurrenceState.SCHEDULED, OccurrenceState.ARMED -> ReveilleUiState.Closed(brief.title, ClosedOutcome.NOT_RINGING)
         }
+    }
+
+    /**
+     * The first step, with the lines for this moment: praise for a handshake that was passed (and for nothing else), and the direction, unless
+     * this mission has been acknowledged again and again without a start, when it is the line that offers something smaller.
+     */
+    private suspend fun guidance(row: OccurrenceRow, brief: MissionBrief): ReveilleUiState.Direction {
+        val repeated = repository.acknowledgedWithoutStart(row.missionId, row.scheduledAtUtc) >= REPEATED_ACK_NO_START_AFTER
+        val phase = if (repeated) CoachingPhase.REPEATED_ACK_NO_START else CoachingPhase.DIRECTION
+        val praise = if (repository.handshakeJustPassed(row)) repository.lineFor(row, CoachingPhase.HANDSHAKE_SUCCESS, withMissionWords = false).text else ""
+        return ReveilleUiState.Direction(
+            brief.title,
+            brief.firstAction,
+            brief.starterMinutes,
+            repository.lineFor(row, phase, withMissionWords = false).text,
+            praise,
+            offerStarter = row.state == OccurrenceState.GUIDED_START && brief.starterMinutes > 0,
+        )
+    }
+
+    // --- the starter -------------------------------------------------------------------------------------------
+
+    private class StarterOnScreen(val window: StarterWindow, val title: String, val firstAction: String, val startLine: String, val midpointLine: String)
+
+    private var starterOnScreen: StarterOnScreen? = null
+    private var starterClock: Job? = null
+
+    private fun stopStarter() {
+        starterClock?.cancel()
+        starterClock = null
+        starterOnScreen = null
+    }
+
+    /** The lines keep the length the starter began with, whatever the mission says by now. */
+    private suspend fun starterScreen(row: OccurrenceRow, brief: MissionBrief, window: StarterWindow): ReveilleUiState.Starter {
+        val on = StarterOnScreen(
+            window,
+            brief.title,
+            brief.firstAction,
+            repository.lineFor(row, CoachingPhase.STARTER_START, withMissionWords = false, minutes = window.minutes).text,
+            repository.lineFor(row, CoachingPhase.STARTER_MIDPOINT, withMissionWords = false, minutes = window.minutes).text,
+        )
+        starterOnScreen = on
+        if (starterClock?.isActive != true) {
+            starterClock = viewModelScope.launch {
+                while (!window.isOver(clock.nowMs())) {
+                    starterTick()
+                    _state.value = drawn(starterOnScreen ?: return@launch)
+                }
+            }
+        }
+        return drawn(on)
+    }
+
+    private fun drawn(on: StarterOnScreen): ReveilleUiState.Starter {
+        val now = clock.nowMs()
+        return ReveilleUiState.Starter(on.title, on.firstAction, on.window.remainingSeconds(now), if (on.window.pastMidpoint(now)) on.midpointLine else on.startLine)
     }
 
     // --- the handshake -----------------------------------------------------------------------------------------
@@ -232,6 +340,8 @@ class ReveilleViewModel @Inject constructor(
         if (chain == null) {
             val wanted = repository.handshakeOf(row)
             phrase = TypedPhrase.pick(phrases.phrases(wanted.personality), row.id)
+            prompt = repository.lineFor(row, CoachingPhase.HANDSHAKE_PROMPT, withMissionWords = false).text
+            ringLine = repository.lineFor(row, CoachingPhase.REVEILLE).text
             val tries = repository.attemptsOf(row.id)
             val started = ChainRunner.start(wanted.chain)
             if (tries.isEmpty() && started.attempts.isNotEmpty()) {
@@ -279,7 +389,16 @@ class ReveilleViewModel @Inject constructor(
         val state = chain ?: return _state.value
         // Satisfied: the alarm is being acknowledged, and the observer will show the next screen; the screen stays as it is until then.
         if (state.status == ChainStatus.SATISFIED) return _state.value
-        return ReveilleUiState.Firing(id, brief.title, challengeOf(id, state, brief.firstAction), progressOf(state), offerAccessibleConfirm, alternativesOf(state))
+        return ReveilleUiState.Firing(
+            id,
+            brief.title,
+            challengeOf(id, state, brief.firstAction),
+            progressOf(state),
+            offerAccessibleConfirm,
+            alternativesOf(state),
+            prompt,
+            ringLine?.takeIf { lineNotSpoken },
+        )
     }
 
     private fun challengeOf(id: String, state: ChainState, firstAction: String): Challenge {
@@ -527,6 +646,7 @@ class ReveilleViewModel @Inject constructor(
 
     fun resume() = command(OccurrenceCommand.Resume)
     fun started() = command(OccurrenceCommand.ReportStarted)
+    fun beginStarter() = command(OccurrenceCommand.BeginStarter)
 
     fun delay(minutes: Int) = withFriction { evidence -> OccurrenceCommand.Delay(minutes, evidence) }
     fun skip() = withFriction { evidence -> OccurrenceCommand.Skip(SkipReason.USER, evidence) }
