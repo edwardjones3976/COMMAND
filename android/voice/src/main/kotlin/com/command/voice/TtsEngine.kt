@@ -5,6 +5,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.util.Log
+import com.command.domain.voice.SpeechVoice
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -35,6 +36,11 @@ internal interface TtsEngine {
 
     fun selectVoice(voice: EngineVoice): Boolean
 
+    /** The pitch and the rate of what is written from now on, 1 being normal. */
+    fun setPitch(pitch: Float)
+
+    fun setSpeechRate(rate: Float)
+
     /** Starts writing [text] to [file]; [finished] is told true when it is done and false when it failed. Returns whether the request was accepted. */
     fun synthesizeToFile(text: String, file: File, utteranceId: String, finished: (Boolean) -> Unit): Boolean
 
@@ -52,6 +58,25 @@ internal interface TtsEngine {
  * first. With no such voice, or an engine that does not say which voices it has, nothing is said.
  */
 internal object OfflineVoices {
+
+    /**
+     * Sets the engine up for [voice]: of the installed offline voices of the pack's language, the one the voice engine's own score likes best
+     * ([VoiceDirectorEngine.voiceScore]). With no pack, no such voice, or one the engine will not take, it comes down to [pin] on the phone's
+     * language [phone]: a voice the phone lacks is no reason to say nothing.
+     */
+    fun choose(engine: TtsEngine, voice: SpeechVoice, phone: Locale): Boolean {
+        val tag = voice.languageTag?.takeIf { it.isNotBlank() }
+        if (tag != null) {
+            val wanted = Locale.forLanguageTag(tag)
+            engine.setLanguage(wanted)
+            val best = engine.voices()
+                .filter { it.usable && it.locale.language == wanted.language }
+                .maxByOrNull { VoiceDirectorEngine.voiceScore(it.name, it.quality, it.locale.country == wanted.country, voice.female) }
+            if (best != null && engine.selectVoice(best)) return true
+        }
+        engine.setLanguage(phone)
+        return pin(engine, phone)
+    }
 
     fun pin(engine: TtsEngine, locale: Locale): Boolean {
         val current = engine.currentVoice()
@@ -103,6 +128,14 @@ internal class AndroidTtsEngine(context: Context, onReady: (Boolean) -> Unit) : 
         val match = tts.voices?.firstOrNull { it.name == voice.name } ?: return false
         tts.setVoice(match) == TextToSpeech.SUCCESS
     }.getOrDefault(false)
+
+    override fun setPitch(pitch: Float) {
+        runCatching { tts.setPitch(pitch) }
+    }
+
+    override fun setSpeechRate(rate: Float) {
+        runCatching { tts.setSpeechRate(rate) }
+    }
 
     override fun synthesizeToFile(text: String, file: File, utteranceId: String, finished: (Boolean) -> Unit): Boolean {
         callbacks[utteranceId] = finished

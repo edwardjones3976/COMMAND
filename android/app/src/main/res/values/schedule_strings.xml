@@ -68,6 +68,12 @@
     <string name="editor_fixed">Fixed</string>
     <string name="editor_fixed_body">A real commitment. Delaying or skipping can ask you to confirm first, depending on your rigidity setting.</string>
     <string name="editor_section_starter">First block</string>
+    <string name="editor_section_profile">How it rings</string>
+    <string name="editor_field_category">Category</string>
+    <string name="editor_field_category_hint">What kind of mission this is, such as Work or Sport.</string>
+    <string name="editor_error_category">That word is kept for test alarms. Choose another.</string>
+    <string name="editor_profile_auto">Automatic</string>
+    <string name="editor_profile_hint">Automatic uses the profile set for this kind of mission if there is one, and the active profile if not.</string>
     <string name="editor_starter_minutes">%1$d min</string>
     <string name="editor_save">Save mission</string>
     <string name="editor_test">Test this alarm now</string>

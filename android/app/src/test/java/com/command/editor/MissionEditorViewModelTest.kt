@@ -4,8 +4,10 @@ import androidx.lifecycle.SavedStateHandle
 import com.command.data.DraftProblem
 import com.command.data.MissionDraft
 import com.command.data.MissionRepository
+import com.command.data.ProfileRepository
 import com.command.data.SaveResult
 import com.command.data.ScheduleDraft
+import com.command.data.db.ActivityProfileRow
 import com.command.data.db.CommandDb
 import com.command.domain.dials.Flexibility
 import com.command.domain.occurrence.OccurrenceState
@@ -49,7 +51,7 @@ class MissionEditorViewModelTest {
     fun setUp() = hilt.inject()
 
     private fun editor(id: String? = null) =
-        MissionEditorViewModel(SavedStateHandle(if (id == null) emptyMap() else mapOf(Routes.ARG_ID to id)), missions, clock)
+        MissionEditorViewModel(SavedStateHandle(if (id == null) emptyMap() else mapOf(Routes.ARG_ID to id)), missions, ProfileRepository(db), clock)
 
     private fun MissionEditorViewModel.await(message: String, check: (EditorState) -> Boolean) = awaitUntil(message = message) { check(state.value) }
 
@@ -192,8 +194,86 @@ class MissionEditorViewModelTest {
         assertNull(vm.state.value.message)
     }
 
+    private fun filled(vm: MissionEditorViewModel) {
+        vm.onTitle("Standup")
+        vm.onFirstAction("Open the notes")
+    }
+
+    private fun stored(): com.command.data.db.MissionRow = runBlocking { db.missions().all().single { it.id != MissionRepository.TEST_MISSION_ID } }
+
     @Test
-    fun `a title-only edit keeps the category and the profile the editor does not show`() {
+    fun `the editor offers every profile by name, and a new mission names none and is in the default category`() {
+        val vm = ready()
+        vm.await("profiles") { it.profiles.isNotEmpty() }
+        assertEquals(
+            listOf(ProfileChoice("builtin_nudge", "Nudge"), ProfileChoice("builtin_steady", "Steady"), ProfileChoice("builtin_command", "Command"), ProfileChoice("builtin_reveille_max", "Reveille MAX")),
+            vm.state.value.profiles,
+        )
+        assertNull(vm.state.value.profileId)
+        assertEquals("General", vm.state.value.category)
+    }
+
+    @Test
+    fun `the profile and the category chosen in the editor are what is saved`() {
+        val vm = ready()
+        filled(vm)
+        vm.onProfile("builtin_command")
+        vm.onCategory("Work")
+        vm.save()
+        vm.await("finished") { it.finished }
+        assertEquals("builtin_command", stored().profileId)
+        assertEquals("Work", stored().category)
+    }
+
+    @Test
+    fun `choosing automatic takes a profile away again`() {
+        val id = runBlocking {
+            val draft = MissionDraft(
+                title = "Standup", firstAction = "Open the notes", flexibility = Flexibility.FLEXIBLE,
+                schedule = ScheduleDraft.Once(LocalDateTime.of(2026, 11, 2, 11, 0)), profileId = "builtin_command",
+            )
+            (missions.save(draft) as SaveResult.Saved).missionId
+        }
+        val vm = ready(id)
+        assertEquals("builtin_command", vm.state.value.profileId)
+        vm.onProfile(null)
+        vm.save()
+        vm.await("finished") { it.finished }
+        assertNull(stored().profileId)
+    }
+
+    @Test
+    fun `the word kept for test alarms is refused as a category, and typing another clears the problem`() {
+        val vm = ready()
+        filled(vm)
+        vm.onCategory(MissionRepository.TEST_CATEGORY)
+        vm.save()
+        vm.await("problem") { it.problems.isNotEmpty() && !it.busy }
+        assertEquals(setOf(DraftProblem.CATEGORY_RESERVED), vm.state.value.problems)
+        vm.onCategory("Work")
+        assertTrue(vm.state.value.problems.isEmpty())
+    }
+
+    @Test
+    fun `a test ring takes the category and the profile as they stand, so it rings as the saved mission would`() {
+        runBlocking { db.activityProfiles().upsert(ActivityProfileRow("r", "Work", null, "builtin_command")) }
+        val vm = ready()
+        filled(vm)
+        vm.onCategory("Work")
+        vm.testRing()
+        vm.await("message") { it.message == EditorMessage.TEST_STARTED }
+        assertEquals("builtin_command", runBlocking { db.missions().get(MissionRepository.TEST_MISSION_ID)!!.profileId })
+
+        vm.messageShown()
+        clock.advance(60_000)
+        vm.onProfile("builtin_nudge")
+        vm.testRing()
+        vm.await("message") { it.message == EditorMessage.TEST_STARTED }
+        assertEquals("builtin_nudge", runBlocking { db.missions().get(MissionRepository.TEST_MISSION_ID)!!.profileId })
+    }
+
+    @Test
+    fun `a title-only edit keeps the category and the profile`() {
         val id = runBlocking {
             val draft = MissionDraft(
                 title = "Standup", firstAction = "Open the notes", flexibility = Flexibility.FLEXIBLE,

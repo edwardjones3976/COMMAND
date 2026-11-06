@@ -1,6 +1,7 @@
 package com.command.voice
 
 import com.command.domain.voice.SpeechProblem
+import com.command.domain.voice.SpeechVoice
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -54,6 +55,12 @@ class AndroidSpeechSynthesizerTest {
         var voices: List<EngineVoice> = listOf(offline)
         var current: EngineVoice? = offline
         var shutdowns = 0
+        val pitches = ArrayList<Float>()
+        val rates = ArrayList<Float>()
+        val languages = ArrayList<Locale>()
+
+        /** Whether the engine takes a voice it is told to use. */
+        var refuses: Set<String> = emptySet()
 
         /** What happens when a line is requested: by default the file is written and the engine says it is done. */
         var onRequest: (text: String, file: File, finished: (Boolean) -> Unit) -> Unit = { _, file, finished ->
@@ -63,10 +70,22 @@ class AndroidSpeechSynthesizerTest {
 
         override fun voices() = voices
         override fun currentVoice() = current
-        override fun setLanguage(locale: Locale) = Unit
+        override fun setLanguage(locale: Locale) {
+            languages += locale
+        }
+
         override fun selectVoice(voice: EngineVoice): Boolean {
+            if (voice.name in refuses) return false
             current = voice
             return true
+        }
+
+        override fun setPitch(pitch: Float) {
+            pitches += pitch
+        }
+
+        override fun setSpeechRate(rate: Float) {
+            rates += rate
         }
 
         override fun synthesizeToFile(text: String, file: File, utteranceId: String, finished: (Boolean) -> Unit): Boolean {
@@ -165,6 +184,146 @@ class AndroidSpeechSynthesizerTest {
         })
         assertTrue(synth.synthesize("Write the report") is Synthesis.Audio)
         assertEquals(offline, engines.made.single().current)
+    }
+
+    // --- the pack's voice -------------------------------------------------------------------------------------------------------
+
+    private val stone = SpeechVoice("en-US", pitch = 0.86f, rate = 1.28f, female = false)
+    private val eleanor = SpeechVoice("en-GB", pitch = 1.01f, rate = 1.04f, female = true)
+
+    private val usMale = EngineVoice("en-us-x-iol-local", Locale.US, quality = 300, needsNetwork = false, installed = true)
+    private val usFemale = EngineVoice("en-us-x-iob-local", Locale.US, quality = 300, needsNetwork = false, installed = true)
+    private val gbFemale = EngineVoice("en-gb-x-gba-female-local", Locale.UK, quality = 300, needsNetwork = false, installed = true)
+    private val gbMale = EngineVoice("en-gb-x-rjs-male-local", Locale.UK, quality = 340, needsNetwork = false, installed = true)
+    private val german = EngineVoice("de-de-x-nfh-local", Locale.GERMANY, quality = 300, needsNetwork = false, installed = true)
+
+    private suspend fun spokenWith(voice: SpeechVoice, vararg offered: EngineVoice, configure: ScriptedEngine.() -> Unit = {}): ScriptedEngine {
+        val engines = Engines()
+        val synth = synthesizer(engines, configure = {
+            voices = offered.toList()
+            current = offered.first()
+            configure()
+        })
+        assertTrue(synth.synthesize("Time to start.", voice) is Synthesis.Audio)
+        return engines.made.single()
+    }
+
+    @Test
+    fun `two packs give the engine different pitches, rates, languages and voices`() = runTest {
+        val a = spokenWith(stone, usFemale, usMale, gbFemale, gbMale)
+        val b = spokenWith(eleanor, usFemale, usMale, gbFemale, gbMale)
+
+        assertEquals("the rate is kept to what the engine does well", listOf(0.86f), a.pitches)
+        assertEquals(listOf(SYSTEM_TTS_MAX_RATE), a.rates)
+        assertEquals(usMale, a.current)
+        assertEquals(Locale.US, a.languages.first())
+        assertEquals(listOf(1.01f), b.pitches)
+        assertEquals(listOf(1.04f), b.rates)
+        assertEquals(gbFemale, b.current)
+        assertEquals(Locale.UK, b.languages.first())
+    }
+
+    @Test
+    fun `the words go to the engine only after its voice, pitch and rate are set`() = runTest {
+        val order = ArrayList<String>()
+        val engines = Engines()
+        val synth = synthesizer(engines, configure = {
+            voices = listOf(usMale)
+            current = null
+            onRequest = { _, file, finished ->
+                order += "voice=${current?.name} pitch=${pitches.lastOrNull()} rate=${rates.lastOrNull()}"
+                file.writeBytes(wavBytes())
+                finished(true)
+            }
+        })
+        synth.synthesize("Time to start.", SpeechVoice("en-US", 0.9f, 1.1f, false))
+        assertEquals(listOf("voice=en-us-x-iol-local pitch=0.9 rate=1.1"), order)
+    }
+
+    @Test
+    fun `the score is the voice engine's, so a known kind outweighs quality and the same country counts for a little`() = runTest {
+        assertEquals("a woman's voice is wanted, and a man's is better", gbFemale, spokenWith(eleanor, gbMale, gbFemale).current)
+        assertEquals(
+            "with the kind unknown, quality and then the country decide",
+            EngineVoice("en-gb-1", Locale.UK, 340, false, true),
+            spokenWith(
+                SpeechVoice("en-GB"),
+                EngineVoice("en-us-1", Locale.US, 380, false, true),
+                EngineVoice("en-gb-1", Locale.UK, 340, false, true),
+            ).current,
+        )
+        assertEquals(
+            "a pack that does not say what kind it wants takes the best by quality",
+            gbMale,
+            spokenWith(SpeechVoice("en-GB"), gbFemale, gbMale).current,
+        )
+        assertEquals("the wrong kind is still better than silence", usFemale, spokenWith(stone, usFemale).current)
+    }
+
+    @Test
+    fun `a pack never gets a voice that asks a server or one that is not installed, however good`() = runTest {
+        val server = EngineVoice("en-us-x-iol-network", Locale.US, 900, needsNetwork = true, installed = true)
+        val notHere = EngineVoice("en-us-x-iom-local", Locale.US, 900, needsNetwork = false, installed = false)
+        assertEquals(usFemale, spokenWith(stone, server, notHere, usFemale).current)
+    }
+
+    @Test
+    fun `a language the phone has no offline voice for falls back to the old choice, and the line is still said`() = runTest {
+        val engine = spokenWith(SpeechVoice("fr-CA", pitch = 1.1f, rate = 0.9f, female = true), usMale, gbMale)
+        assertEquals("the voice in use works offline, so it stays", usMale, engine.current)
+        assertEquals("the phone's language was asked for again", Locale.US, engine.languages.last())
+        assertEquals("and the pack's pitch and rate still apply", listOf(1.1f), engine.pitches)
+        assertEquals(listOf(0.9f), engine.rates)
+    }
+
+    @Test
+    fun `a voice the engine will not take falls back too, and the line is still said`() = runTest {
+        val engine = spokenWith(stone, usFemale, usMale) { refuses = setOf(usMale.name) }
+        assertEquals("the current voice works offline", usFemale, engine.current)
+    }
+
+    @Test
+    fun `with no voice that works on the phone a pack says nothing either`() = runTest {
+        val engines = Engines()
+        val synth = synthesizer(engines, configure = {
+            voices = listOf(network)
+            current = network
+        })
+        assertEquals(SpeechProblem.NO_OFFLINE_VOICE, (synth.synthesize("Write the report", stone) as Synthesis.Failed).reason)
+        assertTrue("the person's words were never handed over", log.isEmpty())
+    }
+
+    @Test
+    fun `a line with no pack goes back to the engine's normal voice settings after a line that had one`() = runTest {
+        val engines = Engines()
+        val synth = synthesizer(engines, configure = {
+            voices = listOf(usMale, usFemale)
+            current = usMale
+        })
+        synth.synthesize("One", stone)
+        synth.synthesize("Two")
+        val engine = engines.made.single()
+        assertEquals(listOf(0.86f, 1f), engine.pitches)
+        assertEquals(listOf(SYSTEM_TTS_MAX_RATE, 1f), engine.rates)
+        assertEquals("and to the phone's language", Locale.US, engine.languages.last())
+    }
+
+    @Test
+    fun `a line with no pack keeps the engine's own voice, as it always did`() = runTest {
+        val engine = spokenWith(SpeechVoice.DEFAULT, german, usMale)
+        assertEquals(german, engine.current)
+        assertEquals(listOf(Locale.US), engine.languages)
+    }
+
+    @Test
+    fun `a pitch or a rate out of range is brought into range, and a blank language is the phone's`() = runTest {
+        val low = spokenWith(SpeechVoice("", pitch = 0f, rate = 0f), usMale)
+        assertEquals(listOf(SYSTEM_TTS_MIN_PITCH), low.pitches)
+        assertEquals(listOf(SYSTEM_TTS_MIN_RATE), low.rates)
+        assertEquals(listOf(Locale.US), low.languages)
+        val high = spokenWith(SpeechVoice("en-US", pitch = 9f, rate = 9f), usMale)
+        assertEquals(listOf(SYSTEM_TTS_MAX_PITCH), high.pitches)
+        assertEquals(listOf(SYSTEM_TTS_MAX_RATE), high.rates)
     }
 
     @Test

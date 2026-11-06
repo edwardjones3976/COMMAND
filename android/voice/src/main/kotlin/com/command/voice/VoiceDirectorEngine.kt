@@ -428,14 +428,7 @@ class VoiceDirectorEngine(
             engine.language = locale
             engine.voices
                 ?.filter { it.locale.language == locale.language && !it.isNetworkConnectionRequired }
-                ?.maxByOrNull { voice ->
-                    var score = voice.quality
-                    if (voice.locale.country == locale.country) score += 50
-                    // A known gender outweighs quality (at most 500), so Stone never gets a female voice
-                    // when a male one can be identified.
-                    voiceIsFemale(voice.name)?.let { score += if (it == director.isFemale) 1_000 else -1_000 }
-                    score
-                }
+                ?.maxByOrNull { voice -> voiceScore(voice.name, voice.quality, voice.locale.country == locale.country, director.isFemale) }
                 ?.let { engine.voice = it }
             engine.setPitch(clampSystemPitch(voicePack.pitch))
             engine.setSpeechRate(clampSystemRate(voicePack.speechRate))
@@ -784,6 +777,17 @@ class VoiceDirectorEngine(
         // Google's engine names voices by code (en-us-x-iol-local) rather than by gender.
         private val GOOGLE_FEMALE_VOICE_CODES = setOf("iob", "iog", "sfg", "tpc", "tpf")
         private val GOOGLE_MALE_VOICE_CODES = setOf("iol", "iom", "tpd")
+
+        /**
+         * How well an installed voice suits a pack; the highest is used. A known gender outweighs quality (at most 500), so Stone never gets a
+         * female voice when a male one can be identified. A pack that does not say ([wantFemale] null) goes by quality and country alone.
+         */
+        internal fun voiceScore(voiceName: String, quality: Int, sameCountry: Boolean, wantFemale: Boolean?): Int {
+            var score = quality
+            if (sameCountry) score += 50
+            if (wantFemale != null) voiceIsFemale(voiceName)?.let { score += if (it == wantFemale) 1_000 else -1_000 }
+            return score
+        }
 
         /** True for a female voice, false for male, null when the name doesn't say. */
         internal fun voiceIsFemale(voiceName: String): Boolean? {
