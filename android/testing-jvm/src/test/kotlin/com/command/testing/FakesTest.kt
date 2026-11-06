@@ -32,4 +32,16 @@ class FakesTest {
         val scheduler = FakeAlarmScheduler(exactAllowed = false)
         assertEquals(ArmMode.INEXACT, scheduler.arm(AlarmRequest("occ", 1, AlarmKind.FIRE, 0)))
     }
+
+    @Test
+    fun `an alarm refused when set again is no longer held, as with the platform`() {
+        val scheduler = FakeAlarmScheduler()
+        val request = com.command.domain.alarm.AlarmRequest("occ", 1, com.command.domain.alarm.AlarmKind.FIRE, 1_000)
+        scheduler.arm(request)
+        scheduler.refusing = true
+
+        assertEquals(com.command.domain.occurrence.ArmMode.REFUSED, scheduler.arm(request.copy(atUtcMs = 2_000)))
+
+        assertEquals(false, scheduler.isArmed(request))
+    }
 }

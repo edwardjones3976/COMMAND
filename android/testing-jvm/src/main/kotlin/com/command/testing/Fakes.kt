@@ -45,6 +45,7 @@ class FakeAlarmScheduler(var exactAllowed: Boolean = true) : AlarmScheduler {
 
     override fun arm(request: AlarmRequest): ArmMode {
         if (refusing) {
+            armed.remove(request.identity)
             calls += "refused ${request.identity}"
             return ArmMode.REFUSED
         }
