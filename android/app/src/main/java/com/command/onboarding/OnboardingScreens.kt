@@ -30,7 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.domain.reliability.Fix
 import com.command.reliability.ItemCard
 import com.command.reliability.rememberFixHandler
-import com.example.R
+import com.command.R
 
 object OnboardingTags {
     const val WELCOME_CONTINUE = "onboarding_welcome_continue"

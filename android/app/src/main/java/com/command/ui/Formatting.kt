@@ -2,7 +2,7 @@ package com.command.ui
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
-import com.example.R
+import com.command.R
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId

@@ -59,7 +59,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.data.DraftProblem
 import com.command.domain.dials.Flexibility
-import com.example.R
+import com.command.R
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate

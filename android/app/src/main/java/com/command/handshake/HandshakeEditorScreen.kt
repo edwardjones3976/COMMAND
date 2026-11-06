@@ -74,7 +74,7 @@ import com.command.domain.dials.ChainLimits
 import com.command.domain.dials.ChainOp
 import com.command.domain.dials.HandshakeMode
 import com.command.domain.handshake.ChainState
-import com.example.R
+import com.command.R
 
 /** Everything the editor can ask for, so the screen can be tested without a view model. */
 class HandshakeEditorActions(

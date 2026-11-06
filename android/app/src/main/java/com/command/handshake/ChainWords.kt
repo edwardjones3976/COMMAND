@@ -10,7 +10,7 @@ import com.command.domain.dials.ChainSpec
 import com.command.domain.dials.HandshakeMode
 import com.command.domain.dials.StepSpec
 import com.command.domain.handshake.ChainState.Companion.DEFAULT_HOLD_SECONDS
-import com.example.R
+import com.command.R
 
 /** The name of a way of acknowledging an alarm. */
 @Composable

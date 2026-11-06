@@ -66,7 +66,7 @@ import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.LockPolicy
 import com.command.domain.dials.SkipReasonCode
 import com.command.domain.handshake.TryId
-import com.example.R
+import com.command.R
 
 object ReveilleTags {
     const val HOLD = "reveille_hold"

@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.command.domain.dials.Personality
 import com.command.domain.handshake.TypedPhrase
-import com.example.R
+import com.command.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals

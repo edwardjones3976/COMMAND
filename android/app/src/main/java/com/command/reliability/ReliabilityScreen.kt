@@ -50,7 +50,7 @@ import com.command.domain.reliability.ReliabilityItem
 import com.command.domain.reliability.ReliabilityReport
 import com.command.domain.reliability.Severity
 import com.command.ui.whenLabel
-import com.example.R
+import com.command.R
 import java.time.LocalDate
 import java.time.ZoneId
 

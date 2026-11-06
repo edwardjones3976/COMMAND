@@ -40,7 +40,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.command.domain.handshake.TryId
-import com.example.R
+import com.command.R
 
 /** How many deliberate taps the assistive confirm takes, in place of a press. */
 internal const val ASSISTIVE_TAPS = 3

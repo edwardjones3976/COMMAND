@@ -43,7 +43,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.domain.voice.RoutePolicy
 import com.command.ui.pauseTitle
-import com.example.R
+import com.command.R
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -86,7 +86,7 @@ fun SettingsRoute(
         onOpenData = onOpenData,
         onOpenHandshakes = onOpenHandshakes,
         onOpenCalendars = onOpenCalendars,
-        version = com.example.BuildConfig.VERSION_NAME,
+        version = com.command.BuildConfig.VERSION_NAME,
         onPause = viewModel::pauseFor,
         onEndPause = viewModel::endPause,
     )

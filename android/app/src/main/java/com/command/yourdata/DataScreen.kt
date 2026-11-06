@@ -46,7 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.data.DataOverview
-import com.example.R
+import com.command.R
 import kotlinx.coroutines.delay
 
 object DataTags {
