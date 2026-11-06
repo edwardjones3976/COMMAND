@@ -62,7 +62,7 @@ internal object OfflineVoices {
     /**
      * Sets the engine up for [voice]: of the installed offline voices of the pack's language, the one the voice engine's own score likes best
      * ([VoiceDirectorEngine.voiceScore]). With no pack, no such voice, or one the engine will not take, it comes down to [pin] on the phone's
-     * language [phone]: a voice the phone lacks is no reason to say nothing.
+     * language [phone], so a pack's voice the phone lacks costs that voice and not the line. False only when [pin] finds nothing that works on the phone.
      */
     fun choose(engine: TtsEngine, voice: SpeechVoice, phone: Locale): Boolean {
         val tag = voice.languageTag?.takeIf { it.isNotBlank() }
