@@ -31,16 +31,20 @@ class RingSurfaceTest {
 
     @After
     fun tearDown() {
-        ring?.let { row ->
-            h.silence(row)
-            h.waitFor("the ring to stop") { !h.isPlayingOnAlarmUsage() }
+        // Whatever fails first, the PIN comes off: a phone left locked would fail every test and case after this one.
+        try {
+            ring?.let { row ->
+                h.silence(row)
+                h.waitFor("the ring to stop") { !h.isPlayingOnAlarmUsage() }
+            }
+        } finally {
+            h.device.pressBack()
+            if (pinSet) {
+                h.shell("locksettings clear --old $PIN")
+                h.shell("settings delete secure lock_screen_lock_after_timeout")
+            }
+            h.unlockedAtHome()
         }
-        h.device.pressBack()
-        if (pinSet) {
-            h.shell("locksettings clear --old $PIN")
-            h.shell("settings delete secure lock_screen_lock_after_timeout")
-        }
-        h.unlockedAtHome()
     }
 
     @Test

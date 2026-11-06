@@ -27,7 +27,8 @@ trap 'rm -rf "$WORK"' EXIT
 FAILED=0
 
 say() { printf '[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"; }
-ash() { adb shell "$@" | tr -d '\r'; }
+# Every read of the device has its own limit: adb can block for good while a device is rebooting.
+ash() { timeout 30 adb shell "$@" | tr -d '\r'; }
 
 # Records a case's outcome: result <case> <PASS|FAIL> <what was seen>.
 result() {
@@ -42,7 +43,7 @@ db_path() { if [ "$1" = androidx.work.workdb ]; then echo "no_backup/$1"; else e
 pull_db() { # pull_db <name> : copies a database and its journal files out of the app
   for suffix in "" -wal -shm; do
     rm -f "$WORK/$1$suffix"
-    adb exec-out run-as "$PKG" cat "$(db_path "$1")$suffix" >"$WORK/$1$suffix" 2>/dev/null
+    timeout 30 adb exec-out run-as "$PKG" cat "$(db_path "$1")$suffix" >"$WORK/$1$suffix" 2>/dev/null
     if [ ! -s "$WORK/$1$suffix" ] || grep -q "No such file" "$WORK/$1$suffix"; then rm -f "$WORK/$1$suffix"; fi
   done
 }
@@ -62,11 +63,10 @@ except sqlite3.Error:
 sql() { sql_on command.db "$1"; }
 
 wait_for() { # wait_for <seconds> <command...> : true as soon as the command succeeds
-  local left=$1; shift
-  while [ "$left" -gt 0 ]; do
+  local end=$((SECONDS + $1)); shift
+  while [ "$SECONDS" -lt "$end" ]; do
     if "$@"; then return 0; fi
     sleep 3
-    left=$((left - 3))
   done
   "$@"
 }
@@ -241,7 +241,7 @@ case_revoke() {
     wait_for 60 arm_mode_is "$id" EXACT
     back="$(arm_mode "$id")"
     if [ "$before" = EXACT ] && [ "$after" = INEXACT ] && [ "$clock_after" = 0 ] && [ "$back" = EXACT ] \
-      && [ "${fired_mode#did not}" = "$fired_mode" ]; then outcome=PASS; fi
+      && { [ "${fired_mode#FGS}" != "$fired_mode" ] || [ "${fired_mode#DEGRADED}" != "$fired_mode" ]; }; then outcome=PASS; fi
     note="arm_mode $before -> $after (alarm clocks held: $clock_after) -> $back after allow; inexact ring: $fired_mode"
   else
     note="the debug receiver armed nothing"
@@ -337,6 +337,10 @@ main() {
   } >"$REPORT"
   install_apk "$DEBUG_APK" || { result setup FAIL "the debug APK did not install from $DEBUG_APK"; return 1; }
   for name in $cases; do
+    case "$name" in
+      kill | kill9 | forcestop | idle | revoke | backstop | reboot) ;;
+      *) result "$name" FAIL "no such case"; continue ;;
+    esac
     say "=== $name"
     adb logcat -c
     "case_$name"
