@@ -165,6 +165,7 @@ dependencies {
   androidTestImplementation(libs.androidx.espresso.core)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.runner)
+  androidTestImplementation(libs.androidx.uiautomator)
   debugImplementation(libs.firebase.appcheck.debug)
   "noexactImplementation"(libs.firebase.appcheck.debug)
   debugImplementation(libs.androidx.compose.ui.test.manifest)

@@ -1,0 +1,71 @@
+name: nightly-emulator
+
+# Real emulators, so too slow and too flaky to hold up a pull request: this is not a required check. It runs every night from the default
+# branch and on demand. On a pull request it runs only when the pull request changes this harness itself.
+on:
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/nightly-emulator.yml
+      - scripts/reliability.sh
+      - android/app/src/androidTest/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-emulator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        api: ['36', '37.0']
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Let the emulator use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Build the APKs and the instrumented tests
+        run: ./gradlew --no-daemon assembleDebug assembleNoexact assembleDebugAndroidTest
+      - name: Instrumented tests, then the reliability cases
+        timeout-minutes: 75
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          ram-size: 4096M
+          disk-size: 6G
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          working-directory: android
+          # One line: the action runs each line on its own and stops at the first failure, and the reliability cases must run either way.
+          script: rc=0; timeout 1500 ./gradlew --no-daemon :app:connectedDebugAndroidTest || rc=1; timeout 60 adb logcat -d > logcat-instrumented.txt; REPORT=reliability-report.md timeout 1800 bash ../scripts/reliability.sh || rc=1; cat reliability-report.md >> "$GITHUB_STEP_SUMMARY"; exit $rc
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-api-${{ matrix.api }}
+          path: |
+            android/app/build/reports/androidTests
+            android/app/build/outputs/androidTest-results
+            android/reliability-report.md
+            android/logcat-*.txt
+          if-no-files-found: warn
