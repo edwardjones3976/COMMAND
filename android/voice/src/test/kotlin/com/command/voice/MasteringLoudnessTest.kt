@@ -1,5 +1,6 @@
 package com.command.voice
 
+import com.command.domain.dials.DialEffects
 import com.command.domain.voice.LoudnessMeter
 import com.command.domain.voice.SpeechLevel
 import com.command.domain.voice.SpeechUsage
@@ -56,6 +57,18 @@ class MasteringLoudnessTest {
             }
         }
         return 20 * log10(peak.coerceAtLeast(1e-9))
+    }
+
+    @Test
+    fun `the alarm profile masters to the loudness the dial says, at every intensity`() {
+        (-1..7).forEach { intensity ->
+            assertEquals(
+                "at intensity $intensity",
+                DialEffects.loudnessTargetLufs(intensity).toFloat(),
+                VoiceMastering.alarmProfile(SpeechLevel(intensity)).targetLufs,
+                0f,
+            )
+        }
     }
 
     @Test
