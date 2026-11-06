@@ -262,7 +262,7 @@ class ReveilleService : Service() {
         if (active?.id == row.id) return
 
         val plan = SessionPlan.of(row)
-        if (plan == null || plan.isOver(clock.nowMs(), clock.elapsedRealtimeMs())) {
+        if (plan == null || plan.isOver(clock)) {
             // The plan ended while nothing was alive to enforce it: record the miss and do not ring at all.
             timeOutRing(this, repository, row.id, code, EventSource.SERVICE)
             return
@@ -361,7 +361,7 @@ class ReveilleService : Service() {
      * monotonic clock, so setting the phone's clock cannot stretch the ring or cut it short, even across a restart.
      */
     private suspend fun runCycles(plan: SessionPlan) {
-        val sinceStart = plan.elapsedMs(clock.nowMs(), clock.elapsedRealtimeMs())
+        val sinceStart = plan.elapsedMs(clock)
         val origin = clock.elapsedRealtimeMs() - sinceStart
         fun position() = clock.elapsedRealtimeMs() - origin
         for (window in plan.cycleWindows) {

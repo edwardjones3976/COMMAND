@@ -11,10 +11,12 @@ import com.command.domain.reliability.Reliability
 import com.command.domain.reliability.ReliabilityReport
 import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -48,7 +50,13 @@ class ReliabilityViewModel @Inject constructor(
     private val asked = MutableStateFlow(false)
     private val maker = oem.find()
 
-    val state: StateFlow<ReliabilityUiState> = combine(snapshot, repository.recentAlarms(), asked, repository.refusedAlarms()) { snap, recent, askedBefore, refused ->
+    /** Bumped each time the page returns. "The last day" is worked out when the query starts, so a page kept in memory has to ask again. */
+    private val returns = MutableStateFlow(0)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val refused = returns.flatMapLatest { repository.refusedAlarms() }
+
+    val state: StateFlow<ReliabilityUiState> = combine(snapshot, repository.recentAlarms(), asked, refused) { snap, recent, askedBefore, refusedCount ->
         if (snap == null) {
             ReliabilityUiState.Loading
         } else {
@@ -57,13 +65,14 @@ class ReliabilityViewModel @Inject constructor(
                 recent = recent,
                 canAskNotifications = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !askedBefore,
                 maker = maker?.maker,
-                refusedAlarms = refused,
+                refusedAlarms = refusedCount,
             )
         }
     }.stateIn(guardedScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), ReliabilityUiState.Loading)
 
     /** Reads the platform again. Every setting on this page can be changed outside the app, so it runs whenever the page returns. */
     fun refresh() {
+        returns.value++
         guardedScope.launch {
             asked.value = settings.notificationsAsked()
             snapshot.value = monitor.refresh()

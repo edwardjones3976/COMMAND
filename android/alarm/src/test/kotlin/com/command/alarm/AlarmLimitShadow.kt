@@ -14,6 +14,10 @@ import org.robolectric.shadows.ShadowAlarmManager
 class AlarmLimitShadow : ShadowAlarmManager() {
 
     private fun check() {
+        beforePlacing?.let {
+            beforePlacing = null
+            it()
+        }
         if (scheduledAlarms.size >= limit) throw IllegalStateException("Maximum limit of concurrent alarms $limit reached")
     }
 
@@ -38,5 +42,10 @@ class AlarmLimitShadow : ShadowAlarmManager() {
     companion object {
         @JvmStatic
         var limit = Int.MAX_VALUE
+
+        /** Runs once, inside the next call to the platform. */
+        @JvmStatic
+        @Volatile
+        var beforePlacing: (() -> Unit)? = null
     }
 }

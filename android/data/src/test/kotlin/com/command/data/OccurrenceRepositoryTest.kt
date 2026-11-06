@@ -1014,6 +1014,25 @@ class OccurrenceRepositoryTest {
     }
 
     @Test
+    fun `a ring stores which boot its monotonic deadline belongs to`() = runBlocking {
+        f.clock.bootId = "7"
+        val row = armedRow()
+        f.repo.apply(row.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+        f.repo.apply(row.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+        assertEquals("7", Codec.decodeSession(f.repo.get(row.id)!!.sessionJson).bootId)
+    }
+
+    @Test
+    fun `the real clock names the boot by the platform's count, and says nothing when the platform does not`() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val settings = context.contentResolver
+        android.provider.Settings.Global.putString(settings, android.provider.Settings.Global.BOOT_COUNT, null)
+        assertEquals(null, AndroidClock(context).bootId())
+        android.provider.Settings.Global.putInt(settings, android.provider.Settings.Global.BOOT_COUNT, 12)
+        assertEquals("12", AndroidClock(context).bootId())
+    }
+
+    @Test
     fun `a Fire tops up the window, and a rejected one does not`() = runBlocking {
         val row = armedRow()
         f.repo.apply(row.id, OccurrenceCommand.Fire, EventSource.SERVICE) // not armed yet: rejected

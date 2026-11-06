@@ -38,6 +38,7 @@ class AlarmLimitTest {
     @After
     fun tearDown() {
         AlarmLimitShadow.limit = Int.MAX_VALUE
+        AlarmLimitShadow.beforePlacing = null
     }
 
     private fun request(n: Int, kind: AlarmKind = AlarmKind.FIRE, at: Long = 1_900_000_000_000L) = AlarmRequest("occ-$n", n, kind, at)
@@ -81,6 +82,26 @@ class AlarmLimitTest {
         assertEquals(ArmMode.REFUSED, scheduler.arm(request(1, at = 1_900_000_100_000L)))
 
         assertFalse("it gave up its place to try, so it is not said to be there", scheduler.isArmed(request(1)))
+    }
+
+    @Test
+    fun `two arms of one alarm take turns, so a refusal cannot cancel what the other has just set`() {
+        AlarmLimitShadow.limit = 1
+        var other: Thread? = null
+        var otherWaited = false
+        var otherMode: ArmMode? = null
+        AlarmLimitShadow.beforePlacing = {
+            other = kotlin.concurrent.thread { otherMode = scheduler.arm(request(1)) }
+            other!!.join(500)
+            otherWaited = other!!.isAlive
+        }
+
+        assertEquals(ArmMode.EXACT, scheduler.arm(request(1)))
+        other!!.join(10_000)
+
+        assertTrue("the second waits for the first to finish", otherWaited)
+        assertEquals("then finds it held, and sets it again", ArmMode.EXACT, otherMode)
+        assertTrue(scheduler.isArmed(request(1)))
     }
 
     @Test

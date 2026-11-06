@@ -487,6 +487,7 @@ class OccurrenceRepository @Inject constructor(
                     newSession = newSession.copy(
                         planEndUtc = now + it.totalMs,
                         planEndElapsed = clock.elapsedRealtimeMs() + it.totalMs,
+                        bootId = clock.bootId(),
                         ringStartUtc = now,
                         ringCycles = ring.cycles,
                         ringCycleMs = ring.cycleMs,

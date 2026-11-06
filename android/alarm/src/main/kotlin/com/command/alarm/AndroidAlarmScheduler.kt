@@ -30,6 +30,8 @@ class AndroidAlarmScheduler @Inject constructor(
 
     override fun canScheduleExact(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarms.canScheduleExactAlarms()
 
+    private val arming = Any()
+
     override fun arm(request: AlarmRequest): ArmMode {
         // Erasing everything is under way (or done): whatever is still running must not set an alarm that the erase has taken back or will.
         if (latch.sealed) return ArmMode.NONE
@@ -48,24 +50,28 @@ class AndroidAlarmScheduler @Inject constructor(
      * before it replaces, so an alarm being set again would be refused for the room it already takes: that one lets go of its own place and
      * tries once more. An alarm refused for good takes its PendingIntent with it, so that [isArmed] does not say it is there.
      */
-    private fun armNow(request: AlarmRequest): ArmMode {
+    /**
+     * One at a time: the calendar's sync and a reconcile can arm the same alarm together, and they share one PendingIntent, so one that was refused
+     * and cancels it would take away what the other has just set.
+     */
+    private fun armNow(request: AlarmRequest): ArmMode = synchronized(arming) {
         val held = isArmed(request)
         val operation = pendingIntent(request, create = true)!!
         try {
-            return place(request, operation)
+            return@synchronized place(request, operation)
         } catch (e: IllegalStateException) {
             Log.w(TAG, "the platform refused an alarm", e)
         }
         if (held) {
             alarms.cancel(operation)
             try {
-                return place(request, operation)
+                return@synchronized place(request, operation)
             } catch (e: IllegalStateException) {
                 Log.w(TAG, "the platform refused an alarm again", e)
             }
         }
         operation.cancel()
-        return ArmMode.REFUSED
+        ArmMode.REFUSED
     }
 
     private fun place(request: AlarmRequest, operation: PendingIntent): ArmMode {

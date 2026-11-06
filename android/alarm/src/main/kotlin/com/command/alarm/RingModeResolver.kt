@@ -46,7 +46,7 @@ class RingModeResolver @Inject constructor(
             ?: repository.get(occurrenceId)?.takeIf { it.state == OccurrenceState.FIRING }
             ?: return // stale: nothing to ring for
 
-        val remaining = SessionPlan.of(row)?.let { it.totalMs - it.elapsedMs(clock.nowMs(), clock.elapsedRealtimeMs()) } ?: 0L
+        val remaining = SessionPlan.of(row)?.let { it.totalMs - it.elapsedMs(clock) } ?: 0L
         if (remaining <= 0) {
             // None of the plan is left (it ran out while nothing could ring): record the miss and make no sound.
             repository.logEvent(EventType.RING_DEGRADED, row, EventSource.RECEIVER, EventPayload.of("reason" to reason, "notified" to false))

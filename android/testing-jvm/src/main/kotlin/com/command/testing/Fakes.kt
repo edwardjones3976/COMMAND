@@ -19,10 +19,12 @@ class FakeClock(
     var nowMs: Long = 0L,
     var elapsedMs: Long = 0L,
     var zone: ZoneId = ZoneOffset.UTC,
+    var bootId: String? = null,
 ) : Clock {
     override fun nowMs(): Long = nowMs
     override fun elapsedRealtimeMs(): Long = elapsedMs
     override fun zone(): ZoneId = zone
+    override fun bootId(): String? = bootId
 
     /** Moves wall-clock and monotonic time forward together. */
     fun advance(ms: Long) {

@@ -45,7 +45,7 @@ class ArmingReconciler @Inject constructor(
     private suspend fun settleRings() {
         for (row in occurrences.firing()) {
             val plan = SessionPlan.of(row)
-            val elapsed = plan?.elapsedMs(clock.nowMs(), clock.elapsedRealtimeMs())
+            val elapsed = plan?.elapsedMs(clock)
             if (plan == null || elapsed == null || elapsed >= plan.totalMs) {
                 timeOutRing(context, occurrences, row.id, row.requestCode, EventSource.SYSTEM)
             } else {

@@ -125,6 +125,50 @@ class DeadRingTest {
     }
 
     @Test
+    fun `a reboot makes the stored deadline mean nothing, even when the new boot has been up longer than the ring had`() {
+        clock.bootId = "1"
+        val o = abandoned()
+        val total = planOf(o).totalMs
+        clock.bootId = "2"
+        clock.elapsedMs += 10_000 // read as this boot's clock, only 10 seconds of the ring have gone
+        clock.nowMs += total + 3_600_000 // by the wall clock it ended an hour ago
+
+        reconcile()
+
+        assertEquals(OccurrenceState.MISSED, current(o).state)
+        assertNull(cycleEnd(o))
+    }
+
+    @Test
+    fun `after a reboot the time left comes from the wall clock`() {
+        clock.bootId = "1"
+        val o = abandoned()
+        val total = planOf(o).totalMs
+        clock.bootId = "2"
+        clock.elapsedMs += 10_000
+        clock.nowMs += 30_000
+
+        reconcile()
+
+        assertEquals(OccurrenceState.FIRING, current(o).state)
+        assertEquals(clock.nowMs + total - 30_000, cycleEnd(o)?.atUtcMs)
+    }
+
+    @Test
+    fun `in the same boot a clock set forward cannot end a ring that may be sounding`() {
+        clock.bootId = "1"
+        val o = abandoned()
+        val total = planOf(o).totalMs
+        clock.advance(10_000)
+        clock.nowMs += total + 3_600_000
+
+        reconcile()
+
+        assertEquals(OccurrenceState.FIRING, current(o).state)
+        assertEquals(clock.nowMs + total - 10_000, cycleEnd(o)?.atUtcMs)
+    }
+
+    @Test
     fun `a ring whose plan cannot be read is over, because nothing could ever say when it ends`() {
         val o = abandoned()
         db.openHelper.writableDatabase.execSQL("UPDATE occurrences SET session_json = '{}' WHERE id = '${o.id}'")
