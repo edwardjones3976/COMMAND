@@ -20,6 +20,16 @@
     <string name="reveille_resume">Resume</string>
     <string name="reveille_direction_label">Your first step</string>
     <string name="reveille_starting">I am starting</string>
+    <plurals name="reveille_starter_begin">
+        <item quantity="one">Set a %1$d-minute clock</item>
+        <item quantity="other">Set a %1$d-minute clock</item>
+    </plurals>
+    <plurals name="reveille_starter_left">
+        <item quantity="one">%1$d minute left</item>
+        <item quantity="other">%1$d minutes left</item>
+    </plurals>
+    <string name="reveille_starter_clock">%1$d:%2$02d</string>
+    <string name="reveille_starter_over">The clock is up. Report a start if you made one.</string>
     <string name="reveille_delay">Delay %1$d min</string>
     <string name="reveille_skip">Skip</string>
     <string name="reveille_closed_started">Started. Good.</string>

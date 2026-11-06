@@ -201,6 +201,19 @@ class FollowUpScreenTest {
     }
 
     @Test
+    fun `a skip shows the coach's words beside what is recorded`() {
+        show(FollowUpUiState.Finished("Write the report", FollowUpOutcome.SKIPPED, "Skipped. Understood."))
+        compose.onNodeWithText("Recorded as skipped, not as done.").assertIsDisplayed()
+        compose.onNodeWithText("Skipped. Understood.").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a close with no words adds no empty line`() {
+        show(FollowUpUiState.Finished("Write the report", FollowUpOutcome.SKIPPED))
+        compose.onNodeWithText("Skipped. Understood.").assertDoesNotExist()
+    }
+
+    @Test
     fun `an occurrence that is gone says so and closes`() {
         val taps = show(FollowUpUiState.NotFound)
         compose.onNodeWithText("This one is gone").assertIsDisplayed()

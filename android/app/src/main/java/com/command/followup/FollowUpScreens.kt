@@ -276,19 +276,21 @@ private fun Finished(state: FollowUpUiState.Finished, onClose: () -> Unit) {
         FollowUpOutcome.DELAYED -> R.string.followup_delayed_title to R.string.followup_delayed_body
         FollowUpOutcome.WAITING -> R.string.followup_waiting_title to R.string.followup_waiting_body
     }
-    Message(stringResource(title), stringResource(body), onClose, heading = state.title)
+    Message(stringResource(title), stringResource(body), onClose, heading = state.title, coaching = state.coaching)
 }
 
 @Composable
-private fun Message(title: String, body: String, onClose: () -> Unit, heading: String? = null) {
+private fun Message(title: String, body: String, onClose: () -> Unit, heading: String? = null, coaching: String = "") {
     Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp),
+        // It scrolls like the other screens here, so that long words at large type cannot push Close out of reach.
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         if (heading != null) Text(heading, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
         Text(title, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
         Text(body, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
+        if (coaching.isNotBlank()) Text(coaching, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
         Button(onClick = onClose, modifier = Modifier.fillMaxWidth().height(56.dp).testTag(FollowUpTags.CLOSE)) {
             Text(stringResource(R.string.followup_close))
         }

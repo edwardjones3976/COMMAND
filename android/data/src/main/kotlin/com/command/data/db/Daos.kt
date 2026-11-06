@@ -85,6 +85,24 @@ interface OccurrenceDao {
     @Query("SELECT * FROM occurrences WHERE id = :id")
     fun observe(id: String): Flow<OccurrenceRow?>
 
+    /**
+     * How many of [missionId]'s occurrences before [beforeUtc] were acknowledged and have no reported start, counting back to the last one
+     * that does have one. A start is the person's report (started, working or done), however it ended afterwards; a silence that was picked up
+     * again was not acknowledged.
+     */
+    @Query(
+        """SELECT COUNT(*) FROM occurrences o
+           WHERE o.mission_id = :missionId AND o.scheduled_at_utc < :beforeUtc
+           AND EXISTS (SELECT 1 FROM events e WHERE e.occurrence_id = o.id AND e.type = 'STATE_CHANGED'
+               AND e.payload_json LIKE '%"command":"ACKNOWLEDGE"%')
+           AND o.scheduled_at_utc > COALESCE((SELECT MAX(s.scheduled_at_utc) FROM occurrences s
+               JOIN events e ON e.occurrence_id = s.id
+               WHERE s.mission_id = :missionId AND s.scheduled_at_utc < :beforeUtc AND e.type = 'STATE_CHANGED'
+               AND (e.payload_json LIKE '%"command":"REPORT_STARTED"%' OR e.payload_json LIKE '%"command":"REPORT_WORKING"%'
+                    OR e.payload_json LIKE '%"command":"REPORT_DONE"%')), -9223372036854775808)""",
+    )
+    suspend fun acknowledgedWithoutStart(missionId: String, beforeUtc: Long): Int
+
     @Query("SELECT * FROM occurrences WHERE mission_id = :missionId AND scheduled_at_utc = :scheduledAtUtc")
     suspend fun find(missionId: String, scheduledAtUtc: Long): OccurrenceRow?
 
@@ -198,6 +216,20 @@ interface EventDao {
 
     @Query("SELECT * FROM events ORDER BY seq")
     suspend fun all(): List<EventRow>
+
+    /** Whether anything says that this ring's line was not heard: the phone could not speak, or the route said no. */
+    @Query(
+        """SELECT EXISTS(SELECT 1 FROM events WHERE occurrence_id = :occurrenceId
+           AND (type = 'TTS_UNAVAILABLE' OR (type = 'AUDIO_ROUTE' AND payload_json LIKE '%"spoke":"false"%')))""",
+    )
+    fun observeLineNotSpoken(occurrenceId: String): Flow<Boolean>
+
+    /** Whether the occurrence was ever acknowledged: its handshake was passed, as against a silence that was picked up again. */
+    @Query(
+        """SELECT EXISTS(SELECT 1 FROM events WHERE occurrence_id = :occurrenceId
+           AND type = 'STATE_CHANGED' AND payload_json LIKE '%"command":"ACKNOWLEDGE"%')""",
+    )
+    suspend fun wasAcknowledged(occurrenceId: String): Boolean
 }
 
 @Dao

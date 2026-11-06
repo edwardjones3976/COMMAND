@@ -90,8 +90,8 @@ class ScheduleViewModelTest {
             repo.apply(row.occurrenceId, OccurrenceCommand.Fire, EventSource.SERVICE)
             repo.apply(row.occurrenceId, OccurrenceCommand.Miss(MissReason.TIMEOUT), EventSource.SERVICE)
         }
-        awaitUntil(message = "recent") { ready()?.recent?.size == 1 }
-        assertTrue(ready()!!.upcoming.isEmpty())
+        // The two lists are separate reads, so one can move before the other: wait for both, and a mission stuck in upcoming times out here.
+        awaitUntil(message = "out of upcoming and into recent") { ready()?.let { it.recent.size == 1 && it.upcoming.isEmpty() } == true }
         assertEquals(OccurrenceState.MISSED, ready()!!.recent.single().state)
     }
 

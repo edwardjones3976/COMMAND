@@ -9,6 +9,7 @@ import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.LockPolicy
 import com.command.domain.dials.RecoveryOption
 import com.command.domain.dials.SkipReasonCode
+import com.command.domain.occurrence.SkipReason
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.OccurrenceCommand
@@ -314,7 +315,24 @@ class FollowUpViewModelTest {
         awaitUi("ask again") { (it as? FollowUpUiState.Ask)?.title == "Skipped" }
         vm.skip()
         awaitUntil(message = "skipped") { stateOf(skipped) == OccurrenceState.SKIPPED }
-        awaitUi("finished") { it == FollowUpUiState.Finished("Skipped", FollowUpOutcome.SKIPPED) }
+        awaitUi("finished") { it is FollowUpUiState.Finished && it.title == "Skipped" && it.outcome == FollowUpOutcome.SKIPPED }
+        val finished = vm.state.value as FollowUpUiState.Finished
+        assertEquals("a skip is met with the coach's words", runBlocking { repo.lineFor(repo.get(skipped.id)!!, CoachingPhase.SKIP_ACK, withMissionWords = false).text }, finished.coaching)
+        assertTrue(finished.coaching.isNotBlank())
+    }
+
+    @Test
+    fun `a skip the calendar made is not answered as the person's own`() {
+        val o = runBlocking {
+            val mission = testMission(profileId = "builtin_steady")
+            db.missions().insert(mission)
+            val row = repo.createOccurrence(mission.id, FakeAlarmModule.T0 + 600_000, "UTC").occurrence
+            repo.apply(row.id, OccurrenceCommand.Skip(SkipReason.CALENDAR_CANCELLED), EventSource.WORKER)
+            row
+        }
+        vm.show(o.id)
+        awaitUi("finished") { it is FollowUpUiState.Finished && it.outcome == FollowUpOutcome.SKIPPED }
+        assertEquals("", (vm.state.value as FollowUpUiState.Finished).coaching)
     }
 
     @Test

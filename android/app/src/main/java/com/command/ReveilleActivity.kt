@@ -130,6 +130,7 @@ internal fun ringActions(viewModel: ReveilleViewModel, ring: String?, onClose: (
     onSilence = viewModel::silence,
     onResume = viewModel::resume,
     onStarted = viewModel::started,
+    onBeginStarter = viewModel::beginStarter,
     onDelay = viewModel::delay,
     onSkip = viewModel::skip,
     onClose = onClose,
