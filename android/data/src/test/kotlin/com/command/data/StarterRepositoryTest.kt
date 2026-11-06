@@ -189,6 +189,23 @@ class StarterRepositoryTest {
     }
 
     @Test
+    fun `an acknowledgement put off counts, and so does the delayed ring acknowledged after it`() = run {
+        val m = f.mission()
+        apply(guided(m), OccurrenceCommand.Delay(10))
+        assertEquals(1, count(m))
+
+        val child = f.db.occurrences().find(m.id, f.t0 + 10 * minute)!!
+        apply(child, OccurrenceCommand.Fire)
+        apply(child, OccurrenceCommand.Acknowledge())
+        assertEquals("the delayed ring being asked about has not had its chance", 1, count(m, child.scheduledAtUtc))
+        assertEquals(2, count(m))
+
+        apply(child, OccurrenceCommand.StartGuidance)
+        apply(child, OccurrenceCommand.ReportStarted)
+        assertEquals("a start on the delayed ring ends the run", 0, count(m))
+    }
+
+    @Test
     fun `other missions do not count, nor does the occurrence being asked about, nor anything later`() = run {
         val m = f.mission()
         val other = f.mission("Another")

@@ -7,6 +7,9 @@ import com.command.data.db.CommandDb
 import com.command.data.db.OccurrenceRow
 import com.command.domain.alarm.AlarmKind
 import com.command.domain.coaching.CoachingPhase
+import com.command.domain.dials.Flexibility
+import com.command.domain.dials.FrictionEvidence
+import com.command.domain.dials.LockPolicy
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.EventPayload
@@ -309,6 +312,38 @@ class StarterViewModelTest {
         running(skipped, other)
         other.skip()
         await<ReveilleUiState.Closed>(other) { it.outcome == ClosedOutcome.SKIPPED }
+    }
+
+    @Test
+    fun `a Mission Lock question stays open over the running clock, and answering it skips`() {
+        val mission = testMission(profileId = "builtin_steady").copy(flexibility = Flexibility.RIGID, lockPolicy = LockPolicy.CONFIRM)
+        runBlocking { db.missions().insert(mission) }
+        val o = guided(mission.id)
+        running(o)
+
+        vm.skip()
+        awaitUntil(message = "the question") { vm.friction.value != null }
+        assertEquals(240, second(minute, 240).remainingSeconds)
+        assertEquals("a tick does not take the question away", LockPolicy.CONFIRM, vm.friction.value?.required)
+
+        vm.confirmFriction(FrictionEvidence.Confirmed)
+        await<ReveilleUiState.Closed> { it.outcome == ClosedOutcome.SKIPPED }
+        assertNull(vm.friction.value)
+    }
+
+    @Test
+    fun `dismissing the question leaves the starter running`() {
+        val mission = testMission(profileId = "builtin_steady").copy(flexibility = Flexibility.RIGID, lockPolicy = LockPolicy.CONFIRM)
+        runBlocking { db.missions().insert(mission) }
+        val o = guided(mission.id)
+        running(o)
+        vm.skip()
+        awaitUntil(message = "the question") { vm.friction.value != null }
+
+        vm.dismissFriction()
+
+        assertEquals(240, second(minute, 240).remainingSeconds)
+        assertEquals(OccurrenceState.GUIDED_START, row(o).state)
     }
 
     @Test
