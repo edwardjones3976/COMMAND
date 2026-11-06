@@ -27,6 +27,9 @@ import com.command.history.HistoryRoute
 import com.command.onboarding.FirstMissionRoute
 import com.command.onboarding.PermissionsRoute
 import com.command.onboarding.WelcomeScreen
+import com.command.profiles.ActivityRulesRoute
+import com.command.profiles.DialsRoute
+import com.command.profiles.ProfilesRoute
 import com.command.reliability.ReliabilityRoute
 import com.command.schedule.ScheduleRoute
 import com.command.settings.SettingsRoute
@@ -44,8 +47,11 @@ object Routes {
     const val DATA = "data"
     const val HANDSHAKES = "handshakes"
     const val CALENDARS = "calendars"
+    const val PROFILES = "profiles"
+    const val RULES = "activity_rules"
     const val ARG_ID = "id"
     private const val HANDSHAKE_EDITOR = "handshake"
+    private const val DIALS = "dials"
     private const val DETAIL = "detail"
     private const val EDITOR = "mission"
     private const val FOLLOW_UP = "followup"
@@ -69,6 +75,11 @@ object Routes {
     const val HANDSHAKE_EDITOR_PATTERN = "$HANDSHAKE_EDITOR/{$ARG_ID}"
 
     fun handshakeEditor(profileId: String): String = "$HANDSHAKE_EDITOR/$profileId"
+
+    /** The dials of the profile with this id. */
+    const val DIALS_PATTERN = "$DIALS/{$ARG_ID}"
+
+    fun dials(profileId: String): String = "$DIALS/$profileId"
 }
 
 /** The screens of the app and the ways between them. The lock-screen flow is a separate activity and is not part of this. */
@@ -143,6 +154,7 @@ private fun CommandNavHost(
                 onOpenData = { navController.navigate(Routes.DATA) },
                 onOpenHandshakes = { navController.navigate(Routes.HANDSHAKES) },
                 onOpenCalendars = { navController.navigate(Routes.CALENDARS) },
+                onOpenProfiles = { navController.navigate(Routes.PROFILES) },
             )
         }
         composable(Routes.CALENDARS) {
@@ -157,6 +169,25 @@ private fun CommandNavHost(
         ) { entry ->
             HandshakeEditorRoute(profileId = entry.arguments?.getString(Routes.ARG_ID).orEmpty(), onBack = { navController.popBackStack() })
         }
+        composable(Routes.PROFILES) {
+            ProfilesRoute(
+                onBack = { navController.popBackStack() },
+                onOpenDials = { navController.navigate(Routes.dials(it)) },
+                onOpenHandshake = { navController.navigate(Routes.handshakeEditor(it)) },
+                onOpenRules = { navController.navigate(Routes.RULES) },
+            )
+        }
+        composable(
+            Routes.DIALS_PATTERN,
+            arguments = listOf(navArgument(Routes.ARG_ID) { type = NavType.StringType }),
+        ) { entry ->
+            DialsRoute(
+                profileId = entry.arguments?.getString(Routes.ARG_ID).orEmpty(),
+                onBack = { navController.popBackStack() },
+                onOpenHandshake = { navController.navigate(Routes.handshakeEditor(it)) },
+            )
+        }
+        composable(Routes.RULES) { ActivityRulesRoute(onBack = { navController.popBackStack() }) }
         composable(Routes.DATA) { DataRoute(onBack = { navController.popBackStack() }) }
         composable(
             Routes.DETAIL_PATTERN,

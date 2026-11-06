@@ -54,7 +54,7 @@ sealed interface HandshakeProfilesUiState {
 
 /**
  * The profiles and the handshake each asks for, as stored, and which of them alarms are fired with: the list follows the database, so a saved
- * chain shows at once. Until the profile screens of M10b let a person choose, that is the active profile only, and the screens say so.
+ * chain shows at once.
  */
 @HiltViewModel
 class HandshakeProfilesViewModel @Inject constructor(profiles: ProfileRepository) : ViewModel() {

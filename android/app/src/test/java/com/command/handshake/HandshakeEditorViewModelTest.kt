@@ -677,6 +677,25 @@ class HandshakeEditorViewModelTest {
     }
 
     @Test
+    fun `a change to the row while the return to the standard is going on does not bring the editor back early`() {
+        open("builtin_steady")
+        vm.addStep()
+        vm.save()
+        awaitSaved() // a chain of its own, so that the write that goes back changes the row
+        val gate = CompletableDeferred<Unit>()
+        vm.afterUseDefault = { gate.await() }
+
+        vm.useStandard()
+        setDifficulty("builtin_steady", 3)
+        pumpFor(1_000) // long enough for both changes of the row to reach an editor that was following it
+
+        assertEquals("the editor still waits for its answer", HandshakeEditorUiState.Loading, vm.state.value)
+        gate.complete(Unit)
+        awaitUntil(message = "back on the standard") { (vm.state.value as? HandshakeEditorUiState.Editing)?.restored == true }
+        assertEquals(DialEffects.defaultChain(3).steps, editing().steps.map { it.toSpec() })
+    }
+
+    @Test
     fun `a save that lands between the return to the standard and the read that follows it is not shown as the standard`() {
         open("builtin_steady")
         val custom = DialEffects.defaultChain(4)
@@ -689,6 +708,72 @@ class HandshakeEditorViewModelTest {
         assertFalse(editing().usingStandard)
         assertEquals(custom.steps, editing().steps.map { it.toSpec() })
         assertFalse("and the draft is what is in force", editing().changed)
+    }
+
+    /** Through Room, as a real writer goes: a bare SQL statement on the helper does not tell the flows that anything changed. */
+    private fun setDifficulty(id: String, difficulty: Int) = runBlocking { db.profiles().setHandshakeDifficulty(id, difficulty) }
+
+    @Test
+    fun `a change another writer makes to the profile reaches an editor with nothing typed in it`() {
+        open("builtin_steady") // difficulty 2: a hold
+
+        setDifficulty("builtin_steady", 3) // the dials screen, or a sync, writes the same row
+
+        awaitUntil(message = "the editor shows what is in force now") { editing().difficulty == 3 }
+        assertEquals("the standard chain of the new difficulty", DialEffects.defaultChain(3).steps, editing().steps.map { it.toSpec() })
+        assertFalse("nothing to save: the draft is what is in force", editing().changed)
+    }
+
+    @Test
+    fun `a change another writer makes to the profile keeps what the person has typed, and it can still be saved`() {
+        open("builtin_steady")
+        vm.addStep()
+        val typed = editing().steps
+
+        setDifficulty("builtin_steady", 3)
+
+        awaitUntil(message = "the editor knows the new difficulty") { editing().difficulty == 3 }
+        assertEquals("the draft stays", typed, editing().steps)
+        assertTrue("and it is still a change to save", editing().canSave)
+    }
+
+    @Test
+    fun `a change another writer makes while a save is writing leaves the draft alone, even one that looks untouched`() {
+        open("builtin_steady")
+        val original = editing().steps
+        vm.addStep()
+        val gate = CompletableDeferred<Unit>()
+        vm.beforeSaveWrite = { gate.await() }
+        vm.save()
+        vm.removeStep(editing().steps.last().key) // back to what was in force, while the save of the other draft is still going
+
+        setDifficulty("builtin_steady", 3)
+        awaitUntil(message = "the editor knows the new difficulty") { editing().difficulty == 3 }
+
+        assertEquals("the draft is what the person left it as", original, editing().steps)
+        gate.complete(Unit)
+    }
+
+    @Test
+    fun `a change another writer makes after the return to the standard is shown, and takes the note away only if it changes the chain`() {
+        open("builtin_steady")
+        vm.addStep()
+        vm.save()
+        awaitSaved()
+
+        vm.useStandard()
+        awaitUntil(message = "back on the standard") { (vm.state.value as? HandshakeEditorUiState.Editing)?.restored == true }
+        val shown = editing().steps
+        runBlocking { db.profiles().upsert(db.profiles().get("builtin_steady")!!.copy(name = "Renamed")) }
+        awaitUntil(message = "the new name") { editing().profileName == "Renamed" }
+        assertEquals("the same chain keeps its steps", shown, editing().steps)
+        assertTrue("and the note", editing().restored)
+
+        setDifficulty("builtin_steady", 3)
+
+        awaitUntil(message = "the new chain") { editing().difficulty == 3 }
+        assertEquals(DialEffects.defaultChain(3).steps, editing().steps.map { it.toSpec() })
+        assertFalse("this is not the chain the note spoke of", editing().restored)
     }
 
     @Test

@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The profiles, and which one is active -->
+    <string name="settings_link_profiles">Profiles and dials</string>
+    <string name="profiles_title">Profiles</string>
+    <string name="profiles_back">Back</string>
+    <string name="profiles_intro">A profile says how an alarm treats you. The active one is for every mission left on Automatic, unless a rule below fits it. It decides from the next ring: an alarm already ringing keeps its handshake and its voice.</string>
+    <string name="profiles_none_active">No profile is active. Choose one, or missions left on Automatic use the standard settings.</string>
+    <string name="profiles_active">Active</string>
+    <string name="profiles_make_active">Make active</string>
+    <string name="profiles_dials">Dials</string>
+    <string name="profiles_dials_named">Dials of %1$s</string>
+    <string name="profiles_handshake">Handshake</string>
+    <string name="profiles_handshake_named">Handshake of %1$s</string>
+    <string name="profiles_rules_link">Rules by activity</string>
+
+    <!-- One profile's dials -->
+    <string name="dials_title">Dials</string>
+    <string name="dials_intro">Each dial works alone. A setting is saved the moment you choose it.</string>
+    <string name="dial_value_named">%1$s %2$d</string>
+    <string name="dial_firmness">Firmness</string>
+    <string name="dial_obnoxiousness">Obnoxiousness</string>
+    <string name="dial_alert">Alert intensity</string>
+    <string name="dial_persistence">Follow-up persistence</string>
+    <string name="dial_difficulty">Handshake difficulty</string>
+    <string name="dial_rigidity">Schedule rigidity</string>
+    <string name="dial_recovery">Recovery structure</string>
+
+    <string name="dial_firmness_suggest">Lines end as a suggestion: when you are ready.</string>
+    <string name="dial_firmness_invite">Lines end as an invitation to begin.</string>
+    <string name="dial_firmness_direct">Lines end by telling you to begin.</string>
+    <string name="dial_firmness_firm">Lines end by telling you to begin now.</string>
+    <string name="dial_firmness_commanding">Lines end with an order to do it now.</string>
+
+    <string name="dial_obnoxiousness_none">No extra words. Never an insult, at any setting.</string>
+    <plurals name="dial_obnoxiousness_density">
+        <item quantity="one">Up to %1$d shout in a line. Never an insult.</item>
+        <item quantity="other">Up to %1$d shouts in a line. Never an insult.</item>
+    </plurals>
+    <plurals name="dial_obnoxiousness_repeats">
+        <item quantity="one">The last one is said %1$d more time.</item>
+        <item quantity="other">The last one is said %1$d more times.</item>
+    </plurals>
+
+    <string name="dial_alert_once">Rings once, for %1$s.</string>
+    <string name="dial_alert_times">Rings %1$d times, for %2$s each, with %3$s between.</string>
+    <string name="dial_alert_voice_loud">The voice is loud.</string>
+    <string name="dial_alert_voice_louder">The voice is louder.</string>
+    <string name="dial_alert_voice_loudest">The voice is at its loudest.</string>
+
+    <string name="dial_persistence_once">Asks how it is going once, %1$s later.</string>
+    <string name="dial_persistence_times">Asks how it is going up to %1$d times, %2$s apart.</string>
+
+    <plurals name="dial_difficulty_tries">
+        <item quantity="one">%1$d try for each way.</item>
+        <item quantity="other">%1$d tries for each way.</item>
+    </plurals>
+
+    <string name="dial_rigidity_none">A fixed mission can be delayed or skipped with one tap. A flexible one always can.</string>
+    <string name="dial_rigidity_confirm">A fixed mission asks you to confirm before a delay or a skip. A flexible one never asks.</string>
+    <string name="dial_rigidity_reason">A fixed mission asks for a reason before a delay or a skip. A flexible one never asks.</string>
+    <string name="dial_rigidity_recovery">A fixed mission offers a way to start first, before a delay or a skip. A flexible one never asks.</string>
+
+    <plurals name="dial_recovery_offers">
+        <item quantity="one">When a start does not happen, offers once: %2$s.</item>
+        <item quantity="other">When a start does not happen, offers up to %1$d times: %2$s.</item>
+    </plurals>
+    <string name="dial_recovery_reset">start again</string>
+    <string name="dial_recovery_smaller">a smaller step, if the mission has one</string>
+    <string name="dial_recovery_later">try later (in %1$s minutes)</string>
+    <string name="dial_recovery_later_or_tomorrow">try later (in %1$s minutes, or tomorrow)</string>
+
+    <plurals name="dial_minutes">
+        <item quantity="one">%1$d minute</item>
+        <item quantity="other">%1$d minutes</item>
+    </plurals>
+    <plurals name="dial_seconds">
+        <item quantity="one">%1$d second</item>
+        <item quantity="other">%1$d seconds</item>
+    </plurals>
+
+    <string name="dials_preview_title">How a ring opens, for a mission called %1$s</string>
+    <string name="dials_preview_mission">Morning run</string>
+    <string name="dials_preview_first_action">Put on your shoes</string>
+    <string name="dials_preview_cap">This director keeps a line to twelve words, so the extra words go first and firmness and obnoxiousness may not show.</string>
+    <string name="dials_own_chain">This profile has a handshake of its own, so this dial changes nothing until it goes back to the standard handshake.</string>
+    <string name="dials_open_handshake">Open its handshake</string>
+
+    <!-- The rules that give a mission a profile by what it is -->
+    <string name="rules_title">Rules by activity</string>
+    <string name="rules_intro">A rule gives a mission a profile by its category or the words in its title. A profile you pick for a mission itself comes first. If several rules fit, the one that says most decides: both a category and words, then words, then a category.</string>
+    <string name="rules_empty">No rules yet.</string>
+    <string name="rules_add">Add a rule</string>
+    <string name="rules_asks_both">Category %1$s, with \"%2$s\" in the title</string>
+    <string name="rules_asks_words">Missions with \"%1$s\" in the title</string>
+    <string name="rules_asks_category">Category %1$s</string>
+    <string name="rules_asks_nothing">Asks for nothing, so it fits no mission</string>
+    <string name="rules_rings_with">Rings with %1$s</string>
+    <string name="rules_profile_gone">Its profile is gone, so this rule does nothing.</string>
+    <string name="rules_edit">Edit</string>
+    <string name="rules_edit_named">Edit: %1$s</string>
+    <string name="rules_delete">Delete</string>
+    <string name="rules_delete_named">Delete: %1$s</string>
+    <string name="rules_delete_title">Delete this rule?</string>
+    <string name="rules_delete_message">Missions it fits go back to their next choice from the next ring.</string>
+    <string name="rules_delete_keep">Keep the rule</string>
+    <string name="rules_delete_confirm">Delete the rule</string>
+
+    <string name="rules_form_title">Rule</string>
+    <string name="rules_field_category">Category</string>
+    <string name="rules_field_category_hint">Leave it empty for any category.</string>
+    <string name="rules_field_words">Words in the title</string>
+    <string name="rules_field_words_hint">Leave it empty for any title. Capital letters make no difference.</string>
+    <string name="rules_field_profile">Rings with</string>
+    <string name="rules_save">Save the rule</string>
+    <string name="rules_problem_nothing">Fill in a category, words, or both. A rule that asks for nothing fits no mission.</string>
+    <string name="rules_problem_same">Another rule asks for the same. Change that one instead.</string>
+    <string name="rules_problem_profile">Choose a profile.</string>
+</resources>

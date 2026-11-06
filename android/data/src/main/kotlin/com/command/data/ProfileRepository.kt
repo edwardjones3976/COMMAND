@@ -6,7 +6,9 @@ import com.command.data.db.ProfileRow
 import com.command.data.db.SettingRow
 import com.command.domain.dials.ChainIssue
 import com.command.domain.dials.ChainSpec
+import com.command.domain.dials.Dial
 import com.command.domain.dials.DialEffects
+import com.command.domain.dials.Dials
 import com.command.domain.dials.Personality
 import com.command.domain.dials.PresetOrigin
 import com.command.domain.dials.issues
@@ -34,6 +36,9 @@ data class ProfileHandshake(
     /** The chain that is in force for this profile. */
     val chain: ChainSpec get() = own ?: DialEffects.defaultChain(difficulty)
 }
+
+/** A profile as the dials screen sees it. What is stored is shown clamped to 1 to 5, as the screen can show nothing else. */
+data class ProfileDials(val handshake: ProfileHandshake, val dials: Dials)
 
 sealed interface SaveChainResult {
     data object Saved : SaveChainResult
@@ -63,6 +68,30 @@ class ProfileRepository @Inject constructor(private val db: CommandDb) {
     fun observe(): Flow<List<ProfileHandshake>> = db.profiles().observeAll().map { rows -> rows.map(::handshakeOf) }
 
     suspend fun get(id: String): ProfileHandshake? = db.profiles().get(id)?.let(::handshakeOf)
+
+    /** One profile for as long as it is collected: a new value whenever its handshake changes, and null while there is no such profile. */
+    fun observeHandshake(id: String): Flow<ProfileHandshake?> = db.profiles().observe(id).map { row -> row?.let(::handshakeOf) }.distinctUntilChanged()
+
+    /** One profile and its dials for as long as it is collected, and null while there is no such profile. */
+    fun observeDials(id: String): Flow<ProfileDials?> = db.profiles().observe(id).map { row -> row?.let { ProfileDials(handshakeOf(it), dialsOf(it)) } }.distinctUntilChanged()
+
+    /** The id the active-profile setting names. It may name a profile that is gone: a list shows no profile as active then. */
+    fun observeActiveId(): Flow<String?> = db.settings().observe(SettingKeys.ACTIVE_PROFILE_ID).map(::activeProfileIdOf).distinctUntilChanged()
+
+    /** Sets one dial of one profile, and nothing else of it. True if it was written: there is such a profile and the value is one a dial can have. */
+    suspend fun setDial(id: String, dial: Dial, value: Int): Boolean {
+        if (value !in Dials.RANGE) return false
+        val profiles = db.profiles()
+        return when (dial) {
+            Dial.FIRMNESS -> profiles.setFirmness(id, value)
+            Dial.OBNOXIOUSNESS -> profiles.setObnoxiousness(id, value)
+            Dial.ALERT_INTENSITY -> profiles.setAlertIntensity(id, value)
+            Dial.FOLLOW_UP_PERSISTENCE -> profiles.setFollowUpPersistence(id, value)
+            Dial.HANDSHAKE_DIFFICULTY -> profiles.setHandshakeDifficulty(id, value)
+            Dial.SCHEDULE_RIGIDITY -> profiles.setScheduleRigidity(id, value)
+            Dial.RECOVERY_STRUCTURE -> profiles.setRecoveryStructure(id, value)
+        } > 0
+    }
 
     /** The ids of the profiles that alarms are fired with (see [ProfileResolver.observeInUse]). Editing any other reaches no alarm, and the screens say so. */
     fun observeInUse(): Flow<Set<String>> = resolver.observeInUse()
@@ -97,6 +126,10 @@ class ProfileRepository @Inject constructor(private val db: CommandDb) {
 
     /** Goes back to the default chain of the profile's difficulty. True if the profile exists. */
     suspend fun useDefault(id: String): Boolean = db.profiles().setChainJson(id, null) > 0
+
+    private fun dialsOf(row: ProfileRow) = Dials.coerced(
+        listOf(row.firmness, row.obnoxiousness, row.alertIntensity, row.followUpPersistence, row.handshakeDifficulty, row.scheduleRigidity, row.recoveryStructure),
+    )
 
     private fun handshakeOf(row: ProfileRow): ProfileHandshake {
         val own = ChainJson.decode(row.handshakeChainJson)

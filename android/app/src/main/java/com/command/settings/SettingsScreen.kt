@@ -62,6 +62,7 @@ object SettingsTags {
     const val RESUME = "settings_resume"
     const val ABOUT = "settings_about"
     const val LINK_CALENDARS = "settings_link_calendars"
+    const val LINK_PROFILES = "settings_link_profiles"
 }
 
 @Composable
@@ -73,6 +74,7 @@ fun SettingsRoute(
     onOpenData: () -> Unit = {},
     onOpenHandshakes: () -> Unit = {},
     onOpenCalendars: () -> Unit = {},
+    onOpenProfiles: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -86,6 +88,7 @@ fun SettingsRoute(
         onOpenData = onOpenData,
         onOpenHandshakes = onOpenHandshakes,
         onOpenCalendars = onOpenCalendars,
+        onOpenProfiles = onOpenProfiles,
         version = com.example.BuildConfig.VERSION_NAME,
         onPause = viewModel::pauseFor,
         onEndPause = viewModel::endPause,
@@ -110,6 +113,7 @@ fun SettingsScreen(
     onOpenData: () -> Unit = {},
     onOpenHandshakes: () -> Unit = {},
     onOpenCalendars: () -> Unit = {},
+    onOpenProfiles: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -160,6 +164,7 @@ fun SettingsScreen(
                         modifier = Modifier.padding(top = 16.dp).semantics { heading() },
                     )
                 }
+                item { Link(R.string.settings_link_profiles, onOpenProfiles, SettingsTags.LINK_PROFILES) }
                 item { Link(R.string.settings_link_handshakes, onOpenHandshakes, SettingsTags.LINK_HANDSHAKES) }
                 item { Link(R.string.settings_link_calendars, onOpenCalendars, SettingsTags.LINK_CALENDARS) }
                 item { Link(R.string.settings_link_history, onOpenHistory, SettingsTags.LINK_HISTORY) }

@@ -325,7 +325,7 @@ private fun StandardDialog(difficulty: Int, onKeep: () -> Unit, onConfirm: () ->
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Question(
+internal fun Question(
     tag: String,
     title: String,
     message: String,
