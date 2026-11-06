@@ -133,6 +133,66 @@ class StarterRepositoryTest {
         assertNull(f.repo.starterOf(o.copy(sessionJson = Codec.encodeSession(SessionData(starterStartUtc = f.t0)))))
     }
 
+    // --- rows written by older versions, and both sides' fields together ----------------------------------------------
+
+    /** A session as a version before the starter's start and the pinned voice wrote it. */
+    private val oldSession = """{"recoveryOffers":0,"checkInsAsked":0,"phase":null,"chainStep":0,"starterDeadlineUtc":null,""" +
+        """"planEndUtc":null,"planEndElapsed":null,"bootId":null,"ringStartUtc":null,"ringCycles":1,"ringCycleMs":0,"ringGapMs":0,""" +
+        """"handshakeDifficulty":3,"handshakePersonality":"MINIMALIST","handshakeChainJson":null,"alertIntensity":4,"voiceTrimDb":1.5}"""
+
+    private suspend fun withSession(o: OccurrenceRow, json: String): OccurrenceRow {
+        f.db.occurrences().compareAndSet(o.id, o.stateVersion, o.state, json, o.skipReason, o.missReason, o.armMode, o.ringMode)
+        return f.repo.get(o.id)!!
+    }
+
+    @Test
+    fun `an old session decodes with what it pinned, and no starter or voice of its own`() = run {
+        val session = Codec.decodeSession(oldSession)
+        assertEquals("what it pinned is not lost to a failed read", 3, session.handshakeDifficulty)
+        assertEquals("MINIMALIST", session.handshakePersonality)
+        assertEquals(4, session.alertIntensity)
+        assertEquals(1.5f, session.voiceTrimDb!!, 0f)
+        assertNull(session.starterStartUtc)
+        assertNull(session.starterDeadlineUtc)
+        assertNull(session.voiceLanguageTag)
+        assertNull(session.voicePitch)
+        assertNull(session.voiceRate)
+        assertNull(session.voiceFemale)
+    }
+
+    @Test
+    fun `an old row can take the starter, and keeps what it pinned without being given a voice`() = run {
+        val o = withSession(guided(f.mission()), oldSession)
+        assertNull(f.repo.starterOf(o))
+
+        assertTrue(apply(o, OccurrenceCommand.BeginStarter) is ApplyResult.Applied)
+
+        val row = f.repo.get(o.id)!!
+        assertEquals(StarterWindow(f.t0, f.t0 + 5 * minute), f.repo.starterOf(row))
+        val session = Codec.decodeSession(row.sessionJson)
+        assertEquals(3, session.handshakeDifficulty)
+        assertEquals(1.5f, session.voiceTrimDb!!, 0f)
+        assertNull("not pinned then, not pinned now: it follows the profile", session.voicePitch)
+    }
+
+    @Test
+    fun `the pinned voice and the starter are kept side by side through the commands that follow`() = run {
+        val o = guided(f.mission())
+        val pinned = Codec.decodeSession(o.sessionJson).copy(voiceLanguageTag = "en-US", voicePitch = 0.86f, voiceRate = 0.9f, voiceFemale = false)
+        val row = withSession(o, Codec.encodeSession(pinned))
+
+        apply(row, OccurrenceCommand.BeginStarter)
+        apply(row, OccurrenceCommand.CheckInDue(0))
+
+        val session = Codec.decodeSession(f.repo.get(o.id)!!.sessionJson)
+        assertEquals(f.t0 + 5 * minute, session.starterDeadlineUtc)
+        assertEquals(f.t0, session.starterStartUtc)
+        assertEquals("en-US", session.voiceLanguageTag)
+        assertEquals(0.86f, session.voicePitch!!, 0f)
+        assertEquals(0.9f, session.voiceRate!!, 0f)
+        assertEquals(false, session.voiceFemale)
+    }
+
     // --- acknowledged without a start, N times -------------------------------------------------------------------
 
     private suspend fun count(m: MissionRow, before: Long = Long.MAX_VALUE) = f.repo.acknowledgedWithoutStart(m.id, before)

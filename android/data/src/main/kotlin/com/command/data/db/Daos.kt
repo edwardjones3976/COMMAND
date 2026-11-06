@@ -305,6 +305,13 @@ interface ProfileDao {
     @Query("SELECT * FROM execution_profiles ORDER BY is_builtin DESC, name")
     suspend fun all(): List<ProfileRow>
 
+    /** Only the ids, so that which profile a ring has does not depend on every other row being readable. */
+    @Query("SELECT id FROM execution_profiles")
+    suspend fun ids(): List<String>
+
+    @Query("SELECT id FROM execution_profiles")
+    fun observeIds(): Flow<List<String>>
+
     /** In the order a person thinks of them: the built-in ones first, by how hard a handshake they ask for and then by name, then the rest in the same order. */
     @Query("SELECT * FROM execution_profiles ORDER BY is_builtin DESC, handshake_difficulty, name")
     fun observeAll(): kotlinx.coroutines.flow.Flow<List<ProfileRow>>
@@ -315,6 +322,22 @@ interface ProfileDao {
      */
     @Query("UPDATE execution_profiles SET handshake_chain_json = :json WHERE id = :id")
     suspend fun setChainJson(id: String, json: String?): Int
+
+    /** Sets who a profile speaks as, both columns in one statement: there is no moment at which it has the words of one director and the voice of another. */
+    @Query("UPDATE execution_profiles SET personality = :personality, voice_pack_id = :packId WHERE id = :id")
+    suspend fun setDirector(id: String, personality: Personality, packId: String): Int
+}
+
+@Dao
+interface ActivityProfileDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(row: ActivityProfileRow)
+
+    @Query("SELECT * FROM activity_profiles")
+    suspend fun all(): List<ActivityProfileRow>
+
+    @Query("SELECT * FROM activity_profiles")
+    fun observeAll(): Flow<List<ActivityProfileRow>>
 }
 
 @Dao
@@ -333,6 +356,9 @@ interface VoicePackDao {
 
     @Query("SELECT * FROM voice_packs ORDER BY name")
     suspend fun all(): List<VoicePackRow>
+
+    @Query("SELECT * FROM voice_packs WHERE id = :id")
+    suspend fun get(id: String): VoicePackRow?
 }
 
 @Dao

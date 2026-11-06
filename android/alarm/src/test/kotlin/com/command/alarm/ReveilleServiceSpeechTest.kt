@@ -18,10 +18,20 @@ import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.EventType
 import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.OccurrenceState
+import com.command.domain.voice.Line
+import com.command.domain.voice.LoudnessMeter
 import com.command.domain.voice.RoutePolicy
 import com.command.domain.voice.SpeakResult
+import com.command.domain.voice.SpeechLevel
 import com.command.domain.voice.SpeechProblem
 import com.command.domain.voice.SpeechUsage
+import com.command.domain.voice.SpeechVoice
+import com.command.voice.LocalTtsSpeaker
+import com.command.voice.PcmPlayer
+import com.command.voice.SpeechSynthesizer
+import com.command.voice.SpokenAudio
+import com.command.voice.Synthesis
+import kotlin.math.sin
 import com.command.testing.android.FakeAlarmModule
 import com.command.testing.android.FakeAudioRoutes
 import com.command.testing.android.FakeRingOutput
@@ -107,6 +117,89 @@ class ReveilleServiceSpeechTest {
         startService(fired)
         awaitUntil(message = "spoken") { speaker.levels.isNotEmpty() }
         assertEquals(pinned, speaker.levels.single())
+    }
+
+    /** What the ring asks of the speaker, with the voice of [profileId] as it is seeded. */
+    private fun ringOf(profileId: String): Pair<SpeechVoice, SpeechLevel> {
+        speaker.voices.clear()
+        speaker.levels.clear()
+        val o = runBlocking {
+            val mission = testMission(title = "Write the report").copy(profileId = profileId)
+            db.missions().insert(mission)
+            val occurrence = repo.createOccurrence(mission.id, FakeAlarmModule.T0 + 60_000, "UTC").occurrence
+            repo.apply(occurrence.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+            repo.get(occurrence.id)!!
+        }
+        startService(o)
+        awaitUntil(message = "spoken") { speaker.voices.isNotEmpty() }
+        return speaker.voices.single() to speaker.levels.single()
+    }
+
+    /** The real speaker as the ring would use it, on an engine that hands back the same audio and a player that keeps what it is given. */
+    private fun rendered(voice: SpeechVoice, level: SpeechLevel): Pair<SpeechVoice, ShortArray> = runBlocking {
+        val rate = 24_000
+        val audio = SpokenAudio(ShortArray(rate * 3) { i -> (if ((i / (rate / 4)) % 2 == 0) sin(i * 2 * Math.PI * 440 / rate) * 2_000 else 0.0).toInt().toShort() }, rate)
+        var asked: SpeechVoice? = null
+        var played: ShortArray? = null
+        val synth = object : SpeechSynthesizer {
+            override suspend fun synthesize(text: String, voice: SpeechVoice): Synthesis {
+                asked = voice
+                return Synthesis.Audio(audio)
+            }
+
+            override fun shutdown() = Unit
+        }
+        val player = object : PcmPlayer {
+            override suspend fun play(pcm: ShortArray, sampleRate: Int, usage: SpeechUsage, route: RoutePolicy): Long {
+                played = pcm
+                return 1_000
+            }
+
+            override fun stop() = Unit
+        }
+        LocalTtsSpeaker(synth, player).speak(Line.of("Time to start."), SpeechUsage.ALARM, level = level, voice = voice)
+        asked!! to played!!
+    }
+
+    @Test
+    fun `two packs give different speech parameters on the ring path, from the seeded database to the engine`() {
+        val (stoneVoice, stoneLevel) = ringOf("builtin_reveille_max")
+        val (eleanorVoice, eleanorLevel) = ringOf("builtin_steady")
+
+        assertEquals(SpeechVoice("en-US", 0.86f, 1.28f, female = false), stoneVoice)
+        assertEquals(SpeechVoice("en-US", 1.01f, 1.04f, female = true), eleanorVoice)
+        assertEquals(4.5f, stoneLevel.trimDb, 0f)
+        assertEquals(2.5f, eleanorLevel.trimDb, 0f)
+        assertEquals("and the engine is asked for each", stoneVoice, rendered(stoneVoice, stoneLevel).first)
+        assertEquals(eleanorVoice, rendered(eleanorVoice, eleanorLevel).first)
+    }
+
+    @Test
+    fun `the seeded trim changes what the ring renders, at the same intensity, and only ever upward`() {
+        fun lufs(pcm: ShortArray) = LoudnessMeter.integratedLufs(FloatArray(pcm.size) { pcm[it] / 32768f }, 24_000)
+        fun gain(profile: String): Double {
+            val (voice, level) = ringOf(profile)
+            assertTrue("a pack with a trim", level.trimDb > 0f)
+            return lufs(rendered(voice, level).second) - lufs(rendered(voice, level.copy(trimDb = 0f)).second)
+        }
+        // At intensity 2 there is room for all of it. At intensity 5 this dense signal is near what the limiters allow (amendment 28): less, never nothing.
+        assertEquals(2.5, gain("builtin_steady"), 0.5)
+        assertTrue(gain("builtin_reveille_max") > 0.5)
+    }
+
+    @Test
+    fun `the line is asked for in the voice the ring was fired with, whatever the profile says by then`() {
+        val o = armed()
+        runBlocking { repo.apply(o.id, OccurrenceCommand.Fire, EventSource.SYSTEM) }
+        val fired = runBlocking { repo.get(o.id)!! }
+        val pinned = runBlocking { repo.speechVoiceOf(fired) }
+        assertEquals("the seeded pack of the active profile", 1.01f, pinned.pitch, 0f)
+        runBlocking {
+            for (profile in db.profiles().all()) db.profiles().upsert(profile.copy(voicePackId = "pack_major_stone"))
+        }
+        startService(fired)
+        awaitUntil(message = "spoken") { speaker.voices.isNotEmpty() }
+        assertEquals(pinned, speaker.voices.single())
     }
 
     @Test

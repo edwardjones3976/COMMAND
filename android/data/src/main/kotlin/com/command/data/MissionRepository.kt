@@ -61,10 +61,14 @@ data class MissionDraft(
     val firstAction: String,
     val flexibility: Flexibility,
     val schedule: ScheduleDraft,
-    val category: String = "General",
+    val category: String = DEFAULT_CATEGORY,
     val starterMinutes: Int = 5,
     val profileId: String? = null,
-)
+) {
+    companion object {
+        const val DEFAULT_CATEGORY = "General"
+    }
+}
 
 /** The parts of a mission that shape a ring, for a test alarm: what it says and how firm it is. */
 data class TestRingSpec(
@@ -73,13 +77,18 @@ data class TestRingSpec(
     val flexibility: Flexibility = Flexibility.FLEXIBLE,
     val starterMinutes: Int = 5,
     val profileId: String? = null,
+    /** The category typed so far, so that a test rings with the profile the saved mission would. */
+    val category: String = MissionDraft.DEFAULT_CATEGORY,
 )
 
 /** What the schedule shows: what is still to come, soonest first, and what happened recently, newest first. */
 data class ScheduleSnapshot(val upcoming: List<ScheduleRow>, val recent: List<ScheduleRow>)
 
-/** [READ_ONLY]: the mission is a copy of a calendar event, which only the calendar can change. */
-enum class DraftProblem { TITLE_EMPTY, FIRST_ACTION_EMPTY, IN_THE_PAST, NO_DAYS_SELECTED, READ_ONLY }
+/**
+ * [READ_ONLY]: the mission is a copy of a calendar event, which only the calendar can change. [CATEGORY_RESERVED]: the category is the word that
+ * marks the hidden mission behind a test alarm, whose alarms stay in the history after it is gone and which a pause lets through.
+ */
+enum class DraftProblem { TITLE_EMPTY, FIRST_ACTION_EMPTY, IN_THE_PAST, NO_DAYS_SELECTED, READ_ONLY, CATEGORY_RESERVED }
 
 sealed interface SaveResult {
     /** The mission is stored; [scheduled] alarms exist for its coming week (a far-off one-off counts as one). */
@@ -105,6 +114,7 @@ class MissionRepository @Inject constructor(
     private val pauseEffects: PauseEffects,
 ) {
     private val generator = OccurrenceGenerator()
+    private val profiles = ProfileResolver(db)
     private val writes = Mutex()
 
     // --- reads --------------------------------------------------------------------------------------------------
@@ -234,6 +244,7 @@ class MissionRepository @Inject constructor(
         // The hidden mission carries what the test says, so only one test ring may be outstanding: a second replaces the first.
         val outstanding = unfiredIds(TEST_MISSION_ID, emptySet(), now, futureOnly = false, includeDelayed = true)
         if (outstanding.isNotEmpty()) occurrences.discardUnfired(outstanding, EventSource.USER)
+        val profileId = profiles.resolveTyped(spec.title, categoryOf(spec.category), spec.profileId)
         val row = MissionRow(
             id = TEST_MISSION_ID,
             title = spec.title.trim().ifEmpty { DEFAULT_TEST_TITLE },
@@ -242,7 +253,7 @@ class MissionRepository @Inject constructor(
             rigidWeekdays = null, source = MissionSource.MANUAL, startKind = StartKind.ONE_OFF, startAtUtc = at, dtstartLocal = null,
             rrule = null, zoneMode = ZoneMode.DEVICE, zoneId = null, durationMin = 5,
             starterMinutes = spec.starterMinutes.coerceIn(1, MAX_STARTER_MINUTES),
-            profileId = spec.profileId, lockPolicy = null, launcherPackage = null, firstActionVariantsJson = "[]",
+            profileId = profileId, lockPolicy = null, launcherPackage = null, firstActionVariantsJson = "[]",
             enabled = false, deletedAt = now, syncRev = 0, syncDirty = false,
         )
         db.withTransaction { if (db.missions().get(TEST_MISSION_ID) == null) db.missions().insert(row) else db.missions().update(row) }
@@ -413,10 +424,14 @@ class MissionRepository @Inject constructor(
 
     // --- helpers ------------------------------------------------------------------------------------------------
 
+    /** The category as it is stored: what was typed, trimmed, or the default when that leaves nothing. */
+    private fun categoryOf(typed: String) = typed.trim().ifEmpty { MissionDraft.DEFAULT_CATEGORY }
+
     private fun validate(d: MissionDraft): Set<DraftProblem> {
         val out = LinkedHashSet<DraftProblem>()
         if (d.title.isBlank()) out += DraftProblem.TITLE_EMPTY
         if (d.firstAction.isBlank()) out += DraftProblem.FIRST_ACTION_EMPTY
+        if (d.category.trim() == TEST_CATEGORY) out += DraftProblem.CATEGORY_RESERVED
         when (val s = d.schedule) {
             is ScheduleDraft.Once ->
                 if (s.at.atZone(clock.zone()).toInstant().toEpochMilli() < clock.nowMs() + MIN_LEAD_MS) out += DraftProblem.IN_THE_PAST
@@ -444,7 +459,7 @@ class MissionRepository @Inject constructor(
         }
         return MissionRow(
             id = existing?.id ?: UUID.randomUUID().toString(), title = d.title.trim(), firstAction = d.firstAction.trim(),
-            category = d.category, priority = existing?.priority ?: 2, flexibility = d.flexibility, rigidWeekdays = existing?.rigidWeekdays,
+            category = categoryOf(d.category), priority = existing?.priority ?: 2, flexibility = d.flexibility, rigidWeekdays = existing?.rigidWeekdays,
             source = MissionSource.MANUAL, startKind = kind, startAtUtc = startAt, dtstartLocal = dtstart, rrule = rrule,
             zoneMode = ZoneMode.DEVICE, zoneId = null, durationMin = existing?.durationMin ?: 30,
             starterMinutes = d.starterMinutes.coerceIn(1, MAX_STARTER_MINUTES), profileId = d.profileId,

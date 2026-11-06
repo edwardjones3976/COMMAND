@@ -80,12 +80,15 @@ object EditorTags {
     const val TIME = "editor_time"
     const val FLEXIBLE = "editor_flexible"
     const val FIXED = "editor_fixed"
+    const val CATEGORY = "editor_category"
+    const val PROFILE_AUTO = "editor_profile_auto"
     const val SAVE = "editor_save"
     const val TEST = "editor_test"
     const val DELETE = "editor_delete"
     const val DELETE_CONFIRM = "editor_delete_confirm"
     fun day(day: DayOfWeek) = "editor_day_${day.name}"
     fun starter(minutes: Int) = "editor_starter_$minutes"
+    fun profile(id: String) = "editor_profile_$id"
 }
 
 /** Everything the editor can ask for, so the screen can be tested without a view model. */
@@ -99,6 +102,8 @@ class EditorActions(
     val onTime: (LocalTime) -> Unit,
     val onDay: (DayOfWeek) -> Unit,
     val onStarterMinutes: (Int) -> Unit,
+    val onCategory: (String) -> Unit,
+    val onProfile: (String?) -> Unit,
     val onSave: () -> Unit,
     val onTest: () -> Unit,
     val onDelete: () -> Unit,
@@ -131,6 +136,8 @@ fun MissionEditorRoute(onDone: () -> Unit, viewModel: MissionEditorViewModel = h
             onTime = viewModel::onTime,
             onDay = viewModel::onDay,
             onStarterMinutes = viewModel::onStarterMinutes,
+            onCategory = viewModel::onCategory,
+            onProfile = viewModel::onProfile,
             onSave = viewModel::save,
             onTest = viewModel::testRing,
             onDelete = viewModel::delete,
@@ -258,6 +265,37 @@ fun MissionEditorScreen(state: EditorState, actions: EditorActions, snackbar: Sn
                         )
                     }
                 }
+
+                SectionTitle(stringResource(R.string.editor_section_profile))
+                OutlinedTextField(
+                    value = state.category,
+                    onValueChange = actions.onCategory,
+                    modifier = Modifier.fillMaxWidth().testTag(EditorTags.CATEGORY),
+                    label = { Text(stringResource(R.string.editor_field_category)) },
+                    isError = DraftProblem.CATEGORY_RESERVED in state.problems,
+                    supportingText = {
+                        Text(stringResource(if (DraftProblem.CATEGORY_RESERVED in state.problems) R.string.editor_error_category else R.string.editor_field_category_hint))
+                    },
+                    singleLine = true,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // A name no profile has rings as if it were not there, so that is what is shown.
+                    FilterChip(
+                        selected = state.profiles.none { it.id == state.profileId },
+                        onClick = { actions.onProfile(null) },
+                        label = { Text(stringResource(R.string.editor_profile_auto)) },
+                        modifier = Modifier.testTag(EditorTags.PROFILE_AUTO),
+                    )
+                    for (p in state.profiles) {
+                        FilterChip(
+                            selected = p.id == state.profileId,
+                            onClick = { actions.onProfile(p.id) },
+                            label = { Text(p.name) },
+                            modifier = Modifier.testTag(EditorTags.profile(p.id)),
+                        )
+                    }
+                }
+                Text(stringResource(R.string.editor_profile_hint), style = MaterialTheme.typography.bodyLarge)
 
                 Button(onClick = actions.onSave, enabled = !state.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(EditorTags.SAVE)) {
                     Text(stringResource(R.string.editor_save), style = MaterialTheme.typography.labelLarge)

@@ -1,7 +1,9 @@
 package com.command.editor
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -35,6 +37,8 @@ class MissionEditorScreenTest {
         val repeats = ArrayList<RepeatKind>()
         val days = ArrayList<DayOfWeek>()
         val minutes = ArrayList<Int>()
+        val categories = ArrayList<String>()
+        val profiles = ArrayList<String?>()
         var saved = 0
         var tested = 0
         var deleted = 0
@@ -49,6 +53,8 @@ class MissionEditorScreenTest {
             onTime = {},
             onDay = { days += it },
             onStarterMinutes = { minutes += it },
+            onCategory = { categories += it },
+            onProfile = { profiles += it },
             onSave = { saved++ },
             onTest = { tested++ },
             onDelete = { deleted++ },
@@ -65,9 +71,14 @@ class MissionEditorScreenTest {
         editing: Boolean = false,
         loading: Boolean = false,
         notFound: Boolean = false,
+        profileId: String? = null,
+        category: String = "General",
+        profiles: List<ProfileChoice> = listOf(ProfileChoice("builtin_nudge", "Nudge"), ProfileChoice("builtin_command", "Command")),
+        imported: Boolean = false,
     ) = EditorState(
         loading = loading, notFound = notFound, editing = editing, title = title, firstAction = firstAction, flexibility = flexibility,
         repeat = repeat, date = LocalDate.of(2026, 11, 2), time = LocalTime.of(10, 0), days = days, problems = problems,
+        profileId = profileId, category = category, profiles = profiles, imported = imported,
     )
 
     private fun show(s: EditorState, r: Recorder = Recorder()) {
@@ -93,6 +104,41 @@ class MissionEditorScreenTest {
         // The screen holds no text itself (the view model does), so the field may report its reset to empty afterwards.
         assertEquals("Run", r.titles.first())
         assertEquals("Put on shoes", r.actions.first())
+    }
+
+    @Test
+    fun `the profile picker offers automatic and every profile, shows the one in force and reports a choice`() {
+        val r = Recorder()
+        show(state(profileId = "builtin_command"), r)
+        compose.onNodeWithTag(EditorTags.profile("builtin_command")).performScrollTo().assertIsSelected()
+        compose.onNodeWithTag(EditorTags.PROFILE_AUTO).performScrollTo().assertIsNotSelected()
+        compose.onNodeWithTag(EditorTags.profile("builtin_nudge")).performScrollTo().assertIsNotSelected().performClick()
+        compose.onNodeWithTag(EditorTags.PROFILE_AUTO).performScrollTo().performClick()
+        assertEquals(listOf("builtin_nudge", null), r.profiles)
+    }
+
+    @Test
+    fun `a mission with no profile, or one naming a profile that is gone, shows automatic, which is what it will ring with`() {
+        show(state(profileId = "builtin_ghost"))
+        compose.onNodeWithTag(EditorTags.PROFILE_AUTO).performScrollTo().assertIsSelected()
+    }
+
+    @Test
+    fun `the category field shows what is stored and reports what is typed, and the word kept for test alarms is explained`() {
+        val r = Recorder()
+        show(state(category = "Work", problems = setOf(DraftProblem.CATEGORY_RESERVED)), r)
+        compose.onNodeWithTag(EditorTags.CATEGORY).performScrollTo().assertIsDisplayed().assertTextContains("Work")
+        compose.onNodeWithText("That word is kept for test alarms. Choose another.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag(EditorTags.CATEGORY).performTextInput("x")
+        assertEquals("xWork", r.categories.first())
+    }
+
+    @Test
+    fun `a calendar copy offers neither, because only the calendar can change it`() {
+        show(state(imported = true))
+        compose.onNodeWithTag(EditorTags.IMPORTED).assertIsDisplayed()
+        compose.onNodeWithTag(EditorTags.CATEGORY).assertDoesNotExist()
+        compose.onNodeWithTag(EditorTags.PROFILE_AUTO).assertDoesNotExist()
     }
 
     @Test

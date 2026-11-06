@@ -41,6 +41,14 @@ data class SessionData(
      */
     val alertIntensity: Int? = null,
     val voiceTrimDb: Float? = null,
+    /**
+     * Who says the ring's line: the voice of the pack it was fired with, pinned like the loudness. A null [voicePitch] means it was fired before
+     * this was pinned, and it follows the profile; a ring fired with no pack has the phone's own voice pinned, and a null [voiceLanguageTag].
+     */
+    val voiceLanguageTag: String? = null,
+    val voicePitch: Float? = null,
+    val voiceRate: Float? = null,
+    val voiceFemale: Boolean? = null,
 )
 
 internal object Codec {

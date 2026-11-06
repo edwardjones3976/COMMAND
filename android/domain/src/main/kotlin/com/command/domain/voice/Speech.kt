@@ -31,6 +31,24 @@ data class SpeechLevel(val alertIntensity: Int, val trimDb: Float = 0f) {
     }
 }
 
+/**
+ * Who says a line with the phone's own voice: what a voice pack asks of the engine. [languageTag] picks the language and the accent (null: the
+ * phone's own); [pitch] and [rate] are the pack's, 1 being the engine's normal; [female] says which kind of voice to prefer among those
+ * installed (null: no preference). Nothing here can make a voice that asks a server acceptable, and when the phone lacks the voice asked for
+ * it uses another that works on the phone, if it has one.
+ */
+data class SpeechVoice(
+    val languageTag: String? = null,
+    val pitch: Float = 1f,
+    val rate: Float = 1f,
+    val female: Boolean? = null,
+) {
+    companion object {
+        /** No pack: the phone's own voice, as the engine sets it up. */
+        val DEFAULT = SpeechVoice()
+    }
+}
+
 /** Why nothing was spoken. Whoever asked shows the words on the screen instead, and the audit log records the reason. */
 enum class SpeechProblem {
     /** No speech engine on the phone, or it refused to start. */
@@ -87,6 +105,7 @@ interface Speaker {
         usage: SpeechUsage,
         route: RoutePolicy = RoutePolicy.SPEAKER_AND_HEADSET,
         level: SpeechLevel = SpeechLevel.LOUDEST,
+        voice: SpeechVoice = SpeechVoice.DEFAULT,
         onAudible: () -> Unit = {},
     ): SpeakResult
 

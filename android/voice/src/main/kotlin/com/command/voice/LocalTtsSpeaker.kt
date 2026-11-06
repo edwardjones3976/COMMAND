@@ -7,6 +7,7 @@ import com.command.domain.voice.Speaker
 import com.command.domain.voice.SpeechLevel
 import com.command.domain.voice.SpeechProblem
 import com.command.domain.voice.SpeechUsage
+import com.command.domain.voice.SpeechVoice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -45,12 +46,12 @@ class LocalTtsSpeaker(
     /** Counts the lines asked for and the stops, so that each line can tell whether it is still the current one. */
     private val generation = AtomicInteger()
 
-    override suspend fun speak(line: Line, usage: SpeechUsage, route: RoutePolicy, level: SpeechLevel, onAudible: () -> Unit): SpeakResult {
+    override suspend fun speak(line: Line, usage: SpeechUsage, route: RoutePolicy, level: SpeechLevel, voice: SpeechVoice, onAudible: () -> Unit): SpeakResult {
         val mine = generation.incrementAndGet()
         fun superseded() = generation.get() != mine
         if (line.isEmpty) return SpeakResult.Spoken(0)
         val made = try {
-            synthesizer.synthesize(line.text)
+            synthesizer.synthesize(line.text, voice)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -99,7 +100,7 @@ internal fun profileFor(usage: SpeechUsage, level: SpeechLevel): VoiceMastering.
 
 /** For a phone with no speech engine at all: says nothing, and says why. */
 class SilentSpeaker : Speaker {
-    override suspend fun speak(line: Line, usage: SpeechUsage, route: RoutePolicy, level: SpeechLevel, onAudible: () -> Unit): SpeakResult =
+    override suspend fun speak(line: Line, usage: SpeechUsage, route: RoutePolicy, level: SpeechLevel, voice: SpeechVoice, onAudible: () -> Unit): SpeakResult =
         SpeakResult.Unavailable(SpeechProblem.NO_ENGINE)
 
     override fun stop() = Unit

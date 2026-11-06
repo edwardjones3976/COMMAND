@@ -1,7 +1,9 @@
 package com.command.data
 
+import androidx.room.withTransaction
 import com.command.data.db.CommandDb
 import com.command.data.db.ProfileRow
+import com.command.data.db.SettingRow
 import com.command.domain.dials.ChainIssue
 import com.command.domain.dials.ChainSpec
 import com.command.domain.dials.DialEffects
@@ -10,7 +12,6 @@ import com.command.domain.dials.PresetOrigin
 import com.command.domain.dials.issues
 import com.command.domain.model.SettingKeys
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -40,37 +41,31 @@ sealed interface SaveChainResult {
     data object NotFound : SaveChainResult
 }
 
+/** What choosing a director did. */
+sealed interface DirectorResult {
+    data class Chosen(val profileId: String, val personality: Personality, val voicePackId: String) : DirectorResult
+    data object NoSuchPack : DirectorResult
+    data object NoProfile : DirectorResult
+}
+
 /**
  * The id that the active-profile setting names. The setting is stored as JSON text, so the id comes with its quotes, and one with nothing in
- * it (a pair of quotes with nothing between them, or no text at all) names nothing. The ring ([OccurrenceRepository]) and the screens
- * ([ProfileRepository.observeInUse]) both read it here, so that the profile an alarm is fired with and the profile that is said to be in use
- * cannot be told apart by how each one reads the setting.
+ * it (a pair of quotes with nothing between them, or no text at all) names nothing. [ProfileResolver] reads it here, for the ring and the
+ * screens alike.
  */
 internal fun activeProfileIdOf(raw: String?): String? = raw?.trim('"')?.takeIf { it.isNotEmpty() }
 
-/** The profiles' handshake chains: read for the screens, saved by the editor. Everything else about a profile belongs to the profile screens of M10b. */
+/** The profiles as the screens see them: their handshake chains, who is in use, who speaks for them and which is active. */
 @Singleton
 class ProfileRepository @Inject constructor(private val db: CommandDb) {
+    private val resolver = ProfileResolver(db)
 
     fun observe(): Flow<List<ProfileHandshake>> = db.profiles().observeAll().map { rows -> rows.map(::handshakeOf) }
 
     suspend fun get(id: String): ProfileHandshake? = db.profiles().get(id)?.let(::handshakeOf)
 
-    /**
-     * The ids of the profiles that alarms are fired with: the active profile (every mission that names none, and so every new one, has it)
-     * and any that a mission names (a mission that was removed names nothing; the hidden mission behind a test alarm is removed too, and
-     * carries the profile of the mission the test was started from, which that mission names as well). Until the profile screens of M10b
-     * let a person choose, that is the active one only; editing another profile reaches no alarm, and the screens say so. It follows the
-     * database: it is read again whenever the setting or a mission changes. It can hold an id that no profile has (a mission that names one
-     * that is gone rings with the active profile), which no list shows.
-     */
-    fun observeInUse(): Flow<Set<String>> =
-        combine(db.settings().observe(SettingKeys.ACTIVE_PROFILE_ID), db.missions().observeActive()) { active, missions ->
-            buildSet {
-                activeProfileIdOf(active)?.let { add(it) }
-                missions.mapNotNullTo(this) { it.profileId }
-            }
-        }
+    /** The ids of the profiles that alarms are fired with (see [ProfileResolver.observeInUse]). Editing any other reaches no alarm, and the screens say so. */
+    fun observeInUse(): Flow<Set<String>> = resolver.observeInUse()
 
     /** Whether alarms are fired with the profile [id]: the answer now, and again whenever it changes (see [observeInUse]). */
     fun observeInUse(id: String): Flow<Boolean> = observeInUse().map { id in it }.distinctUntilChanged()
@@ -80,6 +75,24 @@ class ProfileRepository @Inject constructor(private val db: CommandDb) {
         val issues = spec.issues()
         if (issues.isNotEmpty()) return SaveChainResult.Invalid(issues)
         return if (db.profiles().setChainJson(id, ChainJson.encode(spec)) > 0) SaveChainResult.Saved else SaveChainResult.NotFound
+    }
+
+    /**
+     * Makes the director of pack [packId] the one who speaks for a profile ([profileId], or the active one when it is null): the pack's
+     * personality and the pack, together. Nothing changes when there is no such pack or no such profile.
+     */
+    suspend fun chooseDirector(packId: String, profileId: String? = null): DirectorResult = db.withTransaction {
+        val pack = db.voicePacks().get(packId) ?: return@withTransaction DirectorResult.NoSuchPack
+        val target = profileId ?: activeProfileIdOf(db.settings().get(SettingKeys.ACTIVE_PROFILE_ID)) ?: return@withTransaction DirectorResult.NoProfile
+        if (db.profiles().setDirector(target, pack.defaultPersonality, pack.id) == 0) return@withTransaction DirectorResult.NoProfile
+        DirectorResult.Chosen(target, pack.defaultPersonality, pack.id)
+    }
+
+    /** Makes [id] the active profile, if there is one by that name. The setting is one row, so there is never more than one active profile. */
+    suspend fun activate(id: String): Boolean = db.withTransaction {
+        if (db.profiles().get(id) == null) return@withTransaction false
+        db.settings().put(SettingRow(SettingKeys.ACTIVE_PROFILE_ID, "\"$id\""))
+        true
     }
 
     /** Goes back to the default chain of the profile's difficulty. True if the profile exists. */

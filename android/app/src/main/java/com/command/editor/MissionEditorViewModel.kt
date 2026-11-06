@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.command.data.DraftProblem
 import com.command.data.MissionDraft
 import com.command.data.MissionRepository
+import com.command.data.ProfileRepository
 import com.command.data.SaveResult
 import com.command.data.ScheduleDraft
 import com.command.data.TestRingSpec
@@ -32,6 +33,9 @@ enum class RepeatKind { ONCE, DAILY, WEEKLY }
 
 enum class EditorMessage { TEST_STARTED }
 
+/** A profile the mission can name. */
+data class ProfileChoice(val id: String, val name: String)
+
 /** Everything the editor shows. Text is held as typed, so a rotation or a validation error never loses it. */
 data class EditorState(
     val loading: Boolean,
@@ -45,9 +49,10 @@ data class EditorState(
     val time: LocalTime,
     val days: Set<DayOfWeek> = emptySet(),
     val starterMinutes: Int = 5,
-    /** Kept from the stored mission: the editor does not show them, and a save must not reset them. */
-    val category: String = "General",
+    val category: String = MissionDraft.DEFAULT_CATEGORY,
+    /** The profile this mission names; null leaves it to a profile rule, or the active profile. */
     val profileId: String? = null,
+    val profiles: List<ProfileChoice> = emptyList(),
     val problems: Set<DraftProblem> = emptySet(),
     val busy: Boolean = false,
     val finished: Boolean = false,
@@ -63,6 +68,7 @@ data class EditorState(
 class MissionEditorViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val missions: MissionRepository,
+    private val profiles: ProfileRepository,
     private val clock: Clock,
 ) : ViewModel() {
 
@@ -72,6 +78,9 @@ class MissionEditorViewModel @Inject constructor(
     val state: StateFlow<EditorState> = _state.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            profiles.observe().collect { all -> _state.update { s -> s.copy(profiles = all.map { ProfileChoice(it.id, it.name) }) } }
+        }
         if (missionId == null) {
             _state.update { it.copy(loading = false) }
         } else {
@@ -131,6 +140,10 @@ class MissionEditorViewModel @Inject constructor(
 
     fun onStarterMinutes(value: Int) = _state.update { it.copy(starterMinutes = value) }
 
+    fun onCategory(value: String) = _state.update { it.copy(category = value, problems = it.problems - DraftProblem.CATEGORY_RESERVED) }
+
+    fun onProfile(id: String?) = _state.update { it.copy(profileId = id) }
+
     // --- actions -------------------------------------------------------------------------------------------------
 
     fun save() {
@@ -150,7 +163,7 @@ class MissionEditorViewModel @Inject constructor(
         val s = _state.value
         if (s.busy || s.loading) return
         viewModelScope.launch {
-            missions.testRing(TestRingSpec(s.title, s.firstAction, s.flexibility, s.starterMinutes, s.profileId))
+            missions.testRing(TestRingSpec(s.title, s.firstAction, s.flexibility, s.starterMinutes, s.profileId, s.category))
             _state.update { it.copy(message = EditorMessage.TEST_STARTED) }
         }
     }
