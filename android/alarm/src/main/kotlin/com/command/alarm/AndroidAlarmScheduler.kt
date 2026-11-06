@@ -49,8 +49,7 @@ class AndroidAlarmScheduler @Inject constructor(
      * The platform refuses an app that holds as many alarms as it allows (an IllegalStateException, not documented as part of the call). It counts
      * before it replaces, so an alarm being set again would be refused for the room it already takes: that one lets go of its own place and
      * tries once more. An alarm refused for good takes its PendingIntent with it, so that [isArmed] does not say it is there.
-     */
-    /**
+     *
      * One at a time: the calendar's sync and a reconcile can arm the same alarm together, and they share one PendingIntent, so one that was refused
      * and cancels it would take away what the other has just set.
      */

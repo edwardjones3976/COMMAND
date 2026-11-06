@@ -117,6 +117,8 @@ data class MissionBrief(val title: String, val firstAction: String, val starterM
 /** What a ring asks of the person: the chain of challenges that the occurrence's profile calls for, and the personality whose words they are in. */
 data class HandshakePlan(val chain: ChainSpec, val personality: Personality)
 
+private val FOLLOWING_UP = listOf(OccurrenceState.GUIDED_START, OccurrenceState.STARTED_SELF_REPORTED, OccurrenceState.WORKING_SELF_REPORTED)
+
 /**
  * The only writer of `occurrences.state`.
  *
@@ -480,6 +482,15 @@ class OccurrenceRepository @Inject constructor(
                     starterStartUtc = r.snapshot.starter?.startUtc,
                     starterDeadlineUtc = r.snapshot.starter?.deadlineUtc,
                 )
+                // The alarm of a follow-up that has come due has done its work; what the effects ask for last is what should be set now.
+                if (command is OccurrenceCommand.CheckInDue) newSession = newSession.copy(pendingCheckInIndex = null, pendingCheckInAtUtc = null)
+                for (effect in r.effects) {
+                    when (effect) {
+                        Effect.CancelCheckIns -> newSession = newSession.copy(pendingCheckInIndex = null, pendingCheckInAtUtc = null)
+                        is Effect.ScheduleCheckIn -> newSession = newSession.copy(pendingCheckInIndex = effect.index, pendingCheckInAtUtc = effect.atUtcMs)
+                        else -> Unit
+                    }
+                }
                 r.effects.filterIsInstance<Effect.ArmCycleEnd>().firstOrNull()?.let {
                     val ring = DialEffects.alertPlan(dials.alertIntensity)
                     val profile = profiles.resolve(mission)
@@ -653,6 +664,24 @@ class OccurrenceRepository @Inject constructor(
                     arm(row, AlarmRequest(row.id, row.requestCode, AlarmKind.CYCLE_END, atUtc), EventSource.SYSTEM)
                 }
             }
+        }
+    }
+
+    /** What may have a follow-up question or a final timeout on the way. */
+    suspend fun followingUp(): List<OccurrenceRow> = db.occurrences().inStates(FOLLOWING_UP)
+
+    /**
+     * Sets the follow-up alarm that [occurrenceId] should have, for the time it was due, and answers how the platform took it; null when it should
+     * have none. Nothing else puts one back, so without this one that was refused or went with a reboot would leave the occurrence with no question
+     * and no timeout. Setting it again only replaces it, and one already due rings at once.
+     */
+    suspend fun rearmCheckIn(occurrenceId: String): ArmMode? = withContext(Dispatchers.Default) {
+        lockOf(occurrenceId).withLock {
+            val row = db.occurrences().get(occurrenceId)?.takeIf { it.state in FOLLOWING_UP } ?: return@withLock null
+            val session = Codec.decodeSession(row.sessionJson)
+            val index = session.pendingCheckInIndex ?: return@withLock null
+            val at = session.pendingCheckInAtUtc ?: return@withLock null
+            arm(row, AlarmRequest(row.id, row.requestCode, AlarmKind.CHECK_IN, at, index), EventSource.SYSTEM)
         }
     }
 

@@ -330,8 +330,12 @@ class MissionRepository @Inject constructor(
                 }
             } else {
                 // Created but never armed (the app stopped in between) and only just due: arm it now, so it rings at once.
-                if (occurrences.apply(occ.id, OccurrenceCommand.Arm(armModeNow()), EventSource.SYSTEM) is ApplyResult.Applied) repaired++
+                val mode = armStored(occ.id, EventSource.SYSTEM)
+                if (mode == ArmMode.REFUSED) refused++ else if (mode != null) repaired++
             }
+        }
+        for (occ in occurrences.followingUp()) {
+            if (occurrences.rearmCheckIn(occ.id) == ArmMode.REFUSED) refused++
         }
         refreshConflicts(now)
         val report = ReconcileReport(created, discarded, rearmed, lost, missed, precisionChanged, repaired, paused, swallowed, refused)
@@ -503,10 +507,17 @@ class MissionRepository @Inject constructor(
         }
     }
 
-    /** Creates the occurrences that do not exist yet and arms every one that is still waiting to be armed. */
     /** What [createAndArm] did: occurrences created, and ones that already existed but had never been armed and now are. */
     private class ArmCounts(val created: Int, val repaired: Int)
 
+    /** Arms a row that is waiting for it, and answers how the platform took it; null when the row was no longer waiting. */
+    private suspend fun armStored(occurrenceId: String, source: EventSource): ArmMode? =
+        if (occurrences.apply(occurrenceId, OccurrenceCommand.Arm(armModeNow()), source) is ApplyResult.Applied) occurrences.get(occurrenceId)?.armMode else null
+
+    /**
+     * Creates the occurrences that do not exist yet and arms every one that is still waiting to be armed. One the platform refuses is no repair; the
+     * reconcile's own pass over armed rows tries it again and counts it there, once.
+     */
     private suspend fun createAndArm(m: MissionRow, zone: ZoneId, instants: List<Long>, source: EventSource, pause: Pause? = null): ArmCounts {
         var created = 0
         var repaired = 0
@@ -516,8 +527,8 @@ class MissionRepository @Inject constructor(
             if (result.occurrence.state == OccurrenceState.SCHEDULED) {
                 // A pause holds back what is due inside it; the end of the pause settles it.
                 if (pause != null && at < pause.untilUtcMs) continue
-                val applied = occurrences.apply(result.occurrence.id, OccurrenceCommand.Arm(armModeNow()), source)
-                if (!result.isNew && applied is ApplyResult.Applied) repaired++
+                val mode = armStored(result.occurrence.id, source)
+                if (!result.isNew && mode != null && mode != ArmMode.REFUSED) repaired++
             }
         }
         return ArmCounts(created, repaired)

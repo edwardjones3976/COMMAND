@@ -42,7 +42,7 @@ enum class ReconcileTrigger {
  * different precision than they had (an exact alarm that can only be inexact now because the permission was taken away, or the
  * other way round); [repaired] is how many had been stored but never armed (the app stopped between saving and arming) and now are;
  * [paused] is how many armed alarms a global pause had to take down in this run, and [swallowed] how many occurrences it had held back
- * were recorded as missed because of it when it ended; [refused] is how many armed alarms the platform would not take back.
+ * were recorded as missed because of it when it ended; [refused] is how many alarms the platform would not take: an armed one put back, one never armed until now, or a follow-up.
  */
 data class ReconcileReport(
     val created: Int = 0,

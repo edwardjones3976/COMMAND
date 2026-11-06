@@ -2,6 +2,9 @@ package com.command.data
 
 import androidx.test.core.app.ApplicationProvider
 import com.command.data.db.ScheduleRow
+import com.command.domain.alarm.AlarmKind
+import com.command.domain.alarm.AlarmRequest
+import com.command.data.db.OccurrenceRow
 import com.command.domain.dials.Flexibility
 import com.command.domain.model.EventSource
 import com.command.domain.model.StartKind
@@ -665,6 +668,111 @@ class MissionRepositoryTest {
     }
 
     // --- the platform's limit ------------------------------------------------------------------------------------------
+
+    private fun checkIn(o: OccurrenceRow, index: Int = 0) = AlarmRequest(o.id, o.requestCode, AlarmKind.CHECK_IN, 0, index).identity
+
+    private suspend fun ringAnswered(): OccurrenceRow {
+        val o = occurrencesOf(saved(draft())).single()
+        f.repo.apply(o.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+        f.repo.apply(o.id, OccurrenceCommand.Acknowledge(), EventSource.USER)
+        return o
+    }
+
+    private suspend fun session(o: OccurrenceRow) = Codec.decodeSession(f.db.occurrences().get(o.id)!!.sessionJson)
+
+    private fun checkInsHeld() = f.scheduler.armed.values.filter { it.kind == AlarmKind.CHECK_IN }
+
+    @Test
+    fun `a follow-up question the platform refused is counted, and set again for its own time once there is room`() = runBlocking {
+        val o = ringAnswered()
+        f.scheduler.refusing = true
+        f.repo.apply(o.id, OccurrenceCommand.StartGuidance, EventSource.USER)
+        assertTrue(checkInsHeld().isEmpty())
+        val due = session(o).pendingCheckInAtUtc!!
+
+        assertEquals(1, missions.reconcile(ReconcileTrigger.OPEN).refused)
+
+        f.scheduler.refusing = false
+        f.clock.advance(1_000)
+        assertEquals(0, missions.reconcile(ReconcileTrigger.OPEN).refused)
+        assertEquals(due, f.scheduler.armed[checkIn(o)]?.atUtcMs)
+    }
+
+    @Test
+    fun `a reboot takes the follow-up alarms with it, and a reconcile puts back each one, the final timeout too, until none is owed`() = runBlocking {
+        val o = ringAnswered()
+        f.repo.apply(o.id, OccurrenceCommand.StartGuidance, EventSource.USER)
+        f.repo.apply(o.id, OccurrenceCommand.ReportStarted, EventSource.USER)
+        var left = 20
+        while (session(o).pendingCheckInIndex != null && left-- > 0) {
+            val index = session(o).pendingCheckInIndex!!
+            f.scheduler.armed.clear()
+            missions.reconcile(ReconcileTrigger.BOOT)
+            assertEquals(session(o).pendingCheckInAtUtc, f.scheduler.armed[checkIn(o, index)]?.atUtcMs)
+            f.repo.apply(o.id, OccurrenceCommand.CheckInDue(index), EventSource.RECEIVER)
+        }
+        assertTrue("the questions ended", left > 0)
+        val unanswered = f.db.events().ofType(EventType.CHECKIN_UNANSWERED).size
+        assertEquals(1, unanswered)
+
+        f.scheduler.armed.clear()
+        missions.reconcile(ReconcileTrigger.BOOT)
+
+        assertTrue("the final timeout has gone off and is not owed again", checkInsHeld().isEmpty())
+    }
+
+    @Test
+    fun `an answer that ends the questions leaves no follow-up alarm to put back`() = runBlocking {
+        val o = ringAnswered()
+        f.repo.apply(o.id, OccurrenceCommand.StartGuidance, EventSource.USER)
+        f.repo.apply(o.id, OccurrenceCommand.ReportDone, EventSource.USER)
+        f.scheduler.armed.clear()
+
+        missions.reconcile(ReconcileTrigger.BOOT)
+
+        assertTrue(checkInsHeld().isEmpty())
+        assertNull(session(o).pendingCheckInIndex)
+    }
+
+    @Test
+    fun `a follow-up alarm is not set for an occurrence that has moved on, however its session reads`() = runBlocking {
+        val o = ringAnswered()
+        f.repo.apply(o.id, OccurrenceCommand.StartGuidance, EventSource.USER)
+        assertEquals(ArmMode.EXACT, f.repo.rearmCheckIn(o.id))
+        f.db.openHelper.writableDatabase.execSQL("UPDATE occurrences SET state = 'UNCONFIRMED' WHERE id = '${o.id}'")
+        f.scheduler.armed.clear()
+
+        assertNull(f.repo.rearmCheckIn(o.id))
+        assertTrue(checkInsHeld().isEmpty())
+    }
+
+    @Test
+    fun `an occurrence never armed and just due, whose alarm is refused, is counted as refused and not as repaired`() = runBlocking {
+        val mission = Fixture.missionRow(startAt = f.t0 + 2 * hour)
+        f.db.missions().insert(mission)
+        val row = f.repo.createOccurrence(mission.id, f.t0 + 2 * hour, "UTC").occurrence
+        f.clock.advance(2 * hour + 5 * 60_000)
+        f.scheduler.refusing = true
+
+        val report = missions.reconcile(ReconcileTrigger.OPEN)
+
+        assertEquals(OccurrenceState.ARMED, f.db.occurrences().get(row.id)!!.state)
+        assertEquals(0, report.repaired)
+        assertEquals(1, report.refused)
+    }
+
+    @Test
+    fun `an occurrence stored and never armed, whose alarm is refused, is not a repair, and counts as refused once`() = runBlocking {
+        val mission = Fixture.missionRow(startAt = f.t0 + 2 * hour)
+        f.db.missions().insert(mission)
+        f.repo.createOccurrence(mission.id, f.t0 + 2 * hour, "UTC")
+        f.scheduler.refusing = true
+
+        val report = missions.reconcile(ReconcileTrigger.OPEN)
+
+        assertEquals(0, report.repaired)
+        assertEquals(1, report.refused)
+    }
 
     @Test
     fun `a reconcile counts what the platform refused, says so, and does not call it lost or put back`() = runBlocking {
