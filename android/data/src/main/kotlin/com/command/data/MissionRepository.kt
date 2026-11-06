@@ -244,7 +244,7 @@ class MissionRepository @Inject constructor(
         // The hidden mission carries what the test says, so only one test ring may be outstanding: a second replaces the first.
         val outstanding = unfiredIds(TEST_MISSION_ID, emptySet(), now, futureOnly = false, includeDelayed = true)
         if (outstanding.isNotEmpty()) occurrences.discardUnfired(outstanding, EventSource.USER)
-        val profileId = profiles.resolveTyped(spec.title, spec.category, spec.profileId)
+        val profileId = profiles.resolveTyped(spec.title, categoryOf(spec.category), spec.profileId)
         val row = MissionRow(
             id = TEST_MISSION_ID,
             title = spec.title.trim().ifEmpty { DEFAULT_TEST_TITLE },
@@ -424,6 +424,9 @@ class MissionRepository @Inject constructor(
 
     // --- helpers ------------------------------------------------------------------------------------------------
 
+    /** The category as it is stored: what was typed, trimmed, or the default when that leaves nothing. */
+    private fun categoryOf(typed: String) = typed.trim().ifEmpty { MissionDraft.DEFAULT_CATEGORY }
+
     private fun validate(d: MissionDraft): Set<DraftProblem> {
         val out = LinkedHashSet<DraftProblem>()
         if (d.title.isBlank()) out += DraftProblem.TITLE_EMPTY
@@ -456,7 +459,7 @@ class MissionRepository @Inject constructor(
         }
         return MissionRow(
             id = existing?.id ?: UUID.randomUUID().toString(), title = d.title.trim(), firstAction = d.firstAction.trim(),
-            category = d.category.trim().ifEmpty { MissionDraft.DEFAULT_CATEGORY }, priority = existing?.priority ?: 2, flexibility = d.flexibility, rigidWeekdays = existing?.rigidWeekdays,
+            category = categoryOf(d.category), priority = existing?.priority ?: 2, flexibility = d.flexibility, rigidWeekdays = existing?.rigidWeekdays,
             source = MissionSource.MANUAL, startKind = kind, startAtUtc = startAt, dtstartLocal = dtstart, rrule = rrule,
             zoneMode = ZoneMode.DEVICE, zoneId = null, durationMin = existing?.durationMin ?: 30,
             starterMinutes = d.starterMinutes.coerceIn(1, MAX_STARTER_MINUTES), profileId = d.profileId,

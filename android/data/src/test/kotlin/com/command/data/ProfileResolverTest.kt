@@ -231,6 +231,31 @@ class ProfileResolverTest {
         assertEquals(Personality.SUPPORTIVE_COACH, ringsWith(TestRingSpec(category = "Work", profileId = "builtin_nudge")))
     }
 
+    /** The personality a test alarm started from [spec] rings with. */
+    private suspend fun testRingsWith(spec: TestRingSpec): Personality {
+        val id = missions().testRing(spec)
+        f.repo.apply(id, OccurrenceCommand.Fire, EventSource.SYSTEM)
+        return f.repo.handshakeOf(f.repo.get(id)!!).personality
+    }
+
+    @Test
+    fun `a test alarm with a blank category rings as the saved mission will, in the default category`() = run {
+        rule("r", MissionDraft.DEFAULT_CATEGORY, null, "builtin_command")
+        assertEquals(Personality.ACCOUNTABILITY_PARTNER, testRingsWith(TestRingSpec(category = "   ")))
+    }
+
+    @Test
+    fun `the hidden mission's own category is not matched against the rules`() = run {
+        rule("r", MissionRepository.TEST_CATEGORY, null, "builtin_command")
+        assertEquals("the typed mission has no rule, so the active profile", Personality.EXECUTIVE_DIRECTOR, testRingsWith(TestRingSpec()))
+    }
+
+    @Test
+    fun `nor is the title a test alarm gets when none was typed`() = run {
+        rule("r", "", "test alarm", "builtin_command")
+        assertEquals(Personality.EXECUTIVE_DIRECTOR, testRingsWith(TestRingSpec()))
+    }
+
     @Test
     fun `the category is stored as typed but trimmed, an empty one is the default, and the word kept for test alarms is refused`() = run {
         val repo = missions()

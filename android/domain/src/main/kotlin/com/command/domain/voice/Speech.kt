@@ -34,8 +34,8 @@ data class SpeechLevel(val alertIntensity: Int, val trimDb: Float = 0f) {
 /**
  * Who says a line with the phone's own voice: what a voice pack asks of the engine. [languageTag] picks the language and the accent (null: the
  * phone's own); [pitch] and [rate] are the pack's, 1 being the engine's normal; [female] says which kind of voice to prefer among those
- * installed (null: no preference). Nothing here can make a voice that asks a server acceptable, and a voice the phone does not have is not
- * a reason to say nothing.
+ * installed (null: no preference). Nothing here can make a voice that asks a server acceptable, and when the phone lacks the voice asked for
+ * it uses another that works on the phone, if it has one.
  */
 data class SpeechVoice(
     val languageTag: String? = null,

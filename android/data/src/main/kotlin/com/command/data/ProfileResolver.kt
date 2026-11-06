@@ -20,7 +20,9 @@ class ProfileResolver(private val db: CommandDb) {
 
     /** The profile in force for [mission]. With no mission, or nothing that fits and no usable active profile, it can be nothing: the caller has its own default. */
     suspend fun resolve(mission: MissionRow?): ProfileRow? {
-        val id = pickProfileId(mission?.let(::subjectOf), db.activityProfiles().all(), db.profiles().ids().toSet(), activeProfileIdOf(db.settings().get(SettingKeys.ACTIVE_PROFILE_ID)))
+        // The rules were applied to what was typed when a test alarm was started (resolveTyped): the hidden mission's own title and category say nothing about it.
+        val rules = if (mission?.id == MissionRepository.TEST_MISSION_ID) emptyList() else db.activityProfiles().all()
+        val id = pickProfileId(mission?.let(::subjectOf), rules, db.profiles().ids().toSet(), activeProfileIdOf(db.settings().get(SettingKeys.ACTIVE_PROFILE_ID)))
         return id?.let { db.profiles().get(it) }
     }
 
