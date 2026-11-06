@@ -56,6 +56,7 @@ import java.time.ZoneId
 
 object ReliabilityTags {
     const val SUMMARY = "reliability_summary"
+    const val ALARM_LIMIT = "reliability_alarm_limit"
     const val OK_LIST = "reliability_ok_list"
     const val RECENT_EMPTY = "reliability_recent_empty"
     const val MAKER = "reliability_maker"
@@ -119,10 +120,14 @@ fun ReliabilityScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item { Text(stringResource(R.string.reliability_intro), style = MaterialTheme.typography.bodyLarge) }
-                item { Summary(state.report) }
+                item { Summary(state.report, state.refusedAlarms) }
 
                 val advice = state.report.items.filter { it.severity == Severity.INFO }
                 attention(R.string.reliability_section_problems, state.report.problems, state.canAskNotifications, onFix)
+                if (state.refusedAlarms > 0) {
+                    if (state.report.problems.isEmpty()) item { SectionTitle(stringResource(R.string.reliability_section_problems)) }
+                    item { AlarmLimitCard(state.refusedAlarms) }
+                }
                 attention(R.string.reliability_section_warnings, state.report.warnings, state.canAskNotifications, onFix)
                 attention(R.string.reliability_section_advice, advice, state.canAskNotifications, onFix)
 
@@ -165,8 +170,8 @@ private fun SectionTitle(text: String) {
 }
 
 @Composable
-private fun Summary(report: ReliabilityReport) {
-    val problems = report.problems.size
+private fun Summary(report: ReliabilityReport, refusedAlarms: Int) {
+    val problems = report.problems.size + if (refusedAlarms > 0) 1 else 0
     val title = when {
         problems > 0 -> pluralStringResource(R.plurals.reliability_summary_problems_title, problems, problems)
         report.warnings.isNotEmpty() -> stringResource(R.string.reliability_summary_warnings_title)
@@ -221,6 +226,18 @@ internal fun ItemCard(item: ReliabilityItem, canAskNotifications: Boolean, onFix
                     OutlinedButton(onClick = { onFix(fix) }, modifier = modifier) { Text(action, style = MaterialTheme.typography.labelLarge) }
                 }
             }
+        }
+    }
+}
+
+/** The platform's limit on how many alarms one app can hold. Nothing on the phone's settings pages changes it, so there is no button. */
+@Composable
+private fun AlarmLimitCard(refused: Int) {
+    Card(modifier = Modifier.fillMaxWidth().testTag(ReliabilityTags.ALARM_LIMIT)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(stringResource(R.string.reliability_limit_title), style = MaterialTheme.typography.titleLarge)
+            Text(pluralStringResource(R.plurals.reliability_limit_state, refused, refused), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error)
+            Text(stringResource(R.string.reliability_limit_body), style = MaterialTheme.typography.bodyLarge)
         }
     }
 }

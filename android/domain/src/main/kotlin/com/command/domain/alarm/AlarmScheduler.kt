@@ -32,7 +32,8 @@ interface AlarmScheduler {
 
     /**
      * Arms (or replaces) the alarm and reports the precision actually obtained: EXACT or INEXACT. NONE means that nothing was set because
-     * everything is being erased: the app is about to be ended, and the caller has nothing to record.
+     * everything is being erased: the app is about to be ended, and the caller has nothing to record. REFUSED means the platform would not take
+     * it, because the app holds as many alarms as it allows: nothing is set, and this alarm will not ring until a later try succeeds.
      */
     fun arm(request: AlarmRequest): ArmMode
 

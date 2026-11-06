@@ -2,7 +2,6 @@ package com.command.onboarding
 
 import android.os.Build
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.alarm.ReliabilityMonitor
 import com.command.data.AppSettings
 import com.command.data.MissionRepository
@@ -10,6 +9,7 @@ import com.command.domain.reliability.Precondition
 import com.command.domain.reliability.PreconditionSnapshot
 import com.command.domain.reliability.Reliability
 import com.command.domain.reliability.ReliabilityItem
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -47,7 +47,7 @@ class OnboardingViewModel @Inject constructor(
                 .mapNotNull { report.of(it) }
             PermissionsUiState.Ready(items, canAskNotifications = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !askedBefore)
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), PermissionsUiState.Loading)
+    }.stateIn(guardedScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), PermissionsUiState.Loading)
 
     private val _hasMissions = MutableStateFlow<Boolean?>(null)
 
@@ -55,12 +55,12 @@ class OnboardingViewModel @Inject constructor(
     val hasMissions: StateFlow<Boolean?> = _hasMissions
 
     init {
-        viewModelScope.launch { _hasMissions.value = missions.hasMissions() }
+        guardedScope.launch { _hasMissions.value = missions.hasMissions() }
     }
 
     /** Reads the phone's permissions again; they can change in Android's own screens while this one is behind them. */
     fun refresh() {
-        viewModelScope.launch {
+        guardedScope.launch {
             asked.value = settings.notificationsAsked()
             snapshot.value = monitor.refresh()
         }
@@ -68,7 +68,7 @@ class OnboardingViewModel @Inject constructor(
 
     /** The runtime notification request was answered, granted or not. */
     fun onNotificationRequestResult() {
-        viewModelScope.launch {
+        guardedScope.launch {
             settings.markNotificationsAsked()
             refresh()
         }
@@ -76,7 +76,7 @@ class OnboardingViewModel @Inject constructor(
 
     /** The person has seen what there is to see: remember it, so these screens are not shown again, then carry on. */
     fun finish(then: () -> Unit) {
-        viewModelScope.launch {
+        guardedScope.launch {
             settings.markOnboardingDone()
             then()
         }

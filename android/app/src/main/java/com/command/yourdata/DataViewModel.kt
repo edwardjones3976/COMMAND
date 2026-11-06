@@ -2,9 +2,9 @@ package com.command.yourdata
 
 import android.net.Uri
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.data.DataOverview
 import com.command.domain.time.Clock
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -72,7 +72,7 @@ class DataViewModel @Inject constructor(
     val state: StateFlow<DataUiState> = _state.asStateFlow()
 
     init {
-        viewModelScope.launch {
+        guardedScope.launch {
             val overview = try {
                 rights.overview()
             } catch (e: CancellationException) {
@@ -98,11 +98,11 @@ class DataViewModel @Inject constructor(
         if (busy(s) || s.erase == EraseStatus.Confirming || s.erase is EraseStatus.Done) {
             // Not now: another job is running, or the question about erasing is open, or the erase has run. The picker has already made the
             // document, so it is removed again rather than left empty.
-            viewModelScope.launch(Dispatchers.IO) { runCatching { sink.discard(uri) } }
+            guardedScope.launch(Dispatchers.IO) { runCatching { sink.discard(uri) } }
             return
         }
         _state.update { it.copy(export = ExportStatus.Working) }
-        viewModelScope.launch {
+        guardedScope.launch {
             val summary = try {
                 withContext(Dispatchers.IO) { rights.export { sink.open(uri) ?: throw IOException("the document cannot be written") } }
             } catch (e: CancellationException) {
@@ -141,7 +141,7 @@ class DataViewModel @Inject constructor(
 
     private fun runErase() {
         _state.update { it.copy(erase = EraseStatus.Working) }
-        viewModelScope.launch {
+        guardedScope.launch {
             val status = try {
                 val report = rights.erase()
                 EraseStatus.Done(report.leftovers.size, report.problems.size, report.volumeLeft)

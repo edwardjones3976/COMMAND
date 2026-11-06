@@ -663,4 +663,31 @@ class MissionRepositoryTest {
         for (i in 1..600) f.repo.createOccurrence(mission.id, f.t0 - i * hour, "UTC")
         assertEquals(600, missions.observeHistory(30).first().size)
     }
+
+    // --- the platform's limit ------------------------------------------------------------------------------------------
+
+    @Test
+    fun `a reconcile counts what the platform refused, says so, and does not call it lost or put back`() = runBlocking {
+        val id = occurrencesOf(saved(draft())).single().id
+        f.scheduler.refusing = true
+        f.scheduler.armed.clear()
+
+        val first = missions.reconcile(ReconcileTrigger.BOOT)
+        assertEquals(1, first.refused)
+        assertEquals(0, first.rearmed)
+        assertTrue(first.changedAnything)
+
+        // The row says refused now, so the alarm is not reported as lost by the run after this one.
+        val second = missions.reconcile(ReconcileTrigger.BOOT)
+        assertEquals(0, second.lost)
+        assertEquals(1, second.refused)
+        assertTrue("a refusal is worth a line by itself", second.changedAnything)
+        assertTrue(f.db.events().ofType(EventType.BOOT_RECONCILE).last().payloadJson.contains("refused"))
+
+        f.scheduler.refusing = false
+        val third = missions.reconcile(ReconcileTrigger.BOOT)
+        assertEquals(0, third.refused)
+        assertEquals(1, third.rearmed)
+        assertTrue(f.scheduler.armed.keys.any { it.contains(id) })
+    }
 }

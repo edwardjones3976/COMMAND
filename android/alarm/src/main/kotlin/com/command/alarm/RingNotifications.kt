@@ -63,6 +63,9 @@ object RingNotifications {
      * The one notification of a ring. It carries the full-screen intent, an Open action and a Safety silence action; if
      * it is swiped away that counts as the user silencing the alarm. A public version without the mission title still
      * offers the same actions, so Safety silence is reachable on a locked screen that hides sensitive content.
+     *
+     * Delay and Skip are not on it, by decision (amendment 33): a fixed commitment asks for a confirmation or a reason first, which a notification
+     * cannot ask, and one tap in a shade or a pocket would end a ring unseen. Both are on the ring's own screen, which shows over the lock screen.
      */
     fun ring(
         context: Context,

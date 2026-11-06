@@ -280,6 +280,7 @@ class HandshakeNavigationTest {
         tap(HandshakeTags.STANDARD_CONFIRM)
 
         waitGone(HandshakeTags.STANDARD)
+        waitFor(HandshakeTags.RESTORED) // the button goes as soon as the editor shows Loading, before anything is back
         assertNull(runBlocking { profiles.get("builtin_steady")!!.own })
         assertTrue("and the editor shows the standard chain: one step", !exists(HandshakeTags.step(1)))
         compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.HOLD)).assertIsSelected()

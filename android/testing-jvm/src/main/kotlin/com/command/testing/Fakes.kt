@@ -33,12 +33,19 @@ class FakeClock(
 
 /** Remembers what is armed, keyed by identity exactly like platform alarms, and records every call. */
 class FakeAlarmScheduler(var exactAllowed: Boolean = true) : AlarmScheduler {
+    /** The platform holds as many alarms as it allows, so it takes no more. */
+    var refusing = false
+
     val armed: MutableMap<String, AlarmRequest> = java.util.Collections.synchronizedMap(LinkedHashMap())
     val calls: MutableList<String> = java.util.Collections.synchronizedList(ArrayList())
 
     override fun canScheduleExact(): Boolean = exactAllowed
 
     override fun arm(request: AlarmRequest): ArmMode {
+        if (refusing) {
+            calls += "refused ${request.identity}"
+            return ArmMode.REFUSED
+        }
         val mode = if (exactAllowed) ArmMode.EXACT else ArmMode.INEXACT
         armed[request.identity] = request
         calls += "arm ${request.identity} $mode"

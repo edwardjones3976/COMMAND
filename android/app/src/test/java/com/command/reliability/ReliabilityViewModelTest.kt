@@ -66,6 +66,22 @@ class ReliabilityViewModelTest {
     private fun ready(): ReliabilityUiState.Ready? = vm.state.value as? ReliabilityUiState.Ready
 
     @Test
+    fun `an alarm the platform refused reaches the page`() {
+        val row = runBlocking {
+            val mission = testMission()
+            db.missions().insert(mission)
+            occurrences.createOccurrence(mission.id, FakeAlarmModule.T0 + 60_000, "UTC").occurrence
+        }
+        vm.refresh()
+        awaitUntil(message = "ready") { ready() != null }
+        assertEquals(0, ready()!!.refusedAlarms)
+
+        runBlocking { occurrences.logEvent(EventType.ALARM_CAP, row, EventSource.SYSTEM, com.command.domain.occurrence.EventPayload.EMPTY) }
+
+        awaitUntil(message = "shown") { ready()?.refusedAlarms == 1 }
+    }
+
+    @Test
     fun `nothing is shown until the phone has been read`() {
         assertEquals(ReliabilityUiState.Loading, vm.state.value)
         vm.refresh()

@@ -1,7 +1,6 @@
 package com.command.reveille
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.data.ApplyExtras
 import com.command.data.ApplyResult
 import com.command.data.ChallengeRecord
@@ -32,6 +31,7 @@ import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.SkipReason
 import com.command.domain.occurrence.StarterWindow
 import com.command.domain.time.Clock
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -152,7 +152,7 @@ class ReveilleViewModel @Inject constructor(
         set(value) {
             if (field == value) return
             field = value
-            viewModelScope.launch { engine.withLock { publish() } }
+            guardedScope.launch { engine.withLock { publish() } }
         }
 
     // --- the handshake: everything below is written while holding [engine] -----------------------------------------
@@ -221,7 +221,7 @@ class ReveilleViewModel @Inject constructor(
         _friction.value = null
         _state.value = ReveilleUiState.Loading
         // What the phone could not say is on the screen instead, as soon as that is written down, whenever that is in the ring.
-        voice = viewModelScope.launch {
+        voice = guardedScope.launch {
             repository.observeLineNotSpoken(id).collect { notSpoken ->
                 engine.withLock {
                     lineNotSpoken = notSpoken
@@ -229,7 +229,7 @@ class ReveilleViewModel @Inject constructor(
                 }
             }
         }
-        observing = viewModelScope.launch {
+        observing = guardedScope.launch {
             repository.observe(id).collectLatest { row ->
                 if (row?.state == OccurrenceState.ACKNOWLEDGED) {
                     // The process died between acknowledging and starting the guidance (the two commit together now, but an
@@ -317,7 +317,7 @@ class ReveilleViewModel @Inject constructor(
         )
         starterOnScreen = on
         if (starterClock?.isActive != true) {
-            starterClock = viewModelScope.launch {
+            starterClock = guardedScope.launch {
                 while (!window.isOver(clock.nowMs())) {
                     starterTick()
                     _state.value = drawn(starterOnScreen ?: return@launch)
@@ -492,7 +492,7 @@ class ReveilleViewModel @Inject constructor(
      * a screen at all (a fence, a redraw).
      */
     private fun inRing(ring: String? = null, block: suspend () -> Unit) {
-        viewModelScope.launch { engine.withLock { if (ring == null || ring == occurrenceId) block() } }
+        guardedScope.launch { engine.withLock { if (ring == null || ring == occurrenceId) block() } }
     }
 
     /** Runs [block] once every event that was sent before it has been handled: a fence for a test of something that must not happen. */
@@ -538,7 +538,7 @@ class ReveilleViewModel @Inject constructor(
         if (timer?.isActive == true) return
         val seconds = state.timeoutSeconds(tryId.position)
         val ring = occurrenceId ?: return
-        timer = viewModelScope.launch {
+        timer = guardedScope.launch {
             attemptTimer(seconds)
             send(ring, ChainEvent.TimedOut(tryId))
         }
@@ -633,7 +633,7 @@ class ReveilleViewModel @Inject constructor(
         val id = occurrenceId ?: return
         val step = chain?.step
         val tryId = chain?.tryOnScreen
-        viewModelScope.launch {
+        guardedScope.launch {
             val extras = if (step != null && tryId != null) {
                 val now = clock.nowMs()
                 ApplyExtras(challenges = listOf(ChallengeRecord(step.position, step.shown, tryId.tryNo, ChallengeOutcome.SAFETY_SILENCE, began ?: now, now)))
@@ -656,7 +656,7 @@ class ReveilleViewModel @Inject constructor(
 
     private fun command(c: OccurrenceCommand) {
         val id = occurrenceId ?: return
-        viewModelScope.launch { repository.apply(id, c, EventSource.USER) }
+        guardedScope.launch { repository.apply(id, c, EventSource.USER) }
     }
 
     /** Tries the command bare; if the mission is fixed and wants more, asks, then tries again with what the user gave. */
@@ -668,7 +668,7 @@ class ReveilleViewModel @Inject constructor(
         // not answered for a ring that is no longer on the screen.
         fun moved() = id != occurrenceId || askedOn != screen
         fun attempt(evidence: FrictionEvidence) {
-            viewModelScope.launch {
+            guardedScope.launch {
                 val result = repository.apply(id, build(evidence), EventSource.USER)
                 beforeAnswer()
                 if (moved()) return@launch

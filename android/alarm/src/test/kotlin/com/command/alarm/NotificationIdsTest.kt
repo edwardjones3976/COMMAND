@@ -138,4 +138,11 @@ class NotificationIdsTest {
     fun `the notification of the reconcile worker can never replace a ring, whose id is its occurrence's request code`() {
         assertTrue("request codes count up from 1", AlarmContract.ID_RECONCILE < 0)
     }
+
+    @Test
+    fun `no untagged notification of ours can have the id of a ring, and none has the id of another`() {
+        val untagged = listOf(AlarmContract.ID_RECONCILE, AlarmContract.ID_PAUSED, AlarmContract.ID_RING_STARTING)
+        assertTrue("request codes count up from 1", untagged.all { it < 0 })
+        assertEquals(untagged.size, untagged.toSet().size)
+    }
 }

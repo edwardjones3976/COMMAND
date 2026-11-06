@@ -1,7 +1,6 @@
 package com.command.consents
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.alarm.ReliabilityMonitor
 import com.command.data.ConsentStore
 import com.command.domain.model.ConsentBoundaries
@@ -11,6 +10,7 @@ import com.command.domain.model.ConsentOwner
 import com.command.domain.model.ConsentSource
 import com.command.domain.reliability.Fix
 import com.command.domain.reliability.Precondition
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -59,20 +59,20 @@ class ConsentCenterViewModel @Inject constructor(
                 )
             },
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), ConsentCenterUiState.Loading)
+    }.stateIn(guardedScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), ConsentCenterUiState.Loading)
 
     /** The person turned one of the app's own consents on or off. It is recorded as theirs; turning one off also removes what it allowed. */
     fun setGranted(key: ConsentKey, granted: Boolean) {
         // Android keeps the others: what it says is read and recorded as the system's, and nothing is written here that it does not say.
         if (ConsentBoundaries.all.none { it.key == key && it.owner == ConsentOwner.APP }) return
-        viewModelScope.launch {
+        guardedScope.launch {
             if (granted) consents.grant(key, ConsentSource.USER) else consents.revoke(key, ConsentSource.USER)
         }
     }
 
     /** Asks Android again, so a permission changed in its settings is on the record before the person reads it. */
     fun refresh() {
-        viewModelScope.launch { monitor.refresh() }
+        guardedScope.launch { monitor.refresh() }
     }
 
     private companion object {

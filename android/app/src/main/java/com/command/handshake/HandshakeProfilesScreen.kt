@@ -35,10 +35,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewModelScope
 import com.command.data.ProfileHandshake
 import com.command.data.ProfileRepository
 import com.command.R
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -62,7 +62,7 @@ class HandshakeProfilesViewModel @Inject constructor(profiles: ProfileRepository
         profiles.observe(),
         profiles.observeInUse(),
     ) { all, inUse -> HandshakeProfilesUiState.Ready(all, inUse) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), HandshakeProfilesUiState.Loading)
+        .stateIn(guardedScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), HandshakeProfilesUiState.Loading)
 
     private companion object {
         const val STOP_TIMEOUT_MS = 5_000L

@@ -1,7 +1,6 @@
 package com.command.handshake
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.data.ProfileHandshake
 import com.command.data.ProfileRepository
 import com.command.data.SaveChainResult
@@ -14,6 +13,7 @@ import com.command.domain.dials.DialEffects
 import com.command.domain.dials.HandshakeMode
 import com.command.domain.dials.StepSpec
 import com.command.domain.handshake.ChainState
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -91,7 +91,7 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
         inForce = null
         opening?.cancel()
         _state.value = HandshakeEditorUiState.Loading
-        opening = viewModelScope.launch {
+        opening = guardedScope.launch {
             val profile = profiles.get(id)
             // Another profile may have been asked for while this one was read.
             if (profileId != id) return@launch
@@ -225,7 +225,7 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
         if (!current.canSave) return
         val spec = ChainSpec(current.op, current.steps.map { it.toSpec() })
         val earlier = saving
-        saving = viewModelScope.launch {
+        saving = guardedScope.launch {
             earlier?.join()
             beforeSaveWrite()
             val result = profiles.saveChain(id, spec)
@@ -255,7 +255,7 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
         if (_state.value !is HandshakeEditorUiState.Editing) return
         _state.value = HandshakeEditorUiState.Loading
         val earlier = saving
-        viewModelScope.launch {
+        guardedScope.launch {
             earlier?.join()
             if (!profiles.useDefault(id)) {
                 if (profileId == id) _state.value = HandshakeEditorUiState.NotFound

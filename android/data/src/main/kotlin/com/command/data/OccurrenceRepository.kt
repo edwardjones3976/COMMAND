@@ -204,6 +204,9 @@ class OccurrenceRepository @Inject constructor(
     fun observeDetail(id: String): Flow<OccurrenceDetail?> =
         db.invalidationTracker.createFlow("occurrences", "missions", "events", "check_ins", "challenges").map { detail(id) }
 
+    /** What the database says is ringing. A ring that was killed stays here, so only the plan and the live service can say whether it is sounding. */
+    suspend fun firing(): List<OccurrenceRow> = db.occurrences().inStates(listOf(OccurrenceState.FIRING))
+
     /** The title of an occurrence's mission, for notifications and screens that need to name it. */
     suspend fun missionTitle(missionId: String): String? = db.missions().get(missionId)?.title
 
@@ -576,7 +579,7 @@ class OccurrenceRepository @Inject constructor(
     suspend fun reschedule(occurrenceId: String, newAtUtc: Long, zoneId: String, source: EventSource = EventSource.WORKER): Boolean {
         val row = db.withTransaction { rescheduleInTx(occurrenceId, newAtUtc, zoneId, source) } ?: return false
         if (row.state == OccurrenceState.ARMED) {
-            val mode = scheduler.arm(AlarmRequest(row.id, row.requestCode, AlarmKind.FIRE, row.scheduledAtUtc))
+            val mode = arm(row, AlarmRequest(row.id, row.requestCode, AlarmKind.FIRE, row.scheduledAtUtc), source)
             if (mode != row.armMode) db.occurrences().setArmMode(row.id, mode)
         }
         return true
@@ -631,8 +634,31 @@ class OccurrenceRepository @Inject constructor(
     suspend fun rearm(occurrenceId: String): ArmMode? {
         val occ = db.occurrences().get(occurrenceId) ?: return null
         if (occ.state != OccurrenceState.ARMED) return null
-        val mode = scheduler.arm(AlarmRequest(occ.id, occ.requestCode, AlarmKind.FIRE, occ.scheduledAtUtc))
+        val mode = arm(occ, AlarmRequest(occ.id, occ.requestCode, AlarmKind.FIRE, occ.scheduledAtUtc), EventSource.SYSTEM)
         if (mode != occ.armMode) db.occurrences().setArmMode(occ.id, mode)
+        return mode
+    }
+
+    /**
+     * Sets (or replaces) the alarm that ends the ring of [occurrenceId] at [atUtc], the one [com.command.domain.occurrence.Effect.ArmCycleEnd] set when
+     * it began. It takes its turn with every command and looks again, because the ring may have been answered since the caller read it, and a ring
+     * that is over must not get an alarm back.
+     */
+    suspend fun armCycleEnd(occurrenceId: String, atUtc: Long) {
+        withContext(Dispatchers.Default) {
+            lockOf(occurrenceId).withLock {
+                val row = db.occurrences().get(occurrenceId)
+                if (row?.state == OccurrenceState.FIRING) {
+                    arm(row, AlarmRequest(row.id, row.requestCode, AlarmKind.CYCLE_END, atUtc), EventSource.SYSTEM)
+                }
+            }
+        }
+    }
+
+    /** Every alarm goes through here, so that one the platform refuses is on the record, whichever kind it was. */
+    private suspend fun arm(occurrence: OccurrenceRow, request: AlarmRequest, source: EventSource): ArmMode {
+        val mode = scheduler.arm(request)
+        if (mode == ArmMode.REFUSED) log(EventType.ALARM_CAP, occurrence, source, EventPayload.of("kind" to request.kind))
         return mode
     }
 
@@ -688,7 +714,7 @@ class OccurrenceRepository @Inject constructor(
             fun request(kind: AlarmKind, at: Long = occ.scheduledAtUtc, index: Int = 0) = AlarmRequest(occ.id, occ.requestCode, kind, at, index)
             when (val e = p.effect) {
                 is Effect.ArmAlarm -> {
-                    val actual = scheduler.arm(request(AlarmKind.FIRE))
+                    val actual = arm(occ, request(AlarmKind.FIRE), source)
                     if (actual != e.mode) {
                         db.occurrences().setArmMode(occ.id, actual)
                         log(EventType.ALARM_ARMED, occ, source, EventPayload.of("mode" to actual, "adjusted" to "true"))
@@ -696,9 +722,9 @@ class OccurrenceRepository @Inject constructor(
                 }
                 Effect.DisarmAlarm -> scheduler.cancel(request(AlarmKind.FIRE))
                 Effect.StopRinging -> ringController.stop(occ.id, occ.requestCode)
-                is Effect.ArmCycleEnd -> scheduler.arm(request(AlarmKind.CYCLE_END, at = p.nowMs + e.totalMs))
+                is Effect.ArmCycleEnd -> arm(occ, request(AlarmKind.CYCLE_END, at = p.nowMs + e.totalMs), source)
                 Effect.CancelCycleEnd -> scheduler.cancel(request(AlarmKind.CYCLE_END))
-                is Effect.ScheduleCheckIn -> scheduler.arm(request(AlarmKind.CHECK_IN, at = e.atUtcMs, index = e.index))
+                is Effect.ScheduleCheckIn -> arm(occ, request(AlarmKind.CHECK_IN, at = e.atUtcMs, index = e.index), source)
                 is Effect.PostCheckIn -> {
                     val title = missionBrief(occ.missionId)?.title.orEmpty()
                     poster.post(CheckInPrompt(occ.id, occ.requestCode, e.index, title, started = occ.state != OccurrenceState.GUIDED_START, line = checkInLine(occ, e.index)))

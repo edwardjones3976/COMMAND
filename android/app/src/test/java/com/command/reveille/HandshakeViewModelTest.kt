@@ -731,11 +731,11 @@ class HandshakeViewModelTest {
 
         awaitUi("silenced") { it is ReveilleUiState.Silenced }
         settle()
-        assertEquals(
-            "the first try, and then the silence: the second try came after the end of the ring and is not part of its history",
-            listOf(ChallengeOutcome.FAILED, ChallengeOutcome.SAFETY_SILENCE),
-            rows(o).map { it.outcome },
-        )
+        // The silence does not wait for anybody, and nothing waits for it: the second try may have its turn and commit first, because its answer did
+        // come before the tap. What may never happen is a row after the silence, which ends the history.
+        val outcomes = rows(o).map { it.outcome }
+        assertEquals("the end of the ring is the end of its history: $outcomes", ChallengeOutcome.SAFETY_SILENCE, outcomes.last())
+        assertTrue("nothing but the two tries before it: $outcomes", outcomes.dropLast(1).all { it == ChallengeOutcome.FAILED } && outcomes.size <= 3)
     }
 
     @Test

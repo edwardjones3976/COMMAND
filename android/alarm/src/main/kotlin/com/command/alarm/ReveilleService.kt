@@ -162,7 +162,7 @@ class ReveilleService : Service() {
         if (id == null || code == 0 || latch.sealed) {
             // Started with nothing to ring for, or while everything is being erased (an alarm that was already on its way stays quiet). A
             // foreground start must still be answered with startForeground.
-            runCatching { ServiceCompat.startForeground(this, FALLBACK_ID, RingNotifications.starting(this), FGS_TYPE) }
+            answerForegroundStart()
             settle()
             return
         }
@@ -180,7 +180,7 @@ class ReveilleService : Service() {
         } catch (e: Exception) {
             // Not allowed to run as a foreground service right now. Still answer the start if the platform will let us (its
             // deadline is a few seconds and the fallback needs the database), then ring from a full-screen notification.
-            runCatching { ServiceCompat.startForeground(this, FALLBACK_ID, RingNotifications.starting(this), FGS_TYPE) }
+            answerForegroundStart()
             queue(null) { resolver.degrade(id, code, reasonOf(e), setFor) }
             return
         }
@@ -194,6 +194,21 @@ class ReveilleService : Service() {
             runCatching { speaker.prepare() }
         }
         queue(id) { deliver(id, code, setFor) }
+    }
+
+    /**
+     * Answers a foreground start that has no ring of its own to show. A ring that is sounding keeps its notification, with Safety silence on it:
+     * asking for the foreground under any other id would take that notification away. With no ring, the id is one no occurrence can have.
+     */
+    private fun answerForegroundStart() {
+        val ringing = active
+        runCatching {
+            if (ringing != null) {
+                ServiceCompat.startForeground(this, ringing.code, RingNotifications.ring(this, ringing.id, ringing.code, ringing.title), FGS_TYPE)
+            } else {
+                ServiceCompat.startForeground(this, AlarmContract.ID_RING_STARTING, RingNotifications.starting(this), FGS_TYPE)
+            }
+        }
     }
 
     /**
@@ -447,7 +462,6 @@ class ReveilleService : Service() {
         const val FGS_TYPE = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
 
         const val MAX_RING_MS = 10 * 60_000L
-        private const val FALLBACK_ID = 1
         private const val TAG = "ReveilleService"
     }
 }

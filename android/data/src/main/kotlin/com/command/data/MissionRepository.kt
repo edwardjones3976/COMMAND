@@ -304,6 +304,7 @@ class MissionRepository @Inject constructor(
         var lost = 0
         var missed = 0
         var precisionChanged = 0
+        var refused = 0
         for (occ in db.occurrences().inStates(listOf(OccurrenceState.SCHEDULED, OccurrenceState.ARMED))) {
             if (pause != null && occ.scheduledAtUtc < pause.untilUtcMs && occ.missionId != TEST_MISSION_ID) {
                 // The pause holds it back: nothing arms it and nothing misses it; the end of the pause settles it.
@@ -314,13 +315,16 @@ class MissionRepository @Inject constructor(
                 val result = occurrences.apply(occ.id, OccurrenceCommand.Miss(MissReason.DOWNTIME, lateMs = now - occ.scheduledAtUtc), EventSource.SYSTEM)
                 if (result is ApplyResult.Applied) missed++
             } else if (occ.state == OccurrenceState.ARMED) {
-                if (!scheduler.isArmed(AlarmRequest(occ.id, occ.requestCode, AlarmKind.FIRE, occ.scheduledAtUtc))) {
+                // One the platform refused was never there to lose.
+                if (occ.armMode != ArmMode.REFUSED && !scheduler.isArmed(AlarmRequest(occ.id, occ.requestCode, AlarmKind.FIRE, occ.scheduledAtUtc))) {
                     lost++
                     occurrences.logEvent(EventType.ALARM_LOST, occ, EventSource.SYSTEM, EventPayload.of("trigger" to trigger))
                 }
                 // Always put it back, found or not: arming the same alarm again replaces it, so this can only help.
                 val mode = occurrences.rearm(occ.id)
-                if (mode != null) {
+                if (mode == ArmMode.REFUSED) {
+                    refused++
+                } else if (mode != null) {
                     rearmed++
                     if (mode != occ.armMode) precisionChanged++
                 }
@@ -330,14 +334,14 @@ class MissionRepository @Inject constructor(
             }
         }
         refreshConflicts(now)
-        val report = ReconcileReport(created, discarded, rearmed, lost, missed, precisionChanged, repaired, paused, swallowed)
+        val report = ReconcileReport(created, discarded, rearmed, lost, missed, precisionChanged, repaired, paused, swallowed, refused)
         if (trigger.alwaysLogged || report.changedAnything) {
             occurrences.logEvent(
                 EventType.BOOT_RECONCILE, null, EventSource.SYSTEM,
                 EventPayload.of(
                     "trigger" to trigger, "created" to created, "discarded" to discarded,
                     "rearmed" to rearmed, "lost" to lost, "missed" to missed, "precision_changed" to precisionChanged, "repaired" to repaired,
-                    "paused" to paused, "swallowed" to swallowed,
+                    "paused" to paused, "swallowed" to swallowed, "refused" to refused,
                 ),
             )
         }

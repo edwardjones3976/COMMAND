@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 import androidx.core.net.toUri
 import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
@@ -42,8 +43,32 @@ class AndroidAlarmScheduler @Inject constructor(
         return mode
     }
 
+    /**
+     * The platform refuses an app that holds as many alarms as it allows (an IllegalStateException, not documented as part of the call). It counts
+     * before it replaces, so an alarm being set again would be refused for the room it already takes: that one lets go of its own place and
+     * tries once more. An alarm refused for good takes its PendingIntent with it, so that [isArmed] does not say it is there.
+     */
     private fun armNow(request: AlarmRequest): ArmMode {
+        val held = isArmed(request)
         val operation = pendingIntent(request, create = true)!!
+        try {
+            return place(request, operation)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "the platform refused an alarm", e)
+        }
+        if (held) {
+            alarms.cancel(operation)
+            try {
+                return place(request, operation)
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "the platform refused an alarm again", e)
+            }
+        }
+        operation.cancel()
+        return ArmMode.REFUSED
+    }
+
+    private fun place(request: AlarmRequest, operation: PendingIntent): ArmMode {
         if (canScheduleExact()) {
             try {
                 when (request.kind) {
@@ -98,6 +123,8 @@ class AndroidAlarmScheduler @Inject constructor(
     }
 
     private companion object {
+        const val TAG = "AndroidAlarmScheduler"
+
         /** Request codes from the database start at 1 and count up, so this can never collide with an occurrence's. */
         const val SHOW_REQUEST_CODE = 0
     }

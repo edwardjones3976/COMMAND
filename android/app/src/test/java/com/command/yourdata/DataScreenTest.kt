@@ -3,6 +3,8 @@ package com.command.yourdata
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -161,6 +163,16 @@ class DataScreenTest {
         assertEquals(0, calls.erase)
         compose.onNodeWithTag(DataTags.ERASE_CONFIRM).performClick()
         assertEquals(1, calls.erase)
+    }
+
+    @Test
+    fun `the safe answer comes first, above the one that erases, on a screen wide enough to put them side by side`() {
+        show(ready(erase = EraseStatus.Confirming))
+
+        val keep = compose.onNodeWithTag(DataTags.ERASE_KEEP).getUnclippedBoundsInRoot()
+        val erase = compose.onNodeWithTag(DataTags.ERASE_CONFIRM).getUnclippedBoundsInRoot()
+        assertTrue("keep ends at ${keep.bottom}, erase starts at ${erase.top}", keep.bottom <= erase.top)
+        assertTrue("the answers stay large enough to hit", keep.bottom - keep.top >= 56.dp && erase.bottom - erase.top >= 56.dp)
     }
 
     @Test

@@ -9,6 +9,7 @@ import com.command.data.OccurrenceRepository
 import com.command.domain.alarm.CheckInPoster
 import com.command.domain.alarm.PauseEffects
 import com.command.domain.alarm.RingController
+import com.command.domain.alarm.WindowRoller
 import com.command.domain.time.Clock
 import com.command.domain.voice.Speaker
 import com.command.voice.AndroidSpeechSynthesizer
@@ -80,6 +81,7 @@ abstract class AlarmBindings {
     @Binds abstract fun audioRoutes(impl: AndroidAudioRoutes): AudioRoutes
     @Binds abstract fun checkInPoster(impl: AndroidCheckInPoster): CheckInPoster
     @Binds abstract fun pauseEffects(impl: AndroidPauseEffects): PauseEffects
+    @Binds abstract fun windowRoller(impl: ReconcileWindowRoller): WindowRoller
 }
 
 /**
@@ -96,8 +98,8 @@ object VoiceProviders {
 }
 
 /**
- * Ports whose real implementation arrives in a later milestone. They do nothing, on purpose and visibly: the state
- * machine's effects for them are simply not carried out yet (work enqueueing and window top-up).
+ * A port whose real implementation arrives in a later milestone. It does nothing, on purpose and visibly: the state
+ * machine's effect for it is simply not carried out yet (work enqueueing).
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -105,6 +107,4 @@ object PendingPorts {
     @Provides fun work(): com.command.domain.alarm.WorkEnqueuer = object : com.command.domain.alarm.WorkEnqueuer {
         override fun enqueue(kind: com.command.domain.occurrence.WorkKind, occurrenceId: String) = Unit
     }
-
-    @Provides fun roller(): com.command.domain.alarm.WindowRoller = com.command.domain.alarm.WindowRoller { }
 }
