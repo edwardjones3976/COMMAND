@@ -28,6 +28,7 @@ import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import com.command.testing.android.awaitUntil
 import kotlinx.coroutines.runBlocking
 import org.robolectric.Shadows.shadowOf
 import java.util.concurrent.CountDownLatch
@@ -100,12 +101,14 @@ class DialsTest {
         holder.join()
     }
 
-    /** Long enough for every write that was waiting to land, and for a tap that came after them to be undone if one could be. */
-    private fun settled() {
+    /** Waits for [value] however slow the machine, and then gives a write that was still waiting the time to land over it. */
+    private fun staysAt(dial: Dial, value: Int) {
+        awaitUntil(message = "$dial to be $value") { dials().dials[dial] == value }
         repeat(150) {
             shadowOf(Looper.getMainLooper()).idle()
             Thread.sleep(10)
         }
+        assertEquals(value, dials().dials[dial])
     }
 
     /** A view model as the destination holds it: clearing the store is what leaving the screen does to it. */
@@ -124,8 +127,7 @@ class DialsTest {
             store.clear()
         }
 
-        settled()
-        assertEquals("the last tap to be written", 5, dials().dials[Dial.ALERT_INTENSITY])
+        staysAt(Dial.ALERT_INTENSITY, 5)
     }
 
     @Test
@@ -143,8 +145,7 @@ class DialsTest {
             again.set(Dial.ALERT_INTENSITY, 3)
         }
 
-        settled()
-        assertEquals("the choice made last", 3, dials().dials[Dial.ALERT_INTENSITY])
+        staysAt(Dial.ALERT_INTENSITY, 3)
     }
 
     @Test
@@ -253,8 +254,7 @@ class DialsTest {
             vm.set(Dial.FIRMNESS, 5)
         }
 
-        settled()
-        assertEquals(5, dials().dials.firmness)
+        staysAt(Dial.FIRMNESS, 5)
     }
 
     @Test
