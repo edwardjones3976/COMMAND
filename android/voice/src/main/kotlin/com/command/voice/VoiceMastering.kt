@@ -1,5 +1,6 @@
 package com.command.voice
 
+import com.command.domain.dials.DialEffects
 import com.command.domain.voice.LoudnessMeter
 import com.command.domain.voice.SpeechLevel
 import kotlin.math.PI
@@ -80,15 +81,9 @@ object VoiceMastering {
         data class ALARM(val targetLufs: Float, val trimDb: Float = 0f) : Profile
     }
 
-    /** The alarm profile of an alert intensity: -16 LUFS at 1 to 3, -15 at 4, -14 at 5, plus the pack's trim. */
-    fun alarmProfile(level: SpeechLevel): Profile.ALARM {
-        val target = when {
-            level.alertIntensity >= 5 -> -14f
-            level.alertIntensity == 4 -> -15f
-            else -> -16f
-        }
-        return Profile.ALARM(target, level.trimDb)
-    }
+    /** The alarm profile of an alert intensity: the target the dial gives ([DialEffects.loudnessTargetLufs]), plus the pack's trim. */
+    fun alarmProfile(level: SpeechLevel): Profile.ALARM =
+        Profile.ALARM(DialEffects.loudnessTargetLufs(level.alertIntensity).toFloat(), level.trimDb)
 
     data class Result(
         val pcm: ShortArray,
