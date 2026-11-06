@@ -8,6 +8,8 @@
     <string name="profiles_none_active">No profile is active. Choose one, or missions left on Automatic use the standard settings.</string>
     <string name="profiles_active">Active</string>
     <string name="profiles_make_active">Make active</string>
+    <string name="profiles_active_named">%1$s is active</string>
+    <string name="profiles_make_active_named">Make %1$s active</string>
     <string name="profiles_dials">Dials</string>
     <string name="profiles_dials_named">Dials of %1$s</string>
     <string name="profiles_handshake">Handshake</string>

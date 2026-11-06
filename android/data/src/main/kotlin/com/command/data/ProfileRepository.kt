@@ -73,7 +73,7 @@ class ProfileRepository @Inject constructor(private val db: CommandDb) {
     fun observeHandshake(id: String): Flow<ProfileHandshake?> = db.profiles().observe(id).map { row -> row?.let(::handshakeOf) }.distinctUntilChanged()
 
     /** One profile and its dials for as long as it is collected, and null while there is no such profile. */
-    fun observeDials(id: String): Flow<ProfileDials?> = db.profiles().observe(id).map { row -> row?.let { ProfileDials(handshakeOf(it), dialsOf(it)) } }.distinctUntilChanged()
+    fun observeDials(id: String): Flow<ProfileDials?> = db.profiles().observe(id).map { row -> row?.let { ProfileDials(handshakeOf(it), it.storedDials()) } }.distinctUntilChanged()
 
     /** The id the active-profile setting names. It may name a profile that is gone: a list shows no profile as active then. */
     fun observeActiveId(): Flow<String?> = db.settings().observe(SettingKeys.ACTIVE_PROFILE_ID).map(::activeProfileIdOf).distinctUntilChanged()
@@ -127,10 +127,6 @@ class ProfileRepository @Inject constructor(private val db: CommandDb) {
     /** Goes back to the default chain of the profile's difficulty. True if the profile exists. */
     suspend fun useDefault(id: String): Boolean = db.profiles().setChainJson(id, null) > 0
 
-    private fun dialsOf(row: ProfileRow) = Dials.coerced(
-        listOf(row.firmness, row.obnoxiousness, row.alertIntensity, row.followUpPersistence, row.handshakeDifficulty, row.scheduleRigidity, row.recoveryStructure),
-    )
-
     private fun handshakeOf(row: ProfileRow): ProfileHandshake {
         val own = ChainJson.decode(row.handshakeChainJson)
         return ProfileHandshake(
@@ -144,3 +140,19 @@ class ProfileRepository @Inject constructor(private val db: CommandDb) {
         )
     }
 }
+
+/**
+ * The dials of a stored row, for the ring and for the screens alike. What is out of range costs the setting and never the ring: it is clamped, and
+ * an alert level that cannot be read is the loudest, as it is for the spoken line.
+ */
+internal fun ProfileRow.storedDials(): Dials = Dials.coerced(
+    listOf(
+        firmness,
+        obnoxiousness,
+        alertIntensity.takeIf { it in Dials.RANGE } ?: Dials.RANGE.last,
+        followUpPersistence,
+        handshakeDifficulty,
+        scheduleRigidity,
+        recoveryStructure,
+    ),
+)

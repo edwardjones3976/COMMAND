@@ -47,11 +47,13 @@ import com.command.data.ProfileHandshake
 import com.command.data.ProfileRepository
 import com.example.R
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 sealed interface ProfilesUiState {
@@ -71,9 +73,9 @@ class ProfilesViewModel @Inject constructor(private val profiles: ProfileReposit
     ) { all, active, inUse -> ProfilesUiState.Ready(all, active, inUse) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), ProfilesUiState.Loading)
 
-    /** A profile that has gone meanwhile is not made active, and the list then no longer shows it. */
+    /** A profile that has gone meanwhile is not made active, and the list then no longer shows it. Leaving the screen at once does not undo the choice. */
     fun activate(id: String) {
-        viewModelScope.launch { profiles.activate(id) }
+        viewModelScope.launch { withContext(NonCancellable) { profiles.activate(id) } }
     }
 
     private companion object {
@@ -163,11 +165,14 @@ private fun ProfileCard(profile: ProfileHandshake, active: Boolean, inUse: Boole
     Card(modifier = Modifier.fillMaxWidth().testTag(ProfilesTags.profile(profile.id))) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(profile.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+            // Named for its profile as the buttons below are: the name above is outside this row, and every other row says the same words.
+            val activeNamed = stringResource(if (active) R.string.profiles_active_named else R.string.profiles_make_active_named, profile.name)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 56.dp)
                     .selectable(selected = active, onClick = { actions.onActivate(profile.id) }, role = Role.RadioButton)
+                    .semantics { contentDescription = activeNamed }
                     .testTag(ProfilesTags.active(profile.id)),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

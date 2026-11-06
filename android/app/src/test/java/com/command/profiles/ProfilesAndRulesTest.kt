@@ -3,7 +3,13 @@ package com.command.profiles
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -17,11 +23,13 @@ import com.command.data.db.ActivityProfileRow
 import com.command.data.db.CommandDb
 import com.command.domain.model.SettingKeys
 import com.command.data.db.SettingRow
+import com.command.testing.android.awaitUntil
 import com.command.testing.android.testMission
 import com.command.ui.theme.CommandTheme
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -91,6 +99,50 @@ class ProfilesAndRulesTest {
         compose.onNodeWithTag(ProfilesTags.active("builtin_steady")).assertIsNotSelected()
         assertEquals("\"builtin_command\"", activeSetting())
         assertEquals("builtin_command", runBlocking { ProfileResolver(db).resolve(testMission()) }?.id)
+    }
+
+    /** A view model as the destination holds it: clearing the store is what leaving the screen does to it. */
+    private inline fun <reified T : ViewModel> ViewModelStore.holding(noinline make: () -> T): T =
+        ViewModelProvider(this, viewModelFactory { initializer { make() } })[T::class.java]
+
+    @Test
+    fun `each choice of the active profile is named for its profile, to a screen reader and to a voice`() {
+        showProfiles()
+        val steady = runBlocking { profiles.get("builtin_steady")!!.name }
+        val command = runBlocking { profiles.get("builtin_command")!!.name }
+
+        compose.onNodeWithTag(ProfilesTags.active("builtin_steady")).assertContentDescriptionEquals("$steady is active")
+        compose.onNodeWithTag(ProfilesTags.active("builtin_command")).assertContentDescriptionEquals("Make $command active")
+    }
+
+    @Test
+    fun `leaving the screen does not lose a profile that was just chosen`() {
+        val store = ViewModelStore()
+        val held = store.holding { ProfilesViewModel(profiles) }
+
+        held.activate("builtin_command")
+        store.clear()
+
+        awaitUntil(message = "the choice to be written") { activeSetting() == "\"builtin_command\"" }
+    }
+
+    @Test
+    fun `leaving the screen does not lose a rule being saved, or one being deleted`() {
+        val store = ViewModelStore()
+        val held = store.holding { ActivityRulesViewModel(rules, profiles) }
+        val gate = CompletableDeferred<Unit>()
+        held.beforeWrite = { gate.await() }
+        runBlocking { db.activityProfiles().upsert(ActivityProfileRow("old", "Home", null, "builtin_nudge")) }
+        held.startNew()
+        held.setCategory("Work")
+        held.setProfile("builtin_nudge")
+
+        held.save()
+        held.delete("old")
+        store.clear()
+        gate.complete(Unit)
+
+        awaitUntil(message = "the new rule to be written and the old one to go") { storedRules().map { it.matchCategory } == listOf("Work") }
     }
 
     @Test

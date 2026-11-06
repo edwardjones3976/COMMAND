@@ -14,11 +14,13 @@ import com.command.domain.dials.Dials
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 sealed interface DialsUiState {
@@ -70,10 +72,13 @@ class DialsViewModel @Inject constructor(private val profiles: ProfileRepository
     fun set(dial: Dial, value: Int) {
         val id = profileId ?: return
         val earlier = writing
+        // A tap is written even if the person leaves the screen at once: nothing else on this screen says it was not.
         writing = viewModelScope.launch {
-            earlier?.join()
-            beforeWrite()
-            profiles.setDial(id, dial, value)
+            withContext(NonCancellable) {
+                earlier?.join()
+                beforeWrite()
+                profiles.setDial(id, dial, value)
+            }
         }
     }
 

@@ -4,6 +4,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -81,6 +86,26 @@ class DialsTest {
     }
 
     private fun exists(tag: String) = compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
+
+    /** A view model as the destination holds it: clearing the store is what leaving the screen does to it. */
+    private inline fun <reified T : ViewModel> ViewModelStore.holding(noinline make: () -> T): T =
+        ViewModelProvider(this, viewModelFactory { initializer { make() } })[T::class.java]
+
+    @Test
+    fun `leaving the screen does not lose a tap that is still waiting for the one before it`() {
+        val store = ViewModelStore()
+        val held = store.holding { DialsViewModel(profiles, templates) }
+        val gate = CompletableDeferred<Unit>()
+        held.beforeWrite = { gate.await() }
+        held.open("builtin_steady")
+
+        held.set(Dial.ALERT_INTENSITY, 4)
+        held.set(Dial.ALERT_INTENSITY, 5)
+        store.clear()
+        gate.complete(Unit)
+
+        awaitUntil(message = "the last tap to be written") { dials().dials[Dial.ALERT_INTENSITY] == 5 }
+    }
 
     @Test
     fun `a dial that is tapped is written at once, and the screen shows it from the row`() {

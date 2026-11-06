@@ -9,6 +9,7 @@ import com.command.data.ProfileRepository
 import com.command.data.RuleProblem
 import com.command.data.SaveRuleResult
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /** A rule while it is being written. [id] is null for a new one. While [saving], the fields stay as they were sent, so that what is written is what is shown. */
@@ -42,7 +44,7 @@ class ActivityRulesViewModel @Inject constructor(private val rules: ActivityRule
 
     private val draft = MutableStateFlow<RuleDraft?>(null)
 
-    /** A seam for tests: runs before a rule is written, so that the writes can be counted. */
+    /** A seam for tests: runs before a rule is written, so that the writes can be counted or held back. */
     internal var beforeWrite: suspend () -> Unit = {}
 
     val state: StateFlow<ActivityRulesUiState> = combine<List<ActivityRule>, List<ProfileHandshake>, RuleDraft?, ActivityRulesUiState>(
@@ -76,8 +78,11 @@ class ActivityRulesViewModel @Inject constructor(private val rules: ActivityRule
         val sent = draft.value?.takeUnless { it.saving }?.copy(problems = emptySet(), saving = true) ?: return
         draft.value = sent
         viewModelScope.launch {
-            beforeWrite()
-            val result = rules.save(sent.id, sent.category, sent.words, sent.profileId)
+            // What was accepted is written even if the person leaves the screen at once.
+            val result = withContext(NonCancellable) {
+                beforeWrite()
+                rules.save(sent.id, sent.category, sent.words, sent.profileId)
+            }
             // The person may have left the form, and even started another rule, while this was written: an answer is only for the draft it was asked for.
             draft.update { now ->
                 when {
@@ -90,7 +95,12 @@ class ActivityRulesViewModel @Inject constructor(private val rules: ActivityRule
     }
 
     fun delete(id: String) {
-        viewModelScope.launch { rules.delete(id) }
+        viewModelScope.launch {
+            withContext(NonCancellable) {
+                beforeWrite()
+                rules.delete(id)
+            }
+        }
     }
 
     private inline fun change(how: (RuleDraft) -> RuleDraft) = draft.update { now -> if (now == null || now.saving) now else how(now) }

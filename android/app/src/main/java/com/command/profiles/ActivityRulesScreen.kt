@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -202,7 +203,7 @@ private fun RuleCard(line: RuleLine, actions: RulesActions, onDelete: () -> Unit
 @Composable
 private fun RuleForm(draft: RuleDraft, profiles: List<ProfileHandshake>, actions: RulesActions, modifier: Modifier) {
     LazyColumn(
-        modifier = modifier.fillMaxSize().testTag(RulesTags.FORM),
+        modifier = modifier.fillMaxSize().imePadding().testTag(RulesTags.FORM),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
