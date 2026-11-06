@@ -11,6 +11,7 @@ import com.command.domain.alarm.CheckInPrompt
 import com.command.domain.voice.SpeechLevel
 import com.command.data.db.VoicePackRow
 import com.command.domain.coaching.CoachingPhase
+import com.command.domain.dials.Dial
 import com.command.domain.dials.AlertPlan
 import com.command.domain.dials.ChainOp
 import com.command.domain.dials.ChainSpec
@@ -595,6 +596,23 @@ class OccurrenceRepositoryTest {
         assertEquals(f.t0 + 30 * 60_000L, child.scheduledAtUtc)
         assertNotEquals(o.requestCode, child.requestCode)
         assertTrue("child alarm is armed", f.scheduler.armed.containsKey("command://occurrence/${child.id}"))
+    }
+
+    @Test
+    fun `lowering persistence on the dial while a follow-up is waiting cannot leave the occurrence waiting for ever`() = run {
+        val profiles = ProfileRepository(f.db)
+        profiles.setDial("builtin_steady", Dial.FOLLOW_UP_PERSISTENCE, 5)
+        val o = scheduled()
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)
+        apply(o, OccurrenceCommand.Acknowledge()); apply(o, OccurrenceCommand.StartGuidance)
+        apply(o, OccurrenceCommand.CheckInDue(0))
+        apply(o, OccurrenceCommand.CheckInDue(1))
+        assertTrue(f.scheduler.armed.containsKey("command://checkin/${o.id}/2"))
+
+        profiles.setDial("builtin_steady", Dial.FOLLOW_UP_PERSISTENCE, 1)
+        apply(o, OccurrenceCommand.CheckInDue(2))
+
+        assertEquals(OccurrenceState.UNCONFIRMED, state(o))
     }
 
     @Test

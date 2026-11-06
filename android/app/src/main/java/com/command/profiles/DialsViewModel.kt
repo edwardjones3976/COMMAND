@@ -13,7 +13,6 @@ import com.command.domain.dials.Dial
 import com.command.domain.dials.Dials
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -52,12 +51,6 @@ class DialsViewModel @Inject constructor(private val profiles: ProfileRepository
 
     private var profileId: String? = null
 
-    /** The last write asked for. Writes run one after another, so that the value tapped last is the one that stays. */
-    private var writing: Job? = null
-
-    /** A seam for tests: runs before a dial is written, so that a slow write can be made to come after a later tap. */
-    internal var beforeWrite: suspend () -> Unit = {}
-
     fun open(id: String) {
         if (profileId == id) return
         profileId = id
@@ -71,15 +64,9 @@ class DialsViewModel @Inject constructor(private val profiles: ProfileRepository
 
     fun set(dial: Dial, value: Int) {
         val id = profileId ?: return
-        val earlier = writing
-        // A tap is written even if the person leaves the screen at once: nothing else on this screen says it was not.
-        writing = viewModelScope.launch {
-            withContext(NonCancellable) {
-                earlier?.join()
-                beforeWrite()
-                profiles.setDial(id, dial, value)
-            }
-        }
+        // A tap is written even if the person leaves the screen at once: nothing else on this screen says it was not. This runs at once up to
+        // the repository's queue, on the thread of the tap, so that the value tapped last is the one that stays, on this screen or one opened after it.
+        viewModelScope.launch { withContext(NonCancellable) { profiles.setDial(id, dial, value) } }
     }
 
     /** A row that cannot be read (from a newer version, say) costs the person's own wording in the preview, as it does on the ring. */

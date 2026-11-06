@@ -14,6 +14,8 @@ import com.command.domain.dials.PresetOrigin
 import com.command.domain.dials.issues
 import com.command.domain.model.SettingKeys
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -63,6 +65,12 @@ internal fun activeProfileIdOf(raw: String?): String? = raw?.trim('"')?.takeIf {
 /** The profiles as the screens see them: their handshake chains, who is in use, who speaks for them and which is active. */
 @Singleton
 class ProfileRepository @Inject constructor(private val db: CommandDb) {
+    /** Dial writes land in the order they were asked for, from whichever screen: a Mutex is fair, and this class is one for the whole app. */
+    private val dialWrites = Mutex()
+
+    /** A seam for tests: runs in its turn, before a dial is written, so that a write can be made as slow as a test needs. */
+    internal var beforeDialWrite: suspend () -> Unit = {}
+
     private val resolver = ProfileResolver(db)
 
     fun observe(): Flow<List<ProfileHandshake>> = db.profiles().observeAll().map { rows -> rows.map(::handshakeOf) }
@@ -82,15 +90,18 @@ class ProfileRepository @Inject constructor(private val db: CommandDb) {
     suspend fun setDial(id: String, dial: Dial, value: Int): Boolean {
         if (value !in Dials.RANGE) return false
         val profiles = db.profiles()
-        return when (dial) {
-            Dial.FIRMNESS -> profiles.setFirmness(id, value)
-            Dial.OBNOXIOUSNESS -> profiles.setObnoxiousness(id, value)
-            Dial.ALERT_INTENSITY -> profiles.setAlertIntensity(id, value)
-            Dial.FOLLOW_UP_PERSISTENCE -> profiles.setFollowUpPersistence(id, value)
-            Dial.HANDSHAKE_DIFFICULTY -> profiles.setHandshakeDifficulty(id, value)
-            Dial.SCHEDULE_RIGIDITY -> profiles.setScheduleRigidity(id, value)
-            Dial.RECOVERY_STRUCTURE -> profiles.setRecoveryStructure(id, value)
-        } > 0
+        return dialWrites.withLock {
+            beforeDialWrite()
+            when (dial) {
+                Dial.FIRMNESS -> profiles.setFirmness(id, value)
+                Dial.OBNOXIOUSNESS -> profiles.setObnoxiousness(id, value)
+                Dial.ALERT_INTENSITY -> profiles.setAlertIntensity(id, value)
+                Dial.FOLLOW_UP_PERSISTENCE -> profiles.setFollowUpPersistence(id, value)
+                Dial.HANDSHAKE_DIFFICULTY -> profiles.setHandshakeDifficulty(id, value)
+                Dial.SCHEDULE_RIGIDITY -> profiles.setScheduleRigidity(id, value)
+                Dial.RECOVERY_STRUCTURE -> profiles.setRecoveryStructure(id, value)
+            } > 0
+        }
     }
 
     /** The ids of the profiles that alarms are fired with (see [ProfileResolver.observeInUse]). Editing any other reaches no alarm, and the screens say so. */

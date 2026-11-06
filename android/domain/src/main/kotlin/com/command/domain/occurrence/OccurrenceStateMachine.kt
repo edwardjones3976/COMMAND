@@ -250,7 +250,8 @@ object OccurrenceStateMachine {
         private fun checkInDue(index: Int, lateMs: Long): TransitionResult {
             if (s.state !in FOLLOW_UP) return illegal()
             val nextQuestion = index == asked && index < schedule.count
-            val finalTimeout = index == schedule.count && asked == schedule.count
+            // The dial can be lowered below what has been asked already. Then the alarm that is waiting is the last one: nothing else is armed.
+            val finalTimeout = index == asked && asked >= schedule.count
             if (!nextQuestion && !finalTimeout) return illegal()
             if (s.restEndsAtUtc != null) {
                 // Protected time: neither ask nor count the silence; try again after the window.

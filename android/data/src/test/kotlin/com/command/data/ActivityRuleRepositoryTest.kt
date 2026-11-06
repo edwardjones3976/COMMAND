@@ -4,7 +4,12 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.command.domain.dials.Dial
 import com.command.domain.dials.Dials
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -119,6 +124,22 @@ class ActivityRuleRepositoryTest {
             assertEquals(dial.name, rowBefore.personality, rowAfter.personality)
         }
         assertEquals("no other profile was touched", com.command.domain.dials.Presets.dialsFor(com.command.domain.dials.PresetOrigin.NUDGE), profiles.observeDials("builtin_nudge").first()!!.dials)
+    }
+
+    @Test
+    fun `dial writes land in the order they were asked for, however slow the first, as the writes of the database promise no order`() = run {
+        val gate = CompletableDeferred<Unit>()
+        var writes = 0
+        profiles.beforeDialWrite = { if (writes++ == 0) gate.await() }
+
+        coroutineScope {
+            launch(start = CoroutineStart.UNDISPATCHED) { profiles.setDial("builtin_steady", Dial.FIRMNESS, 1) }
+            launch(start = CoroutineStart.UNDISPATCHED) { profiles.setDial("builtin_steady", Dial.FIRMNESS, 5) }
+            delay(500) // a second write that had not waited its turn would have landed by now, before the first
+            gate.complete(Unit)
+        }
+
+        assertEquals(5, profiles.observeDials("builtin_steady").first()!!.dials.firmness)
     }
 
     @Test

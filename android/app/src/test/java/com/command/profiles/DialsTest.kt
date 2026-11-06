@@ -22,15 +22,17 @@ import com.command.domain.coaching.CoachingPhase
 import com.command.domain.dials.Dial
 import com.command.domain.dials.DialEffects
 import com.command.domain.dials.Personality
-import com.command.testing.android.awaitUntil
 import com.command.ui.theme.CommandTheme
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import org.robolectric.Shadows.shadowOf
+import java.util.concurrent.CountDownLatch
+import kotlin.concurrent.thread
+import android.os.Looper
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -87,6 +89,25 @@ class DialsTest {
 
     private fun exists(tag: String) = compose.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
 
+    /** Runs [block] while another transaction holds the database, so that every write it starts is as slow as it needs to be. */
+    private fun whileWritesWait(block: () -> Unit) {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val holder = thread { db.runInTransaction { entered.countDown(); release.await() } }
+        entered.await()
+        block()
+        release.countDown()
+        holder.join()
+    }
+
+    /** Long enough for every write that was waiting to land, and for a tap that came after them to be undone if one could be. */
+    private fun settled() {
+        repeat(150) {
+            shadowOf(Looper.getMainLooper()).idle()
+            Thread.sleep(10)
+        }
+    }
+
     /** A view model as the destination holds it: clearing the store is what leaving the screen does to it. */
     private inline fun <reified T : ViewModel> ViewModelStore.holding(noinline make: () -> T): T =
         ViewModelProvider(this, viewModelFactory { initializer { make() } })[T::class.java]
@@ -95,16 +116,35 @@ class DialsTest {
     fun `leaving the screen does not lose a tap that is still waiting for the one before it`() {
         val store = ViewModelStore()
         val held = store.holding { DialsViewModel(profiles, templates) }
-        val gate = CompletableDeferred<Unit>()
-        held.beforeWrite = { gate.await() }
         held.open("builtin_steady")
 
-        held.set(Dial.ALERT_INTENSITY, 4)
-        held.set(Dial.ALERT_INTENSITY, 5)
-        store.clear()
-        gate.complete(Unit)
+        whileWritesWait {
+            held.set(Dial.ALERT_INTENSITY, 4)
+            held.set(Dial.ALERT_INTENSITY, 5)
+            store.clear()
+        }
 
-        awaitUntil(message = "the last tap to be written") { dials().dials[Dial.ALERT_INTENSITY] == 5 }
+        settled()
+        assertEquals("the last tap to be written", 5, dials().dials[Dial.ALERT_INTENSITY])
+    }
+
+    @Test
+    fun `a tap on the screen opened again stays, over taps from before that were still waiting`() {
+        val store = ViewModelStore()
+        val before = store.holding { DialsViewModel(profiles, templates) }
+        before.open("builtin_steady")
+        val again = DialsViewModel(profiles, templates)
+        again.open("builtin_steady")
+
+        whileWritesWait {
+            before.set(Dial.ALERT_INTENSITY, 4)
+            before.set(Dial.ALERT_INTENSITY, 5)
+            store.clear()
+            again.set(Dial.ALERT_INTENSITY, 3)
+        }
+
+        settled()
+        assertEquals("the choice made last", 3, dials().dials[Dial.ALERT_INTENSITY])
     }
 
     @Test
@@ -207,18 +247,13 @@ class DialsTest {
     @Test
     fun `two taps on one dial leave the one tapped last, however slow the first write`() {
         show()
-        val gate = CompletableDeferred<Unit>()
-        var writes = 0
-        vm.beforeWrite = { if (writes++ == 0) gate.await() }
 
-        vm.set(Dial.FIRMNESS, 1)
-        vm.set(Dial.FIRMNESS, 5)
-        gate.complete(Unit)
+        whileWritesWait {
+            vm.set(Dial.FIRMNESS, 1)
+            vm.set(Dial.FIRMNESS, 5)
+        }
 
-        awaitDial(Dial.FIRMNESS, 5)
-        awaitUntil(message = "both started") { writes == 2 }
-        Thread.sleep(500) // a first write that had waited for nothing would land by now, over the second
-        compose.waitForIdle()
+        settled()
         assertEquals(5, dials().dials.firmness)
     }
 
