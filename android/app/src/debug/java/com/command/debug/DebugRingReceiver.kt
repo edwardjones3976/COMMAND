@@ -28,7 +28,8 @@ import java.util.UUID
 
 /**
  * Debug builds only (this file is in the debug source set, so a release build does not contain it): creates a mission and
- * arms its occurrence a few seconds from now, so a ring can be started from a shell on the emulator.
+ * arms its occurrence a few seconds from now, so a ring can be started from a shell on the emulator. Its missions' ids start with
+ * "synthetic-", which no mission a person makes can have: scripts/receipt-redact.py reads only a database of such missions.
  *
  *   adb shell am broadcast -a com.command.debug.RING -p com.aistudio.command.vtxrpl --ei seconds 20 --es title "Stand up"
  *   optional: --es profile builtin_reveille_max   --ez rigid true
@@ -61,7 +62,7 @@ class DebugRingReceiver : BroadcastReceiver() {
                 val clock = graph.clock()
                 val at = clock.nowMs() + seconds * 1000L
                 val mission = MissionRow(
-                    id = UUID.randomUUID().toString(), title = title, firstAction = "Open the first thing and give it five minutes",
+                    id = "synthetic-" + UUID.randomUUID(), title = title, firstAction = "Open the first thing and give it five minutes",
                     category = "Debug", priority = 2, flexibility = if (rigid) Flexibility.RIGID else Flexibility.FLEXIBLE, rigidWeekdays = null,
                     source = MissionSource.MANUAL, startKind = StartKind.ONE_OFF, startAtUtc = at, dtstartLocal = null, rrule = null,
                     zoneMode = ZoneMode.DEVICE, zoneId = null, durationMin = 30, starterMinutes = 5, profileId = profile, lockPolicy = null,

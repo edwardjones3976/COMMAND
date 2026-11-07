@@ -74,10 +74,12 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
-      # The phone signing identity (amendment 39): when the repository holds the keystore as a secret, every APK here is signed with it, so a
-      # later build installs over an earlier one on the owner's phone. Without the secret nothing changes: a throwaway debug key and an unsigned
-      # release. The keystore is written outside the checkout and never uploaded.
-      - name: Phone signing identity, if the repository has one
+      # The phone signing identity (amendment 39): when the repository holds the keystore as a secret, the APKs of a build of main are signed
+      # with it, so a later build installs over an earlier one on the owner's phone. A pull request's build runs code nobody has merged yet, so it
+      # never gets the key: it stays on a throwaway debug key and an unsigned release, as does every build without the secret. The keystore is
+      # written outside the checkout and never uploaded.
+      - name: Phone signing identity, for a build of main if the repository has one
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           KEYSTORE_B64: ${{ secrets.COMMAND_SIGNING_KEYSTORE_B64 }}
         run: |
@@ -88,7 +90,11 @@ jobs:
           else
             echo "No phone signing identity in this repository: the debug APK is signed with this runner's throwaway key and cannot update one built elsewhere." >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: Assemble debug, noexact and release APKs
+      - name: Assemble debug, noexact and release APKs (pull request, never with the phone key)
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
+        run: ./gradlew --no-daemon assembleDebug assembleRelease assembleNoexact
+      - name: Assemble debug, noexact and release APKs (main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           COMMAND_SIGNING_STORE_PASSWORD: ${{ secrets.COMMAND_SIGNING_STORE_PASSWORD }}
           COMMAND_SIGNING_KEY_ALIAS: ${{ secrets.COMMAND_SIGNING_KEY_ALIAS }}

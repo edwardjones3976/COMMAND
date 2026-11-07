@@ -25,9 +25,12 @@ MANIFEST = """<?xml version="1.0" encoding="utf-8"?>
 """
 
 
-def receipt(*names, internet_note=True):
+NOTE = "INTERNET is declared and no running code uses it."
+
+
+def receipt(*names, internet_note=True, note_text=NOTE):
     items = "".join(f"<li><code>{n}</code> what it is for</li>" for n in names)
-    note = '<p id="internet-unused">INTERNET is declared and no running code uses it.</p>' if internet_note else ""
+    note = f'<p id="internet-unused"><strong>{note_text}</strong></p>' if internet_note else ""
     return f'<html lang="en"><body><p><code>android.permission.CAMERA</code> is not asked for.</p><ul id="permissions">{items}</ul>{note}</body></html>'
 
 
@@ -91,6 +94,16 @@ class PermissionsTest(unittest.TestCase):
         code, text = self.check()
         self.assertEqual(1, code)
         self.assertIn("internet-unused", text)
+
+    def test_an_empty_statement_does_not_count(self):
+        self.write_receipt(receipt(*ALL, note_text=""))
+        code, text = self.check()
+        self.assertEqual(1, code)
+        self.assertIn("internet-unused", text)
+
+    def test_a_statement_that_does_not_say_nothing_uses_internet_does_not_count(self):
+        self.write_receipt(receipt(*ALL, note_text="INTERNET is used to fetch voices."))
+        self.assertEqual(1, self.check()[0])
 
     def test_a_receipt_without_a_list_fails(self):
         self.write_receipt('<html lang="en"><body></body></html>')

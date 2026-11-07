@@ -435,12 +435,18 @@ hardening_run() { # hardening_run <enable|throw>
   adb shell am force-stop "$PKG"
   sleep 3
   local after_stop; after_stop="$(alarm_volume | cut -d' ' -f1)"
+  adb logcat -c
   # After a force-stop Android redelivers BOOT_COMPLETED when the process next starts, and that reconcile restores what a dead ring raised.
   adb shell am broadcast -a com.command.debug.CHECKIN_DUE -p "$PKG" -f 32 >/dev/null
   wait_for 90 volume_is "$low" && restored=yes
   if event_seen VOLUME_SET_REFUSED "occurrence_id = '$id'"; then
     refused="$(sql "SELECT payload_json FROM events WHERE type = 'VOLUME_SET_REFUSED' AND occurrence_id = '$id'" | head -1)"
   fi
+  # The background reconcile also re-arms the alarms, so it must finish whatever the volume did: a failed or retried run is a FAIL even if the
+  # level comes back later (before amendment 39, throw mode failed it and opening the app still restored the level).
+  local reconciles; reconciles="$(timeout 30 adb logcat -d | grep -E 'Worker result [A-Z]+ for Work .*ReconcileAlarmsWorker' | sed -n 's/.*Worker result \([A-Z]*\) .*/\1/p' | sort | uniq -c | tr -s ' ' | tr '\n' ',')"
+  local reconcile_ok=yes
+  if [ -z "$reconciles" ] || printf '%s' "$reconciles" | grep -q -E 'RETRY|FAILURE'; then reconcile_ok=no; fi
   # Enforced, the platform drops that restore without an error (measured). The record of what to put back must then outlive it, so that the
   # app's own screen, which hardening allows, puts the level back when it is opened.
   local on_open=""
@@ -453,7 +459,11 @@ hardening_run() { # hardening_run <enable|throw>
   seen="$seen; $logged hardening log lines; level after force-stop $after_stop; put back to $low with the app unopened=${restored:-no}"
   [ -z "$refused" ] || seen="$seen (VOLUME_SET_REFUSED $refused)"
   [ -n "$restored" ] || seen="$seen; put back when the app was opened=${on_open:-no}"
-  if [ "$path" = FGS ] && [ "$playing" = yes ] && [ "$raised" = yes ] && { [ "$restored" = yes ] || [ "$on_open" = yes ]; }; then
+  seen="$seen; background reconciles: ${reconciles:-none seen}"
+  # Put back in the background; or dropped there, with the refusal logged (so the record was kept, not cleared as a floor) and done on opening.
+  local volume_ok=no
+  if [ "$restored" = yes ] || { [ -n "$refused" ] && [ "$on_open" = yes ]; }; then volume_ok=yes; fi
+  if [ "$path" = FGS ] && [ "$playing" = yes ] && [ "$raised" = yes ] && [ "$volume_ok" = yes ] && [ "$reconcile_ok" = yes ]; then
     result "$name" PASS "$seen"
   else
     result "$name" FAIL "$seen"

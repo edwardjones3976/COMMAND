@@ -11,6 +11,7 @@ also carry the element with id "internet-unused" that says no running code uses 
 feature arrives (NoNetworkInRuntimeCodeTest guards the code half).
 """
 import html.parser
+import re
 import sys
 import xml.etree.ElementTree as ET
 
@@ -45,11 +46,18 @@ class _Receipt(html.parser.HTMLParser):
         self.names = []
         self.ids = set()
         self.found_list = False
+        self.note_tag = None  # the tag of the id="internet-unused" element while inside it
+        self.note_depth = 0
+        self.note = ""
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         if attrs.get("id"):
             self.ids.add(attrs["id"])
+        if attrs.get("id") == "internet-unused" and self.note_tag is None:
+            self.note_tag, self.note_depth = tag, 1
+        elif self.note_tag == tag:
+            self.note_depth += 1
         if tag == "ul" and attrs.get("id") == "permissions":
             self.depth, self.found_list = 1, True
         elif self.depth and tag == "ul":
@@ -59,14 +67,23 @@ class _Receipt(html.parser.HTMLParser):
             self.names.append("")
 
     def handle_endtag(self, tag):
+        if self.note_tag == tag and self.note_depth:
+            self.note_depth -= 1
         if tag == "code":
             self.in_code = False
         elif self.depth and tag == "ul":
             self.depth -= 1
 
     def handle_data(self, data):
+        if self.note_depth:
+            self.note += data
         if self.in_code:
             self.names[-1] += data
+
+
+# What the id="internet-unused" element must say: it names INTERNET and says that nothing uses it ("no running code uses it", "no code that
+# runs uses it"). An empty element, or one that says something else, does not count.
+STATEMENT = re.compile(r"INTERNET\b.*\bno\b.*\buses it\b", re.IGNORECASE)
 
 
 def check(receipt_path, manifest_path):
@@ -80,8 +97,8 @@ def check(receipt_path, manifest_path):
     asked = set(requested(manifest_path))
     problems = [f"asked for by the release manifest but not in the receipt: {n}" for n in sorted(asked - listed)]
     problems += [f"in the receipt but not asked for by the release manifest: {n}" for n in sorted(listed - asked)]
-    if "android.permission.INTERNET" in asked and "internet-unused" not in parser.ids:
-        problems.append('INTERNET is declared, so the receipt needs the element id="internet-unused" saying no running code uses it')
+    if "android.permission.INTERNET" in asked and not STATEMENT.search(" ".join(parser.note.split())):
+        problems.append('INTERNET is declared, so the receipt needs the element id="internet-unused" saying that no code that runs uses it')
     return problems
 
 

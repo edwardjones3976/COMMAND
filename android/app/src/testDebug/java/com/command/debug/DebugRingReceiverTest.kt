@@ -13,6 +13,7 @@ import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -58,6 +59,14 @@ class DebugRingReceiverTest {
         ring("relvolume", volume = true)
         awaitUntil(message = "the occurrence is armed") { armed("relvolume") }
         awaitUntil(message = "the volume consent is given") { runBlocking { consents.isGranted(ConsentKey.VOLUME_CONTROL) } }
+    }
+
+    @Test
+    fun `its missions carry an id no person's mission can have, which is how the receipt's redaction knows them`() {
+        ring("relsynthetic")
+        awaitUntil(message = "the occurrence is armed") { armed("relsynthetic") }
+        val id = runBlocking { db.missions().all().single { it.title == "relsynthetic" }.id }
+        assertTrue("id was $id", id.startsWith("synthetic-"))
     }
 
     @Test

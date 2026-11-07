@@ -6,7 +6,8 @@
 Prints, for every event of every occurrence, in the order they were written: the event type, its time (UTC), the state the occurrence had
 reached by then, and the occurrence's request code. Nothing else leaves the database: no title, first step, id, payload, boot id or note.
 
-It reads only a run of synthetic missions, the ones the debug build's ring starter makes (category "Debug" with its fixed first step). A
+It reads only a run of synthetic missions, the ones the debug build's ring starter makes (an id starting "synthetic-", category "Debug" and
+its fixed first step). A
 database holding any other mission, or none, gives no output and exit status 2: a real person's alarms never go into a receipt, redacted or not.
 Keep the -wal and -shm files next to the database copy, or the latest events are not in it.
 """
@@ -19,6 +20,9 @@ import sys
 SYNTHETIC_CATEGORY = "Debug"
 # The first step DebugRingReceiver gives every mission it makes (android/app/src/debug/java/com/command/debug/DebugRingReceiver.kt).
 SYNTHETIC_FIRST_ACTION = "Open the first thing and give it five minutes"
+# The prefix of the id DebugRingReceiver gives a mission. A person can file a mission as "Debug" with the same first step in the editor, but
+# cannot choose its id (the app makes ids), so the prefix is what tells a synthetic mission from a real one.
+SYNTHETIC_ID_PREFIX = "synthetic-"
 COLUMNS = ("type", "time", "state", "request_code")
 
 
@@ -29,8 +33,10 @@ def utc(ms):
 
 def trail(db):
     """The redacted rows, or None when the database is not a synthetic run."""
-    missions = db.execute("SELECT category, first_action FROM missions").fetchall()
-    if not missions or any(m != (SYNTHETIC_CATEGORY, SYNTHETIC_FIRST_ACTION) for m in missions):
+    missions = db.execute("SELECT id, category, first_action FROM missions").fetchall()
+    if not missions or any(
+        not str(i).startswith(SYNTHETIC_ID_PREFIX) or (c, a) != (SYNTHETIC_CATEGORY, SYNTHETIC_FIRST_ACTION) for i, c, a in missions
+    ):
         return None
     rows = db.execute(
         "SELECT e.occurrence_id, e.type, e.at_utc, e.payload_json, o.request_code"
