@@ -166,8 +166,6 @@ class ReveilleService : Service() {
             settle()
             return
         }
-        // A preview on the voice screen is as loud as this line will be, and the alarm comes first.
-        session.ringStarting()
         val ringing = active
         val setFor = intent?.getLongExtra(AlarmContract.EXTRA_AT, AlarmContract.NO_TIME) ?: AlarmContract.NO_TIME
         try {
@@ -191,6 +189,8 @@ class ReveilleService : Service() {
             // it. If the database then says this alarm is stale or its plan is over, the sound is stopped again.
             holdWakeLock()
             output.start()
+            // A preview on the voice screen is as loud as an alarm, and it goes now. After the sound: letting go of its engine is nothing a ring should wait for.
+            session.ringStarting()
             // The speech engine takes seconds to start on some phones, so it is started now, alongside the database work that comes
             // next, and not when the first line is asked for.
             runCatching { speaker.prepare() }

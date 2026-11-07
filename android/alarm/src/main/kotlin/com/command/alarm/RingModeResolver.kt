@@ -46,8 +46,6 @@ class RingModeResolver @Inject constructor(
         val row = (fired as? ApplyResult.Applied)?.occurrence
             ?: repository.get(occurrenceId)?.takeIf { it.state == OccurrenceState.FIRING }
             ?: return // stale: nothing to ring for
-        // A preview on the voice screen is as loud as an alarm, and the alarm comes first. The receiver can come here without the service ever having started.
-        session.ringStarting()
 
         val remaining = SessionPlan.of(row)?.let { it.totalMs - it.elapsedMs(clock) } ?: 0L
         if (remaining <= 0) {
@@ -69,6 +67,9 @@ class RingModeResolver @Inject constructor(
             NotificationManagerCompat.from(context).cancel(occurrenceId, AlarmContract.ID_FALLBACK)
             return
         }
+        // A preview on the voice screen is as loud as an alarm, and it goes now: the receiver can come here without the service ever having started. After
+        // the post, because letting go of its engine is nothing a ring should wait for.
+        session.ringStarting()
         repository.logEvent(EventType.RING_DEGRADED, row, EventSource.RECEIVER, EventPayload.of("reason" to reason, "notified" to posted))
     }
 }

@@ -146,6 +146,16 @@ class ReveilleServiceSpeechTest {
     }
 
     @Test
+    fun `the tone is already sounding when a preview is dealt with, so a slow engine cannot hold a ring up`() {
+        var soundingThen = false
+        session.onRingStarting = { soundingThen = output.ringing }
+
+        startService(armed())
+
+        assertTrue(soundingThen)
+    }
+
+    @Test
     fun `a preview that cannot be stopped does not hold a ring up`() {
         session.onRingStarting = { error("a broken preview") }
 

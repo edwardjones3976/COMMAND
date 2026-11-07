@@ -40,7 +40,7 @@ sealed interface PreviewResult {
  * The ring always wins. A preview is refused while the service is ringing or checking a delivery, and a ring that starts cuts it off at once and
  * lets its engine go ([RingSession.ringStarting]), so that the ring's own engine has the phone's speech service to itself. The service starts a delivery
  * on the main thread, and [say] is called on it (the view model's scope is), with nothing suspending between the check and the speaker counting the
- * line as its own, so a delivery cannot slip between the two: if it comes later, it finds a line to stop. Being a separate instance, stopping or
+ * line as its own, so a delivery cannot slip between the two: if it comes later, it finds a line to stop, just after its tone has started. Being a separate instance, stopping or
  * letting go of this speaker cannot cut off or delay the line of a ring.
  *
  * Known limit: a fallback ring, which sounds from a notification with no service, cuts off a preview as it starts but does not count as busy, so a

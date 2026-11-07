@@ -522,13 +522,18 @@ class ReveilleServiceTest {
 
     @Test
     fun `a degraded ring cuts off a preview too, whether or not the service ever started`() {
-        var cuts = 0
-        session.onRingStarting = { cuts++ }
         val o = armed()
+        var cuts = 0
+        var posted = false
+        session.onRingStarting = {
+            cuts++
+            posted = notifications().getNotification(o.id, AlarmContract.ID_FALLBACK) != null
+        }
 
         runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
 
         assertEquals(1, cuts)
+        assertTrue("the ring is out before a preview is dealt with", posted)
     }
 
     @Test
