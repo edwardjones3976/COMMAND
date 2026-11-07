@@ -124,6 +124,49 @@ class ScheduleScreenTest {
     }
 
     @Test
+    fun `an alarm the platform refused says it will not ring and points to the reliability page`() {
+        val r = Recorder()
+        show(ready(upcoming = listOf(row("a", "Standup", OccurrenceState.ARMED, at(2, 11), armMode = ArmMode.REFUSED))), r)
+
+        compose.onNodeWithText("Will not ring. Android refused this alarm.").assertIsDisplayed()
+        compose.onNodeWithText("Set").assertDoesNotExist()
+        compose.onNodeWithTag(ScheduleTags.row("a")).assert(androidx.compose.ui.test.hasContentDescription("Will not ring", substring = true))
+
+        compose.onNodeWithTag(ScheduleTags.refused("a")).performClick()
+        assertEquals(1, r.reliability)
+        assertEquals("the link does not also open the mission", emptyList<String>(), r.opened)
+
+        compose.onNodeWithTag(ScheduleTags.row("a")).performClick()
+        assertEquals("the row itself still opens the mission", listOf("mission-a"), r.opened)
+    }
+
+    @Test
+    fun `a refused alarm that was only scheduled is told the same way`() {
+        show(ready(upcoming = listOf(row("a", "Standup", OccurrenceState.SCHEDULED, at(2, 11), armMode = ArmMode.REFUSED))))
+        compose.onNodeWithText("Will not ring. Android refused this alarm.").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a refused alarm inside a pause is on hold, with nothing to fix until the pause ends`() {
+        show(ready(upcoming = listOf(row("a", "Standup", OccurrenceState.ARMED, at(2, 11), armMode = ArmMode.REFUSED)), pausedUntil = at(2, 15)))
+        compose.onNodeWithText("On hold, paused").assertIsDisplayed()
+        compose.onNodeWithTag(ScheduleTags.refused("a")).assertDoesNotExist()
+    }
+
+    @Test
+    fun `a ringing alarm that was refused earlier is told as ringing`() {
+        show(ready(upcoming = listOf(row("a", "Standup", OccurrenceState.FIRING, at(2, 8), armMode = ArmMode.REFUSED))))
+        compose.onNodeWithText("Ringing now").assertIsDisplayed()
+        compose.onNodeWithTag(ScheduleTags.refused("a")).assertDoesNotExist()
+    }
+
+    @Test
+    fun `an alarm that is set shows no reliability link of its own`() {
+        show(ready(upcoming = listOf(row("a", "Standup", OccurrenceState.ARMED, at(2, 11)))))
+        compose.onNodeWithTag(ScheduleTags.refused("a")).assertDoesNotExist()
+    }
+
+    @Test
     fun `what happened is told in plain words and silenced or missed is never called started`() {
         show(
             ready(

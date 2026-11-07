@@ -485,6 +485,105 @@ class MissionRepositoryTest {
         assertTrue(snapshot.recent.isEmpty())
     }
 
+    @Test
+    fun `the two lists are bounded separately and each keeps its order, from one read`() = run {
+        repeat(30) { i -> saved(draft(title = "Mission $i", schedule = daily(LocalTime.of(10, 0)))) } // 210 upcoming rows
+        val done = (1..55).map { i -> occurrencesOf(saved(draft(title = "Done $i", schedule = ScheduleDraft.Once(at(i * hour))))).single() }
+        for (occ in done) f.repo.apply(occ.id, OccurrenceCommand.Miss(MissReason.DOWNTIME, lateMs = 0), EventSource.SYSTEM)
+
+        val snapshot = missions.observeSchedule().first()
+
+        assertEquals(200, snapshot.upcoming.size)
+        assertEquals(snapshot.upcoming.map { it.scheduledAtUtc }.sorted(), snapshot.upcoming.map { it.scheduledAtUtc })
+        assertEquals("the cap keeps the soonest: all of the first day's, and the last day's are what it drops", 30, snapshot.upcoming.count { it.scheduledAtUtc == f.t0 + hour })
+        assertEquals("a full upcoming list leaves history its own room", 50, snapshot.recent.size)
+        assertEquals(done.reversed().take(50).map { it.id }, snapshot.recent.map { it.occurrenceId })
+    }
+
+    /**
+     * The screen keys its rows by occurrence, across both lists, and throws on a key it has seen. Two flows, one for each list, reach their reader one
+     * after the other, so a row that moved could be in both lists or in neither.
+     */
+    @Test
+    fun `an occurrence that moves from upcoming to recent is in one list in every snapshot`() = runBlocking {
+        val seen = java.util.concurrent.CopyOnWriteArrayList<ScheduleSnapshot>()
+        val watcher = launch(kotlinx.coroutines.Dispatchers.Default) { missions.observeSchedule().collect { seen += it } }
+        suspend fun awaitLast(what: (ScheduleSnapshot) -> Boolean) = kotlinx.coroutines.withTimeout(10_000) {
+            while (seen.lastOrNull()?.let(what) != true) kotlinx.coroutines.delay(1)
+        }
+        try {
+            repeat(30) { round ->
+                val id = occurrencesOf(saved(draft(title = "Round $round", schedule = ScheduleDraft.Once(at((round + 1) * hour))))).single().id
+                awaitLast { s -> s.upcoming.any { it.occurrenceId == id } }
+                val from = seen.size
+
+                f.repo.apply(id, OccurrenceCommand.Miss(MissReason.DOWNTIME, lateMs = 0), EventSource.SYSTEM)
+                awaitLast { s -> s.recent.any { it.occurrenceId == id } && s.upcoming.none { it.occurrenceId == id } }
+
+                for (s in seen.drop(from)) {
+                    assertEquals("round $round", 1, (s.upcoming + s.recent).count { it.occurrenceId == id })
+                }
+            }
+        } finally {
+            watcher.cancel()
+        }
+    }
+
+    /**
+     * A title has no limit, so the rows can fill more than one cursor window, and each further window runs the query again. Outside a transaction a row
+     * that moved between two windows comes back twice.
+     */
+    @Test
+    fun `rows too large for one cursor window are still each in one list`() = runBlocking {
+        val longTitle = "x".repeat(150_000)
+        val ids = (1..40).map { i -> occurrencesOf(saved(draft(title = "$i $longTitle", schedule = ScheduleDraft.Once(at(i * hour))))).single().id }
+        val seen = java.util.concurrent.CopyOnWriteArrayList<List<String>>()
+        val reader = launch(kotlinx.coroutines.Dispatchers.Default) {
+            missions.observeSchedule().collect { s -> seen += (s.upcoming + s.recent).map { it.occurrenceId } }
+        }
+        try {
+            for (id in ids) {
+                f.repo.apply(id, OccurrenceCommand.Miss(MissReason.DOWNTIME, lateMs = 0), EventSource.SYSTEM)
+                kotlinx.coroutines.delay(5)
+            }
+            kotlinx.coroutines.withTimeout(30_000) {
+                while (missions.observeSchedule().first().recent.size != ids.size || seen.lastOrNull()?.toSet() != ids.toSet()) kotlinx.coroutines.delay(10)
+            }
+        } finally {
+            reader.cancel()
+        }
+        assertTrue("some reads were seen", seen.size > 1)
+        for (read in seen) assertEquals("no occurrence twice in one read", read.distinct(), read)
+    }
+
+    @Test
+    fun `recent keeps what happened in the last day and lets go of what is older`() = run {
+        val occ = occurrencesOf(saved(draft())).single()
+        f.repo.apply(occ.id, OccurrenceCommand.Miss(MissReason.DOWNTIME, lateMs = 0), EventSource.SYSTEM)
+
+        f.clock.advance(occ.scheduledAtUtc + day - f.clock.nowMs())
+        assertEquals("exactly a day ago is still recent", listOf(occ.id), missions.observeSchedule().first().recent.map { it.occurrenceId })
+
+        f.clock.advance(1)
+        assertTrue(missions.observeSchedule().first().recent.isEmpty())
+    }
+
+    @Test
+    fun `a ringing occurrence stays with what is still to come`() = run {
+        val occ = occurrencesOf(saved(draft())).single()
+        f.repo.apply(occ.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+        val snapshot = missions.observeSchedule().first()
+        assertEquals(listOf(occ.id), snapshot.upcoming.map { it.occurrenceId })
+        assertTrue(snapshot.recent.isEmpty())
+    }
+
+    @Test
+    fun `an alarm the platform refused reaches the schedule as refused`() = run {
+        f.scheduler.refusing = true
+        saved(draft())
+        assertEquals(ArmMode.REFUSED, missions.observeSchedule().first().upcoming.single().armMode)
+    }
+
     // --- reconciling after something disturbed the platform's alarms ------------------------------------------
 
     @Test

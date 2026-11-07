@@ -32,7 +32,6 @@ import com.command.domain.time.Clock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -119,11 +118,15 @@ class MissionRepository @Inject constructor(
 
     // --- reads --------------------------------------------------------------------------------------------------
 
-    /** Each list has its own bound, so a long upcoming list can never push the rest off the screen. */
-    fun observeSchedule(): Flow<ScheduleSnapshot> = combine(
-        db.occurrences().observeUpcoming(UPCOMING_LIMIT),
-        db.occurrences().observeRecent(clock.nowMs() - RECENT_MS, RECENT_LIMIT),
-    ) { upcoming, recent -> ScheduleSnapshot(upcoming, recent) }
+    /**
+     * Each list has its own bound, so a long upcoming list can never push the rest off the screen. Both lists come from one read and each row goes into
+     * one of them by its state, so an occurrence is never in both: the screen keys its rows by occurrence, and a key it has seen makes it throw.
+     */
+    fun observeSchedule(): Flow<ScheduleSnapshot> =
+        db.occurrences().observeSchedule(UPCOMING_LIMIT, clock.nowMs() - RECENT_MS, RECENT_LIMIT).map { rows ->
+            val (upcoming, recent) = rows.partition { it.state in UPCOMING_STATES }
+            ScheduleSnapshot(upcoming.sortedBy { it.scheduledAtUtc }, recent.sortedByDescending { it.scheduledAtUtc })
+        }
 
     /**
      * What may have come due in the last [days] local days, today included, newest first, of missions that still exist: what History is made
@@ -583,6 +586,10 @@ class MissionRepository @Inject constructor(
         private const val MIN_LEAD_MS = 5_000L
         private const val TEST_DELAY_MS = 5_000L
         private const val UPCOMING_LIMIT = 200
+
+        /** What the DAO's `observeSchedule` reads as still to come; anything else it returned is what has happened. */
+        private val UPCOMING_STATES = setOf(OccurrenceState.SCHEDULED, OccurrenceState.ARMED, OccurrenceState.FIRING)
+
         /** The counts of History are made from these rows, so the bound is only against a runaway table: it takes 330 alarms a day to reach it. */
         private const val HISTORY_LIMIT = 10_000
 
