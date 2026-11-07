@@ -3,6 +3,7 @@ package com.command.alarm
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import com.command.domain.alarm.RingController
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -37,6 +38,14 @@ open class RingSession @Inject constructor() {
     /** Whether the service is ringing something or still checking a delivery that may be about to. Safe from any thread. */
     open val isBusy: Boolean get() = service?.busy == true
 
+    /** Told on the main thread that a delivery has begun, before anything of it is heard. A preview uses it to get out of the way. */
+    @Volatile internal var onRingStarting: (() -> Unit)? = null
+
+    /** From the service, as a delivery begins. Nothing here may stop the ring: what goes wrong is logged and goes no further. */
+    internal fun ringStarting() {
+        runCatching { onRingStarting?.invoke() }.onFailure { Log.w(TAG, "a preview could not be stopped, and the ring carries on", it) }
+    }
+
     /** Ends the sound for [occurrenceId] if that is what is ringing. Safe from any thread. */
     fun end(occurrenceId: String) {
         main.post { service?.endRing(occurrenceId) }
@@ -50,6 +59,8 @@ open class RingSession @Inject constructor() {
         main.post { service?.endEverything() }
     }
 }
+
+private const val TAG = "RingSession"
 
 /** Ends a ring after a state change: the sound (through the service) and the notifications the ring left behind. */
 class AndroidRingController @Inject constructor(

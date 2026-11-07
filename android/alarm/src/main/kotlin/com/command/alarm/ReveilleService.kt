@@ -166,6 +166,8 @@ class ReveilleService : Service() {
             settle()
             return
         }
+        // A preview on the voice screen is as loud as this line will be, and the alarm comes first.
+        session.ringStarting()
         val ringing = active
         val setFor = intent?.getLongExtra(AlarmContract.EXTRA_AT, AlarmContract.NO_TIME) ?: AlarmContract.NO_TIME
         try {

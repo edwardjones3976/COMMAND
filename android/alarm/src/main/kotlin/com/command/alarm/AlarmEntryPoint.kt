@@ -95,6 +95,13 @@ object VoiceProviders {
     @Singleton
     fun speaker(@ApplicationContext context: Context): Speaker =
         LocalTtsSpeaker(AndroidSpeechSynthesizer(context), AudioTrackPlayer(context.getSystemService(AudioManager::class.java)))
+
+    /** The same speaker for the voice screen's preview, its own instance: nothing done to it can reach the line of a ring ([VoicePreview]). */
+    @Provides
+    @Singleton
+    @PreviewSpeaker
+    fun previewSpeaker(@ApplicationContext context: Context): Speaker =
+        LocalTtsSpeaker(AndroidSpeechSynthesizer(context), AudioTrackPlayer(context.getSystemService(AudioManager::class.java)))
 }
 
 /**

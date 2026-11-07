@@ -6,6 +6,7 @@ import com.command.alarm.AudioRoutes
 import com.command.alarm.PendingPorts
 import com.command.alarm.ReliabilityMonitor
 import com.command.alarm.RingOutput
+import com.command.alarm.PreviewSpeaker
 import com.command.alarm.VoiceProviders
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
@@ -100,6 +101,11 @@ class FakeReliabilityMonitor(private val recorder: PreconditionRecorder) : Relia
             ),
         )
     }
+}
+
+/** The speaker of the voice screen's preview, kept apart from the ring's so that a test can tell which one was asked. */
+class FakePreviewSpeaker {
+    val speaker = FakeSpeaker()
 }
 
 /**
@@ -213,6 +219,8 @@ object FakeAlarmModule {
     @Provides @Singleton fun monitor(fake: FakeReliabilityMonitor): ReliabilityMonitor = fake
     @Provides @Singleton fun fakeSpeaker(): FakeSpeaker = FakeSpeaker()
     @Provides @Singleton fun speaker(fake: FakeSpeaker): Speaker = fake
+    @Provides @Singleton fun fakePreviewSpeaker(): FakePreviewSpeaker = FakePreviewSpeaker()
+    @Provides @Singleton @PreviewSpeaker fun previewSpeaker(fake: FakePreviewSpeaker): Speaker = fake.speaker
     @Provides @Singleton fun fakeRoutes(): FakeAudioRoutes = FakeAudioRoutes()
     @Provides @Singleton fun routes(fake: FakeAudioRoutes): AudioRoutes = fake
 }

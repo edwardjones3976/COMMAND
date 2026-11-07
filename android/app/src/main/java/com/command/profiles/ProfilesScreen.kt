@@ -91,6 +91,7 @@ object ProfilesTags {
     fun active(id: String) = "profiles_active_$id"
     fun inUse(id: String) = "profiles_in_use_$id"
     fun dials(id: String) = "profiles_dials_$id"
+    fun voice(id: String) = "profiles_voice_$id"
     fun handshake(id: String) = "profiles_handshake_$id"
 }
 
@@ -100,6 +101,7 @@ class ProfilesActions(
     val onOpenDials: (String) -> Unit,
     val onOpenHandshake: (String) -> Unit,
     val onOpenRules: () -> Unit,
+    val onOpenVoice: (String) -> Unit,
 )
 
 @Composable
@@ -108,10 +110,11 @@ fun ProfilesRoute(
     onOpenDials: (String) -> Unit,
     onOpenHandshake: (String) -> Unit,
     onOpenRules: () -> Unit,
+    onOpenVoice: (String) -> Unit,
     viewModel: ProfilesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    ProfilesScreen(state, ProfilesActions(onBack, viewModel::activate, onOpenDials, onOpenHandshake, onOpenRules))
+    ProfilesScreen(state, ProfilesActions(onBack, viewModel::activate, onOpenDials, onOpenHandshake, onOpenRules, onOpenVoice))
 }
 
 /** Stateless, so it can be shown in tests without a view model. This is the screen that sets the active profile. */
@@ -192,6 +195,7 @@ private fun ProfileCard(profile: ProfileHandshake, active: Boolean, inUse: Boole
             // Each button is named for its profile, to a screen reader and to a voice that says "Dials of Steady".
             val dialsNamed = stringResource(R.string.profiles_dials_named, profile.name)
             val handshakeNamed = stringResource(R.string.profiles_handshake_named, profile.name)
+            val voiceNamed = stringResource(R.string.profiles_voice_named, profile.name)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = { actions.onOpenDials(profile.id) },
@@ -201,6 +205,10 @@ private fun ProfileCard(profile: ProfileHandshake, active: Boolean, inUse: Boole
                     onClick = { actions.onOpenHandshake(profile.id) },
                     modifier = Modifier.heightIn(min = 56.dp).semantics { contentDescription = handshakeNamed }.testTag(ProfilesTags.handshake(profile.id)),
                 ) { Text(stringResource(R.string.profiles_handshake)) }
+                OutlinedButton(
+                    onClick = { actions.onOpenVoice(profile.id) },
+                    modifier = Modifier.heightIn(min = 56.dp).semantics { contentDescription = voiceNamed }.testTag(ProfilesTags.voice(profile.id)),
+                ) { Text(stringResource(R.string.profiles_voice)) }
             }
         }
     }

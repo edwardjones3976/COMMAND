@@ -34,6 +34,7 @@ import com.command.voice.Synthesis
 import kotlin.math.sin
 import com.command.testing.android.FakeAlarmModule
 import com.command.testing.android.FakeAudioRoutes
+import com.command.testing.android.FakePreviewSpeaker
 import com.command.testing.android.FakeRingOutput
 import com.command.testing.android.FakeSpeaker
 import com.command.testing.android.awaitUntil
@@ -41,6 +42,9 @@ import com.command.testing.android.testMission
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -73,6 +77,8 @@ class ReveilleServiceSpeechTest {
     @Inject lateinit var settings: AppSettings
     @Inject lateinit var consents: ConsentStore
     @Inject lateinit var policy: AlarmVolumePolicy
+    @Inject lateinit var preview: VoicePreview
+    @Inject lateinit var previewSpeaker: FakePreviewSpeaker
 
     private lateinit var context: Context
 
@@ -102,6 +108,52 @@ class ReveilleServiceSpeechTest {
     private fun events(o: OccurrenceRow, type: EventType) = runBlocking { db.events().forOccurrence(o.id).filter { it.type == type } }
 
     private fun alarmVolume() = context.getSystemService(AudioManager::class.java)
+
+    // --- the voice screen's preview ------------------------------------------------------------------------------------------------
+
+    @Test
+    fun `a ring that begins cuts off a preview at once and lets its engine go, and says its own line`() {
+        val heard = previewSpeaker.speaker
+        heard.result = SpeakResult.Interrupted
+        heard.hold = true
+        var result: PreviewResult? = null
+        CoroutineScope(Dispatchers.Unconfined).launch { result = preview.say(Line.of("Preview"), SpeechLevel(3, 2f), SpeechVoice.DEFAULT) }
+        awaitUntil(message = "the preview is being said") { heard.spoken.isNotEmpty() }
+
+        startService(armed())
+
+        assertEquals(1, heard.stops)
+        assertEquals(1, heard.releases)
+        awaitUntil(message = "the ring's own line") { speaker.spoken.isNotEmpty() }
+        awaitUntil(message = "the preview ended") { result != null }
+        assertEquals(PreviewResult.RingSounding, result)
+        assertEquals("the ring's line is not stopped for the preview's sake", 0, speaker.stops)
+    }
+
+    @Test
+    fun `no preview is said while a ring sounds, and stopping or letting go of a preview does not touch the ring's line`() {
+        startService(armed())
+        awaitUntil(message = "the ring's own line") { speaker.spoken.isNotEmpty() }
+
+        val result = runBlocking { preview.say(Line.of("Preview"), SpeechLevel(3, 2f), SpeechVoice.DEFAULT) }
+        preview.stop()
+        preview.release()
+
+        assertEquals(PreviewResult.RingSounding, result)
+        assertTrue(previewSpeaker.speaker.spoken.isEmpty())
+        assertEquals(0, speaker.stops)
+        assertEquals(0, speaker.releases)
+    }
+
+    @Test
+    fun `a preview that cannot be stopped does not hold a ring up`() {
+        session.onRingStarting = { error("a broken preview") }
+
+        startService(armed())
+
+        assertTrue(output.ringing)
+        awaitUntil(message = "the ring's own line") { speaker.spoken.isNotEmpty() }
+    }
 
     // --- the line --------------------------------------------------------------------------------------------------------------
 

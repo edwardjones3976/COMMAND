@@ -23,7 +23,6 @@ import com.command.domain.coaching.CoachingContext
 import com.command.domain.coaching.CoachingEngine
 import com.command.domain.coaching.CoachingPhase
 import com.command.domain.coaching.TemplateOverrides
-import com.command.domain.voice.BuiltInVoicePacks
 import com.command.domain.voice.Line
 import com.command.domain.dials.ChainSpec
 import com.command.domain.dials.CheckInSchedule
@@ -329,7 +328,7 @@ class OccurrenceRepository @Inject constructor(
 
     /** The voice of the profile's pack; the phone's own when it has no pack, or one that is gone. */
     private suspend fun voiceOf(profile: ProfileRow?): SpeechVoice =
-        packOf(profile)?.let { SpeechVoice(it.locale, it.pitch, it.rate, BuiltInVoicePacks.isFemale(it.id)) } ?: SpeechVoice.DEFAULT
+        packOf(profile)?.speechVoice() ?: SpeechVoice.DEFAULT
 
     /** The loudness trim of the profile's voice pack; none when it has no pack, or one that is gone. */
     private suspend fun voiceTrimOf(profile: ProfileRow?): Float = packOf(profile)?.loudnessTrimDb ?: 0f
