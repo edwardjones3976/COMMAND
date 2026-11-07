@@ -752,8 +752,9 @@ class VoiceDirectorEngine(
         /** The external folder of the debug captures. [com.command.alarm.DataEraser] takes it with the rest, and DeleteLeavesNothingTest looks. */
         const val DEBUG_CAPTURE_FOLDER = "voice_debug"
 
-        internal fun clampSystemPitch(pitch: Float) = pitch.coerceIn(SYSTEM_TTS_MIN_PITCH, SYSTEM_TTS_MAX_PITCH)
-        internal fun clampSystemRate(rate: Float) = rate.coerceIn(SYSTEM_TTS_MIN_RATE, SYSTEM_TTS_MAX_RATE)
+        /** The pitch and the rate the phone's engine is really asked for: the voice screen shows these, and the speaker sets them. */
+        fun clampSystemPitch(pitch: Float) = pitch.coerceIn(SYSTEM_TTS_MIN_PITCH, SYSTEM_TTS_MAX_PITCH)
+        fun clampSystemRate(rate: Float) = rate.coerceIn(SYSTEM_TTS_MIN_RATE, SYSTEM_TTS_MAX_RATE)
 
         /** Boost slider as real gain above the speech target, matching Voice Studio's label: +1 dB per 10% (150% -> +5 dB). */
         internal fun boostDbFor(boostPercent: Int): Float =

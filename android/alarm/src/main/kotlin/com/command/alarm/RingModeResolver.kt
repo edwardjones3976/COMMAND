@@ -36,6 +36,7 @@ class RingModeResolver @Inject constructor(
     private val repository: OccurrenceRepository,
     private val clock: Clock,
     private val latch: ErasureLatch,
+    private val session: RingSession,
 ) {
     suspend fun degrade(occurrenceId: String, requestCode: Int, reason: String, setFor: Long) {
         // Everything is being erased: no ring, not even this one, may start behind the erase.
@@ -66,6 +67,9 @@ class RingModeResolver @Inject constructor(
             NotificationManagerCompat.from(context).cancel(occurrenceId, AlarmContract.ID_FALLBACK)
             return
         }
+        // A preview on the voice screen is as loud as an alarm, and it goes now: the receiver can come here without the service ever having started. After
+        // the post, because letting go of its engine is nothing a ring should wait for.
+        session.ringStarting()
         repository.logEvent(EventType.RING_DEGRADED, row, EventSource.RECEIVER, EventPayload.of("reason" to reason, "notified" to posted))
     }
 }

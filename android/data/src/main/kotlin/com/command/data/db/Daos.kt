@@ -406,6 +406,13 @@ interface VoicePackDao {
 
     @Query("SELECT * FROM voice_packs WHERE id = :id")
     suspend fun get(id: String): VoicePackRow?
+
+    @Query("SELECT * FROM voice_packs ORDER BY name")
+    fun observeAll(): Flow<List<VoicePackRow>>
+
+    /** Sets one pack's trim and nothing else of it. Returns the number of packs changed: 0 when there is no such pack. */
+    @Query("UPDATE voice_packs SET loudness_trim_db = :trimDb WHERE id = :id")
+    suspend fun setLoudnessTrim(id: String, trimDb: Float): Int
 }
 
 @Dao
