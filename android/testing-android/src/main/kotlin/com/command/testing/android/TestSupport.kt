@@ -161,7 +161,11 @@ class FakeSpeaker : Speaker {
         finish()
     }
 
+    /** Runs while the speaker is being let go, so that a test can make that as slow as a real engine might. */
+    var onRelease: () -> Unit = {}
+
     override fun release() {
+        onRelease()
         releases++
     }
 

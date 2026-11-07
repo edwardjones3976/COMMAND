@@ -123,7 +123,7 @@ class ReveilleServiceSpeechTest {
         startService(armed())
 
         assertEquals(1, heard.stops)
-        assertEquals(1, heard.releases)
+        awaitUntil(message = "its engine is let go") { heard.releases == 1 }
         awaitUntil(message = "the ring's own line") { speaker.spoken.isNotEmpty() }
         awaitUntil(message = "the preview ended") { result != null }
         assertEquals(PreviewResult.RingSounding, result)
@@ -153,6 +153,33 @@ class ReveilleServiceSpeechTest {
         startService(armed())
 
         assertTrue(soundingThen)
+    }
+
+    @Test
+    fun `a preview's engine that takes for ever to let go holds nothing up, and its sound has stopped by then`() {
+        val heard = previewSpeaker.speaker
+        val letGo = java.util.concurrent.CountDownLatch(1)
+        // Bounded, so that a release on the main thread fails this test instead of hanging it.
+        heard.onRelease = { letGo.await(10, java.util.concurrent.TimeUnit.SECONDS) }
+
+        startService(armed())
+
+        assertEquals("the sound stops at once", 1, heard.stops)
+        awaitUntil(message = "the ring's own line") { speaker.spoken.isNotEmpty() }
+        assertEquals("the engine is still being let go", 0, heard.releases)
+        letGo.countDown()
+        awaitUntil(message = "its engine is let go") { heard.releases == 1 }
+    }
+
+    @Test
+    fun `a cut asked for from a worker thread happens on the main thread`() {
+        var thread: Thread? = null
+        session.onRingStarting = { thread = Thread.currentThread() }
+
+        kotlin.concurrent.thread { session.ringStarting() }.join()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(Looper.getMainLooper().thread, thread)
     }
 
     @Test

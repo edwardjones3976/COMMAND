@@ -532,6 +532,8 @@ class ReveilleServiceTest {
 
         runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
 
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+
         assertEquals(1, cuts)
         assertTrue("the ring is out before a preview is dealt with", posted)
     }

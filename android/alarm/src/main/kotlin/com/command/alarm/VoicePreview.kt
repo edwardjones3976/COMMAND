@@ -1,5 +1,6 @@
 package com.command.alarm
 
+import android.util.Log
 import com.command.data.AppSettings
 import com.command.domain.voice.Line
 import com.command.domain.voice.SpeakResult
@@ -8,6 +9,9 @@ import com.command.domain.voice.SpeechLevel
 import com.command.domain.voice.SpeechProblem
 import com.command.domain.voice.SpeechUsage
 import com.command.domain.voice.SpeechVoice
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Qualifier
 import javax.inject.Singleton
@@ -38,10 +42,10 @@ sealed interface PreviewResult {
  * is what is not the line: no tone under it, and the alarm volume is left where the person has it, however a ring may raise it.
  *
  * The ring always wins. A preview is refused while the service is ringing or checking a delivery, and a ring that starts cuts it off at once and
- * lets its engine go ([RingSession.ringStarting]), so that the ring's own engine has the phone's speech service to itself. The service starts a delivery
- * on the main thread, and [say] is called on it (the view model's scope is), with nothing suspending between the check and the speaker counting the
- * line as its own, so a delivery cannot slip between the two: if it comes later, it finds a line to stop, just after its tone has started. Being a separate instance, stopping or
- * letting go of this speaker cannot cut off or delay the line of a ring.
+ * lets its engine go ([RingSession.ringStarting]), so that the ring's own engine has the phone's speech service to itself. The cut runs on the main
+ * thread, and [say] is called on it (the view model's scope is), with nothing suspending between the check and the speaker counting the line as its own,
+ * or between the speaker's last look and its track being made. So a delivery cannot slip between either pair: if it comes later, it finds a line to stop,
+ * just after its tone has started. Being a separate instance, stopping or letting go of this speaker cannot cut off or delay the line of a ring.
  *
  * Known limit: a fallback ring, which sounds from a notification with no service, cuts off a preview as it starts but does not count as busy, so a
  * preview asked for while one sounds plays over it. Saying when that ring ends would mean following the notification, for a case this rare.
@@ -55,7 +59,10 @@ class VoicePreview @Inject constructor(
     init {
         session.onRingStarting = {
             speaker.stop()
-            speaker.release()
+            // The engine's shutdown is a call into another process, and this is the thread that answers Safety silence: the sound stops now, and the engine goes on its own time.
+            CoroutineScope(Dispatchers.IO).launch {
+                runCatching { speaker.release() }.onFailure { Log.w(TAG, "the preview's engine could not be let go", it) }
+            }
         }
     }
 
@@ -74,4 +81,8 @@ class VoicePreview @Inject constructor(
 
     /** Lets go of the engine, when the screen is gone. The next preview starts it again. */
     fun release() = speaker.release()
+
+    private companion object {
+        const val TAG = "VoicePreview"
+    }
 }
