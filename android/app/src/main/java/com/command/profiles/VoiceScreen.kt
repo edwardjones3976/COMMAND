@@ -231,6 +231,8 @@ private fun trimWords(db: Float): String = stringResource(R.string.voice_trim_va
 @Composable
 private fun Trim(pack: VoicePackChoice, failedWrites: Int, actions: VoiceActions) {
     var dragged by remember(pack.id) { mutableStateOf<Float?>(null) }
+    // What this movement of the finger last chose. Written on letting go even if it is what the row says now: an earlier write may still be on its way, and this one has to land after it.
+    var chosen by remember(pack.id) { mutableStateOf<Float?>(null) }
     // The write has come back, or could not be made: the row says what the trim is. An earlier write coming back says nothing about this one.
     LaunchedEffect(pack.trimDb, dragged) { if (dragged == pack.trimDb) dragged = null }
     LaunchedEffect(failedWrites) { if (failedWrites > 0) dragged = null }
@@ -241,8 +243,11 @@ private fun Trim(pack: VoicePackChoice, failedWrites: Int, actions: VoiceActions
         Text(trimWords(shown), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag(VoiceTags.TRIM_VALUE))
         Slider(
             value = shown,
-            onValueChange = { dragged = snappedTrim(it) },
-            onValueChangeFinished = { dragged?.let { actions.onSetTrim(pack.id, it) } },
+            onValueChange = { value -> snappedTrim(value).let { dragged = it; chosen = it } },
+            onValueChangeFinished = {
+                chosen?.let { actions.onSetTrim(pack.id, it) }
+                chosen = null
+            },
             valueRange = 0f..BuiltInVoicePacks.MAX_TRIM_DB,
             steps = TRIM_STEPS,
             modifier = Modifier.fillMaxWidth().semantics { contentDescription = name }.testTag(VoiceTags.TRIM),

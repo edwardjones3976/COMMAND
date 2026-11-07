@@ -37,10 +37,14 @@ sealed interface PreviewResult {
  * the person set for the ring's speech, and the level and the voice the caller reads from the same rows a ring is fired from. What it does not do
  * is what is not the line: no tone under it, and the alarm volume is left where the person has it, however a ring may raise it.
  *
- * The ring always wins. A preview is refused while the service is ringing or checking a delivery, and a delivery that starts cuts it off at once and
- * lets its engine go ([RingSession.ringStarting]), so that the ring's own engine has the phone's speech service to itself. The two checks and the ring
- * start all run on the main thread, with nothing suspending between the check and the call to the speaker, so a ring cannot slip between them.
- * Being a separate instance, stopping or letting go of this speaker cannot cut off or delay the line of a ring.
+ * The ring always wins. A preview is refused while the service is ringing or checking a delivery, and a ring that starts cuts it off at once and
+ * lets its engine go ([RingSession.ringStarting]), so that the ring's own engine has the phone's speech service to itself. The service starts a delivery
+ * on the main thread, and [say] is called on it (the view model's scope is), with nothing suspending between the check and the speaker counting the
+ * line as its own, so a delivery cannot slip between the two: if it comes later, it finds a line to stop. Being a separate instance, stopping or
+ * letting go of this speaker cannot cut off or delay the line of a ring.
+ *
+ * Known limit: a fallback ring, which sounds from a notification with no service, cuts off a preview as it starts but does not count as busy, so a
+ * preview asked for while one sounds plays over it. Saying when that ring ends would mean following the notification, for a case this rare.
  */
 @Singleton
 class VoicePreview @Inject constructor(

@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
@@ -261,6 +262,26 @@ class VoiceTest {
         state.value = readyState(pack.copy(trimDb = 2f), failedWrites = 0)
         compose.waitForIdle()
         compose.onNodeWithTag(VoiceTags.TRIM_VALUE).assertTextEquals("+2.0 dB")
+    }
+
+    @Test
+    fun `a movement that ends on what the row still says is written all the same, so that it lands after the write before it`() {
+        val pack = choiceOf("pack_coach_maya").copy(trimDb = 0f)
+        val written = ArrayList<Float>()
+        val ready = readyState(pack, failedWrites = 0)
+        compose.setContent { CommandTheme { VoiceScreen(ready, VoiceActions({}, {}, { _, db -> written += db }, { _, _, _ -> })) } }
+        slideTo(7f)
+        assertEquals(listOf(7f), written)
+
+        // The row still says 0, as the write of 7 has not come back. The finger goes back to 0, and the screen has time to draw it on the way.
+        compose.onNodeWithTag(VoiceTags.TRIM).performTouchInput { down(center) }
+        compose.waitForIdle()
+        compose.onNodeWithTag(VoiceTags.TRIM).performTouchInput { moveTo(centerLeft) }
+        compose.waitForIdle()
+        compose.onNodeWithTag(VoiceTags.TRIM).performTouchInput { up() }
+        compose.waitForIdle()
+
+        assertEquals(0f, written.last(), 0f)
     }
 
     @Test

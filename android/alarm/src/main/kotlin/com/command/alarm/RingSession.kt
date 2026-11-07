@@ -38,10 +38,10 @@ open class RingSession @Inject constructor() {
     /** Whether the service is ringing something or still checking a delivery that may be about to. Safe from any thread. */
     open val isBusy: Boolean get() = service?.busy == true
 
-    /** Told on the main thread that a delivery has begun, before anything of it is heard. A preview uses it to get out of the way. */
+    /** Told that a ring has begun, before anything of it is heard, from any thread (the service's main thread, or the fallback's worker). A preview uses it to get out of the way. */
     @Volatile internal var onRingStarting: (() -> Unit)? = null
 
-    /** From the service, as a delivery begins. Nothing here may stop the ring: what goes wrong is logged and goes no further. */
+    /** From the service as a delivery begins, and from the fallback ring. Nothing here may stop the ring: what goes wrong is logged and goes no further. */
     internal fun ringStarting() {
         runCatching { onRingStarting?.invoke() }.onFailure { Log.w(TAG, "a preview could not be stopped, and the ring carries on", it) }
     }
