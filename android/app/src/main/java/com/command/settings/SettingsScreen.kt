@@ -66,6 +66,7 @@ object SettingsTags {
     const val ABOUT = "settings_about"
     const val LINK_CALENDARS = "settings_link_calendars"
     const val LINK_PROFILES = "settings_link_profiles"
+    const val LINK_REST_WINDOWS = "settings_link_rest_windows"
 }
 
 @Composable
@@ -78,6 +79,7 @@ fun SettingsRoute(
     onOpenHandshakes: () -> Unit = {},
     onOpenCalendars: () -> Unit = {},
     onOpenProfiles: () -> Unit = {},
+    onOpenRestWindows: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -93,6 +95,7 @@ fun SettingsRoute(
         onOpenHandshakes = onOpenHandshakes,
         onOpenCalendars = onOpenCalendars,
         onOpenProfiles = onOpenProfiles,
+        onOpenRestWindows = onOpenRestWindows,
         version = com.command.BuildConfig.VERSION_NAME,
         onPause = viewModel::pauseFor,
         onEndPause = viewModel::endPause,
@@ -119,6 +122,7 @@ fun SettingsScreen(
     onOpenHandshakes: () -> Unit = {},
     onOpenCalendars: () -> Unit = {},
     onOpenProfiles: () -> Unit = {},
+    onOpenRestWindows: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -172,6 +176,7 @@ fun SettingsScreen(
                 }
                 item { Link(R.string.settings_link_profiles, onOpenProfiles, SettingsTags.LINK_PROFILES) }
                 item { Link(R.string.settings_link_handshakes, onOpenHandshakes, SettingsTags.LINK_HANDSHAKES) }
+                item { Link(R.string.settings_link_rest_windows, onOpenRestWindows, SettingsTags.LINK_REST_WINDOWS) }
                 item { Link(R.string.settings_link_calendars, onOpenCalendars, SettingsTags.LINK_CALENDARS) }
                 item { Link(R.string.settings_link_history, onOpenHistory, SettingsTags.LINK_HISTORY) }
                 item { Link(R.string.settings_link_reliability, onOpenReliability, SettingsTags.LINK_RELIABILITY) }

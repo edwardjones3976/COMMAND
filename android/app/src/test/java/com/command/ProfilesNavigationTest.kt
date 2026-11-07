@@ -8,6 +8,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import com.command.data.AppSettings
 import com.command.handshake.HandshakeTags
+import com.command.rest.RestWindowsTags
 import com.command.profiles.DialsTags
 import com.command.profiles.ProfilesTags
 import com.command.profiles.RulesTags
@@ -86,5 +87,21 @@ class ProfilesNavigationTest {
         back()
 
         waitFor(ProfilesTags.LIST)
+    }
+
+    @Test
+    fun `from Settings to the rest windows and their form, and back each time`() {
+        val c = Robolectric.buildActivity(MainActivity::class.java, Intent(ApplicationProvider.getApplicationContext(), MainActivity::class.java)).setup().also { controller = it }
+        fun back() = c.get().onBackPressedDispatcher.onBackPressed()
+
+        tap(ScheduleTags.LINK_SETTINGS)
+        tap(SettingsTags.LINK_REST_WINDOWS)
+        waitFor(RestWindowsTags.LIST)
+        tap(RestWindowsTags.ADD)
+        waitFor(RestWindowsTags.FORM)
+        back() // leaves the form, not the screen
+        waitFor(RestWindowsTags.LIST)
+        back()
+        waitFor(SettingsTags.LINK_REST_WINDOWS)
     }
 }

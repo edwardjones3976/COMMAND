@@ -11,6 +11,7 @@ import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.LockPolicy
 import com.command.domain.dials.RecoveryOption
 import com.command.domain.dials.SkipReasonCode
+import com.command.reveille.FrictionAction
 import com.command.reveille.FrictionPrompt
 import com.command.ui.theme.CommandTheme
 import org.junit.Assert.assertEquals
@@ -236,6 +237,12 @@ class FollowUpScreenTest {
         compose.onNodeWithText("Skip a fixed commitment?").assertIsDisplayed()
         compose.onNodeWithText("Keep going").performClick()
         assertTrue(taps.log.contains("friction dismissed"))
+    }
+
+    @Test
+    fun `a delay's question on the follow-up screen speaks of putting it off`() {
+        show(ask, friction = FrictionPrompt(LockPolicy.CONFIRM, FrictionAction.DELAY) { })
+        compose.onNodeWithText("Put off a fixed commitment?").assertIsDisplayed()
     }
 
     @Test

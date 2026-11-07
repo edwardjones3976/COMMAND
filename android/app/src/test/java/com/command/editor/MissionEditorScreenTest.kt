@@ -12,6 +12,8 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import com.command.data.DraftProblem
 import com.command.domain.dials.Flexibility
+import com.command.domain.model.RestKind
+import com.command.domain.schedule.RestWindow
 import com.command.ui.theme.CommandTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -224,5 +226,67 @@ class MissionEditorScreenTest {
         compose.onNodeWithText("That mission no longer exists.").assertIsDisplayed()
         compose.onNodeWithText("Back").performClick()
         assertEquals(1, r.back)
+    }
+
+    // --- the rest window warning ------------------------------------------------------------------------------------
+
+    private val nights = RestWindow(DayOfWeek.MONDAY, LocalTime.of(22, 0), LocalTime.of(6, 0), RestKind.SLEEP)
+
+    @Test
+    fun `an alarm inside a rest window is warned about, says which day, and says it still rings`() {
+        // 2 November 2026 is a Monday.
+        show(state().copy(time = LocalTime.of(23, 0), restWindows = listOf(nights)))
+        compose.onNodeWithTag(EditorTags.REST_WARNING).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag(EditorTags.REST_WARNING).assertTextContains("Mon", substring = true)
+        compose.onNodeWithTag(EditorTags.REST_WARNING).assertTextContains("It still rings", substring = true)
+    }
+
+    @Test
+    fun `an alarm outside every rest window has no warning`() {
+        show(state().copy(time = LocalTime.of(12, 0), restWindows = listOf(nights)))
+        compose.onNodeWithTag(EditorTags.REST_WARNING).assertDoesNotExist()
+    }
+
+    @Test
+    fun `a calendar copy is warned about as well`() {
+        val coming = listOf(LocalDate.of(2026, 11, 2).atTime(23, 0))
+        show(state(imported = true).copy(restWindows = listOf(nights), comingAlarms = coming))
+        compose.onNodeWithTag(EditorTags.REST_WARNING).assertIsDisplayed()
+    }
+
+    @Test
+    fun `a calendar copy goes by its coming alarms and not by its one start`() {
+        val tuesdays = RestWindow(DayOfWeek.TUESDAY, LocalTime.of(9, 0), LocalTime.of(11, 0), RestKind.LEISURE)
+        val base = state(imported = true).copy(restWindows = listOf(tuesdays))
+        val monday = LocalDate.of(2026, 11, 2).atTime(10, 0)
+        assertEquals(setOf(DayOfWeek.TUESDAY), base.copy(comingAlarms = listOf(monday, monday.plusDays(1))).restWarningDays)
+        assertEquals("it does not ring on the Tuesday any more", emptySet<DayOfWeek>(), base.copy(comingAlarms = listOf(monday)).restWarningDays)
+    }
+
+    @Test
+    fun `saving is not held back by the warning`() {
+        val r = Recorder()
+        show(state(title = "t", firstAction = "a").copy(time = LocalTime.of(23, 0), restWindows = listOf(nights)), r)
+        compose.onNodeWithTag(EditorTags.SAVE).performScrollTo().performClick()
+        assertEquals(1, r.saved)
+    }
+
+    @Test
+    fun `which days are warned about follows the repeat`() {
+        val base = state().copy(time = LocalTime.of(23, 0), restWindows = listOf(nights))
+        assertEquals("once, on its own date", setOf(DayOfWeek.MONDAY), base.restWarningDays)
+        assertEquals("once, on another date", emptySet<DayOfWeek>(), base.copy(date = LocalDate.of(2026, 11, 3)).restWarningDays)
+        assertEquals("daily is every day, and the window is on one", setOf(DayOfWeek.MONDAY), base.copy(repeat = RepeatKind.DAILY).restWarningDays)
+        assertEquals(
+            "weekly looks only at its chosen days",
+            setOf(DayOfWeek.MONDAY),
+            base.copy(repeat = RepeatKind.WEEKLY, days = setOf(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY)).restWarningDays,
+        )
+        assertEquals("not the date, when it repeats", emptySet<DayOfWeek>(), base.copy(repeat = RepeatKind.WEEKLY, days = setOf(DayOfWeek.WEDNESDAY)).restWarningDays)
+        assertEquals(
+            "early Tuesday belongs to Monday night, and it is Tuesday's alarm that falls inside",
+            setOf(DayOfWeek.TUESDAY),
+            base.copy(time = LocalTime.of(5, 0), repeat = RepeatKind.DAILY).restWarningDays,
+        )
     }
 }

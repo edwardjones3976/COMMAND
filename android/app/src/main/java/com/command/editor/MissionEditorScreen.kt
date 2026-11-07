@@ -1,6 +1,5 @@
 package com.command.editor
 
-import android.text.format.DateFormat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,10 +34,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,7 +44,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -60,6 +56,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.data.DraftProblem
 import com.command.domain.dials.Flexibility
 import com.command.R
+import com.command.ui.TimeQuestion
+import com.command.ui.WEEK_DAYS
+import com.command.ui.dayNames
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -71,6 +70,7 @@ import java.time.format.FormatStyle
 object EditorTags {
     const val IMPORTED = "editor_imported"
     const val CONFLICT = "editor_conflict"
+    const val REST_WARNING = "editor_rest_warning"
     const val TITLE = "editor_title"
     const val ACTION = "editor_action"
     const val REPEAT_ONCE = "editor_repeat_once"
@@ -78,6 +78,7 @@ object EditorTags {
     const val REPEAT_WEEKLY = "editor_repeat_weekly"
     const val DATE = "editor_date"
     const val TIME = "editor_time"
+    const val TIME_OK = "editor_time_ok"
     const val FLEXIBLE = "editor_flexible"
     const val FIXED = "editor_fixed"
     const val CATEGORY = "editor_category"
@@ -175,6 +176,7 @@ fun MissionEditorScreen(state: EditorState, actions: EditorActions, snackbar: Sn
                 Text(state.title, style = MaterialTheme.typography.titleLarge)
                 Text(stringResource(R.string.editor_imported_body), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag(EditorTags.IMPORTED))
                 if (state.conflicts > 0) ConflictWarning(state.conflicts)
+                RestWarning(state.restWarningDays)
                 TextButton(onClick = actions.onDelete, enabled = !state.busy, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(EditorTags.DELETE)) {
                     Text(stringResource(R.string.editor_imported_remove), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelLarge)
                 }
@@ -216,7 +218,7 @@ fun MissionEditorScreen(state: EditorState, actions: EditorActions, snackbar: Sn
                 if (state.repeat == RepeatKind.WEEKLY) {
                     Text(stringResource(R.string.editor_days), style = MaterialTheme.typography.bodyLarge)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for ((day, label) in DAYS) {
+                        for ((day, label) in WEEK_DAYS) {
                             FilterChip(
                                 selected = day in state.days,
                                 onClick = { actions.onDay(day) },
@@ -245,6 +247,7 @@ fun MissionEditorScreen(state: EditorState, actions: EditorActions, snackbar: Sn
                     }
                 }
                 if (DraftProblem.IN_THE_PAST in state.problems) ErrorText(stringResource(R.string.editor_error_past))
+                RestWarning(state.restWarningDays)
 
                 SectionTitle(stringResource(R.string.editor_section_commitment))
                 FirmnessOption(state.flexibility == Flexibility.FLEXIBLE, R.string.editor_flexible, R.string.editor_flexible_body, EditorTags.FLEXIBLE) {
@@ -327,18 +330,14 @@ fun MissionEditorScreen(state: EditorState, actions: EditorActions, snackbar: Sn
         ) { DatePicker(state = picker) }
     }
     if (pickingTime) {
-        val is24 = DateFormat.is24HourFormat(LocalContext.current)
-        val picker = rememberTimePickerState(initialHour = state.time.hour, initialMinute = state.time.minute, is24Hour = is24)
-        AlertDialog(
-            onDismissRequest = { pickingTime = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    actions.onTime(LocalTime.of(picker.hour, picker.minute))
-                    pickingTime = false
-                }) { Text(stringResource(R.string.editor_ok)) }
+        TimeQuestion(
+            state.time,
+            EditorTags.TIME_OK,
+            onPick = {
+                actions.onTime(it)
+                pickingTime = false
             },
-            dismissButton = { TextButton(onClick = { pickingTime = false }) { Text(stringResource(R.string.editor_cancel)) } },
-            text = { TimePicker(state = picker) },
+            onDismiss = { pickingTime = false },
         )
     }
     if (confirmingDelete) {
@@ -395,17 +394,19 @@ private fun FirmnessOption(selected: Boolean, title: Int, body: Int, tag: String
     }
 }
 
-private val DAYS = listOf(
-    DayOfWeek.MONDAY to R.string.editor_day_mon,
-    DayOfWeek.TUESDAY to R.string.editor_day_tue,
-    DayOfWeek.WEDNESDAY to R.string.editor_day_wed,
-    DayOfWeek.THURSDAY to R.string.editor_day_thu,
-    DayOfWeek.FRIDAY to R.string.editor_day_fri,
-    DayOfWeek.SATURDAY to R.string.editor_day_sat,
-    DayOfWeek.SUNDAY to R.string.editor_day_sun,
-)
-
 private val STARTER_MINUTES = listOf(2, 5, 10, 15)
+
+/** Says on which days the alarm falls inside a rest window, and that it rings all the same. Nothing is refused because of it. */
+@Composable
+private fun RestWarning(days: Set<DayOfWeek>) {
+    if (days.isEmpty()) return
+    Text(
+        stringResource(R.string.editor_rest_warning, dayNames(days)),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.error,
+        modifier = Modifier.testTag(EditorTags.REST_WARNING),
+    )
+}
 
 @Composable
 private fun ConflictWarning(count: Int) {

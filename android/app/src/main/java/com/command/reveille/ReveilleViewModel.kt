@@ -91,7 +91,10 @@ sealed interface ReveilleUiState {
 }
 
 /** A skip or delay that needs the user to do a little more first (Mission Lock), and what. */
-data class FrictionPrompt(val required: LockPolicy, val retry: (FrictionEvidence) -> Unit)
+/** What a fixed commitment's question is about, which decides its words. The rules are the same for both. */
+enum class FrictionAction { SKIP, DELAY }
+
+data class FrictionPrompt(val required: LockPolicy, val action: FrictionAction = FrictionAction.SKIP, val retry: (FrictionEvidence) -> Unit)
 
 /**
  * Drives the lock-screen flow for one occurrence. The screen is a projection of the stored occurrence: every tap becomes a
@@ -648,8 +651,8 @@ class ReveilleViewModel @Inject constructor(
     fun started() = command(OccurrenceCommand.ReportStarted)
     fun beginStarter() = command(OccurrenceCommand.BeginStarter)
 
-    fun delay(minutes: Int) = withFriction { evidence -> OccurrenceCommand.Delay(minutes, evidence) }
-    fun skip() = withFriction { evidence -> OccurrenceCommand.Skip(SkipReason.USER, evidence) }
+    fun delay(minutes: Int) = withFriction(FrictionAction.DELAY) { evidence -> OccurrenceCommand.Delay(minutes, evidence) }
+    fun skip() = withFriction(FrictionAction.SKIP) { evidence -> OccurrenceCommand.Skip(SkipReason.USER, evidence) }
 
     fun dismissFriction() { _friction.value = null }
     fun confirmFriction(evidence: FrictionEvidence) { _friction.value?.retry?.invoke(evidence) }
@@ -660,7 +663,7 @@ class ReveilleViewModel @Inject constructor(
     }
 
     /** Tries the command bare; if the mission is fixed and wants more, asks, then tries again with what the user gave. */
-    private fun withFriction(build: (FrictionEvidence) -> OccurrenceCommand) {
+    private fun withFriction(action: FrictionAction, build: (FrictionEvidence) -> OccurrenceCommand) {
         val id = occurrenceId ?: return
         val askedOn = screen
         // The screen can change while a command is being decided (another ring takes over, the alarm is silenced from its notification, it
@@ -674,7 +677,7 @@ class ReveilleViewModel @Inject constructor(
                 if (moved()) return@launch
                 when (result) {
                     is ApplyResult.NeedsFriction ->
-                        _friction.value = FrictionPrompt(result.required) { given -> if (moved()) _friction.value = null else attempt(given) }
+                        _friction.value = FrictionPrompt(result.required, action) { given -> if (moved()) _friction.value = null else attempt(given) }
                     else -> _friction.value = null
                 }
             }
