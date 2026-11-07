@@ -31,6 +31,7 @@ android {
   // The release config exists only when KEYSTORE_PATH points at a keystore; otherwise release builds are
   // unsigned (CI) and the owner signs them with apksigner.
   val releaseKeystore = System.getenv("KEYSTORE_PATH")?.takeIf { file(it).isFile }
+  val phoneKeystore = System.getenv("COMMAND_SIGNING_KEYSTORE")?.takeIf { file(it).isFile }
   signingConfigs {
     if (releaseKeystore != null) {
       create("release") {
@@ -38,6 +39,17 @@ android {
         storePassword = System.getenv("STORE_PASSWORD")
         keyAlias = "upload"
         keyPassword = System.getenv("KEY_PASSWORD")
+      }
+    }
+    // One signing identity for every build that goes on the owner's phone, so that a later build installs over an earlier one in place
+    // and keeps its alarms and history (amendment 39). The keystore lives outside the repository; without these four settings every
+    // build signs as before (debug and noexact with the machine's own debug key, release unsigned).
+    if (phoneKeystore != null) {
+      create("phone") {
+        storeFile = file(phoneKeystore)
+        storePassword = System.getenv("COMMAND_SIGNING_STORE_PASSWORD")
+        keyAlias = System.getenv("COMMAND_SIGNING_KEY_ALIAS")
+        keyPassword = System.getenv("COMMAND_SIGNING_KEY_PASSWORD")
       }
     }
     create("debugConfig") {
@@ -53,10 +65,12 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.findByName("release")
+      // The upload key, when there is one, is for the store; otherwise the phone identity, so a release build also updates in place.
+      signingConfig = signingConfigs.findByName("release") ?: signingConfigs.findByName("phone")
     }
     debug {
-      // Local test build: AI Studio's debug.keystore isn't in the export, so AGP's default debug key is used.
+      // Local test build: AI Studio's debug.keystore isn't in the export, so AGP's default debug key is used unless the phone identity is set.
+      signingConfigs.findByName("phone")?.let { signingConfig = it }
     }
     // A debug build whose manifest drops USE_EXACT_ALARM, so on a current emulator the exact-alarm app-op decides and the
     // inexact and degraded paths really run. Same sources as debug.

@@ -1,27 +1,31 @@
 #!/usr/bin/env bash
 #
-# Reliability cases that need the outside of the app: a killed process, a restart, deep idle, a revoked exact-alarm permission and the
-# six-hourly backstop. It works on any one attached device or emulator and needs adb and python3. It erases the app's data on that device:
-# never point it at a phone whose alarms matter.
+# Reliability cases that need the outside of the app: a killed process, a restart, deep idle, a revoked exact-alarm permission, the
+# six-hourly backstop, the task loop walked end to end from a synthetic mission (its redacted trail is written for the release receipt), and
+# on Android 17 and later the ring and the volume restore with background-audio hardening enforced. It works on any one attached device or
+# emulator and needs adb and python3. It erases the app's data on that device: never point it at a phone whose alarms matter.
 #
 #   DEBUG_APK=... NOEXACT_APK=... scripts/reliability.sh [case ...]
 #
-# Cases: kill kill9 forcestop idle revoke backstop reboot (default: all, in that order).
+# Cases: kill kill9 forcestop idle revoke backstop trail hardening reboot (default: all, in that order).
 # Environment:
 #   DEBUG_APK, NOEXACT_APK   the two APKs (default: the Gradle output paths)
 #   MAX_LATE_MS              the most an alarm may be late on this device (default 15000; see docs/VERIFICATION.html)
 #   REPORT                   where the result table is written (default: reliability-report.md)
+#   TRAIL                    where the trail case writes the redacted task-loop trail (default: task-loop-trail.md)
 #
 # Every case runs whatever the one before it did. Exit status: 0 only when every case that ran passed.
 set -u
 export MSYS_NO_PATHCONV=1
 
 PKG=com.aistudio.command.vtxrpl
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Git Bash on Windows gives python a path it can open only in its C:/ form (pwd -W); elsewhere pwd -W fails and plain pwd is used.
+ROOT="$(cd "$(dirname "$0")/.." && { pwd -W 2>/dev/null || pwd; })"
 DEBUG_APK="${DEBUG_APK:-$ROOT/android/app/build/outputs/apk/debug/app-debug.apk}"
 NOEXACT_APK="${NOEXACT_APK:-$ROOT/android/app/build/outputs/apk/noexact/app-noexact.apk}"
 MAX_LATE_MS="${MAX_LATE_MS:-15000}"
 REPORT="${REPORT:-reliability-report.md}"
+TRAIL="${TRAIL:-task-loop-trail.md}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 FAILED=0
@@ -91,17 +95,19 @@ reset_app() {
   adb shell input keyevent KEYCODE_HOME
 }
 
-install_apk() { adb install -r -t "$1" >/dev/null; }
+# Retried once: just after boot the package service can still refuse an install ("Failure [0]", measured on API 37).
+install_apk() { adb install -r -t "$1" >/dev/null || { sleep 20; adb install -r -t "$1" >/dev/null; }; }
 
-arm() { # arm <title of one word> <seconds> : prints the occurrence's id once it is armed
+arm() { # arm <title of one word> <seconds> [more am arguments] : prints the occurrence's id once it is armed
   # Sent again if nothing was armed: a broadcast sent while the last case's ring screen is being torn down can be dropped with the dying process
   # (measured on API 37: "Clearing invalid pending cold start").
-  local id="" left=36
+  local id="" left=36 title="$1" seconds="$2"
+  shift 2
   while [ -z "$id" ] && [ "$left" -gt 0 ]; do
-    if [ $((left % 12)) -eq 0 ]; then adb shell am broadcast -a com.command.debug.RING -p "$PKG" -f 32 --ei seconds "$2" --es title "$1" >/dev/null; fi
+    if [ $((left % 12)) -eq 0 ]; then adb shell am broadcast -a com.command.debug.RING -p "$PKG" -f 32 --ei seconds "$seconds" --es title "$title" "$@" >/dev/null; fi
     sleep 2
     left=$((left - 2))
-    id="$(sql "SELECT o.id FROM occurrences o JOIN missions m ON m.id = o.mission_id WHERE m.title = '$1' AND o.state = 'ARMED'" | head -1)"
+    id="$(sql "SELECT o.id FROM occurrences o JOIN missions m ON m.id = o.mission_id WHERE m.title = '$title' AND o.state = 'ARMED'" | head -1)"
   done
   printf '%s' "$id"
 }
@@ -302,6 +308,158 @@ db.close()
   fi
 }
 
+# The screen as uiautomator sees it, for the cases that walk the app as a person would. ui_find <text> prints the centre "x y" of the first
+# element whose text or description contains <text>, and fails when there is none.
+ui_find() {
+  adb shell uiautomator dump /sdcard/reliability-ui.xml >/dev/null 2>&1
+  timeout 30 adb exec-out cat /sdcard/reliability-ui.xml >"$WORK/ui.xml" 2>/dev/null
+  python3 -c '
+import re, sys, xml.etree.ElementTree as ET
+try:
+    root = ET.parse(sys.argv[1]).getroot()
+except (ET.ParseError, OSError):
+    sys.exit(1)
+for node in root.iter("node"):
+    if sys.argv[2] in (node.get("text") or "") or sys.argv[2] in (node.get("content-desc") or ""):
+        x1, y1, x2, y2 = map(int, re.findall("[0-9]+", node.get("bounds")))
+        print((x1 + x2) // 2, (y1 + y2) // 2)
+        sys.exit(0)
+sys.exit(1)
+' "$WORK/ui.xml" "$1"
+}
+ui_wait() { # ui_wait <seconds> <text> : the centre of <text> once it is on screen
+  local end=$((SECONDS + $1)) at
+  while [ "$SECONDS" -lt "$end" ]; do
+    if at="$(ui_find "$2")"; then echo "$at"; return 0; fi
+    sleep 2
+  done
+  return 1
+}
+ui_tap() { local at; at="$(ui_wait "${2:-30}" "$1")" || return 1; adb shell input tap $at; }
+ui_hold() { local at; at="$(ui_wait 30 "$1")" || return 1; adb shell input swipe $at $at "$2"; } # ui_hold <text> <ms>
+
+# The task loop the spec's release receipt asks evidence of: a synthetic mission rings, is answered by holding, the person says they are
+# starting (a self-reported start: the timed five-minute starter is its own, optional button), the first check-in is asked and answered
+# Done. That occurrence's trail, cut by receipt-redact.py to event type, time, state and
+# request code, is written to $TRAIL for the receipt. The Nudge profile is used because its handshake is a 2 s hold.
+case_trail() {
+  reset_app
+  local id step=""
+  id="$(arm reltrail 20 --es profile builtin_nudge)"
+  [ -n "$id" ] || { result trail FAIL "the debug receiver armed nothing"; return; }
+  if ! wait_for 90 state_is "$id" FIRING; then result trail FAIL "never fired"; return; fi
+  # Unlocked, the ring is a notification whose Open brings up the ring screen. Its heads-up folds away after a few seconds (measured on API 37),
+  # so the shade is opened to reach it.
+  local tries=0
+  until [ "$tries" -ge 3 ]; do
+    adb shell cmd statusbar expand-notifications
+    if ui_tap Open 15; then break; fi
+    tries=$((tries + 1))
+  done
+  [ "$tries" -lt 3 ] || step="no Open on the ring notification"
+  [ -n "$step" ] || ui_hold "Hold to answer" 4000 || step="no hold button on the ring screen"
+  # An answered ring moves on from ACKNOWLEDGED to GUIDED_START at once (measured: 11 ms apart), so the transition is what is looked for.
+  [ -n "$step" ] || wait_for 20 event_seen STATE_CHANGED "occurrence_id = '$id' AND payload_json LIKE '%ACKNOWLEDGED%'" || step="holding did not answer the ring (state $(state_of "$id"))"
+  [ -n "$step" ] || ui_tap "I am starting" || step="no 'I am starting' after the answer"
+  [ -n "$step" ] || wait_for 20 state_is "$id" STARTED_SELF_REPORTED || step="'I am starting' did not record a start (state $(state_of "$id"))"
+  if [ -z "$step" ]; then
+    adb shell am broadcast -a com.command.debug.CHECKIN_DUE -p "$PKG" -f 32 --es id "$id" >/dev/null
+    wait_for 30 event_seen CHECK_IN_ASKED "occurrence_id = '$id'" || step="the check-in was not asked"
+  fi
+  if [ -z "$step" ]; then
+    adb shell am start -W -n "$PKG/com.command.MainActivity" -a com.command.action.OPEN_CHECK_IN --es com.command.extra.OCCURRENCE_ID "$id" >/dev/null
+    ui_tap Done || step="no Done on the check-in"
+  fi
+  [ -n "$step" ] || wait_for 20 state_is "$id" COMPLETED_SELF_REPORTED || step="answering Done did not complete it (state $(state_of "$id"))"
+  adb shell input keyevent KEYCODE_HOME
+  pull_db command.db
+  if ! python3 "$ROOT/scripts/receipt-redact.py" "$WORK/command.db" >"$WORK/trail.md"; then
+    result trail FAIL "${step:-the loop ran}; receipt-redact.py refused the database"
+    return
+  fi
+  {
+    echo "### Task-loop trail, API $(ash getprop ro.build.version.sdk), debug APK $(sha256sum "$DEBUG_APK" | cut -d' ' -f1)"
+    echo
+    cat "$WORK/trail.md"
+  } >"$TRAIL"
+  if [ -n "$step" ]; then
+    result trail FAIL "$step; the partial trail is in $TRAIL"
+  else
+    result trail PASS "rang, held, I am starting, check-in asked, Done: $(($(wc -l <"$WORK/trail.md") - 2)) events in $TRAIL"
+  fi
+}
+
+# The alarm stream's level and its highest, from the platform, as "level highest".
+alarm_volume() { ash cmd media_session volume --stream 4 --get | sed -n 's/.*volume is \([0-9]*\) in range \[[0-9]*\.\.\([0-9]*\)\].*/\1 \2/p'; }
+volume_is() { [ "$(alarm_volume | cut -d' ' -f1)" = "$1" ]; }
+# A started player of alarm usage: what "the ring plays" means on an emulator with no audio device.
+alarm_playing() { ash dumpsys audio | grep -E 'usage=USAGE_ALARM' | grep -q 'state:started'; }
+
+# Android 17's background-audio hardening, enforced (risk 7 of the plan): the ring, and the restore of the alarm volume after a ring that died.
+# The ring is a foreground service started from an alarm clock; the restore runs from the reconcile that the next start of the process queues,
+# with no foreground service, which is the call Android 17 may drop without an error. The volume consent is given and the level set low; the
+# ring raises it to the highest; the process is force-stopped mid-ring so that only the stored record is left; starting the process without its
+# screen must put the level back. It runs once with enforcement on ("enable", which silences what breaks the rule) and once with "throw" (which
+# makes the breaking call throw, so nothing passes quietly), each its own row. Before Android 17 there is nothing to enforce, and the case says so.
+case_hardening() {
+  local api; api="$(ash getprop ro.build.version.sdk)"
+  if [ "${api:-0}" -lt 37 ]; then result hardening N/A "API $api has no background-audio hardening to enforce"; return; fi
+  local mode
+  for mode in ${HARDENING_MODES:-enable throw}; do hardening_run "$mode"; done
+  adb shell cmd audio clear-hardening >/dev/null 2>&1
+}
+
+hardening_run() { # hardening_run <enable|throw>
+  local name="hardening-$1"
+  reset_app
+  adb logcat -c
+  # The Android 17 image (API 37, google_apis r08) names it set-hardening; the plan's set-enable-hardening is not a command there.
+  local low max id raised="" playing=no restored="" refused=""
+  # The ring starts from the level the device has, below its highest (the API 37 image starts at 6 of 7). The shell cannot be relied on to
+  # lower it: on API 37 the platform refuses the shell's own volume change too (measured: "AudioHardening volume control ... ignored for
+  # com.android.server.media"), so the case only tries once, before enforcement.
+  adb shell cmd audio clear-hardening >/dev/null 2>&1
+  low="$(alarm_volume | cut -d' ' -f1)"; max="$(alarm_volume | cut -d' ' -f2)"
+  if [ -n "$max" ] && [ "$low" = "$max" ]; then timeout 20 adb shell cmd audio set-volume 4 $((max - 1)) >/dev/null 2>&1; low="$(alarm_volume | cut -d' ' -f1)"; fi
+  if [ -z "$max" ] || [ "$low" = "$max" ]; then result "$name" FAIL "the alarm volume is at its highest ('$(alarm_volume)') and could not be lowered, so a raise cannot be seen"; return; fi
+  local set; set="$(ash cmd audio set-hardening "$1" 2>&1)"
+  if printf '%s' "$set" | grep -qi -E 'unknown|error|invalid'; then result "$name" FAIL "cmd audio set-hardening $1 was refused: $set"; return; fi
+  local enforced="set-hardening $1 accepted"
+  id="$(arm relharden 15 --ez volume true)"
+  [ -n "$id" ] || { result "$name" FAIL "the debug receiver armed nothing"; return; }
+  if ! wait_for 90 state_is "$id" FIRING; then result "$name" FAIL "never fired with hardening enforced ($enforced)"; return; fi
+  wait_for 15 alarm_playing && playing=yes
+  wait_for 15 volume_is "$max" && raised=yes
+  local path; path="$(ring_path "$id")"
+  local logged; logged="$(timeout 30 adb logcat -d | grep -c -i -E 'AudioHardening|would be muted|would be ignored')"
+  adb shell am force-stop "$PKG"
+  sleep 3
+  local after_stop; after_stop="$(alarm_volume | cut -d' ' -f1)"
+  # After a force-stop Android redelivers BOOT_COMPLETED when the process next starts, and that reconcile restores what a dead ring raised.
+  adb shell am broadcast -a com.command.debug.CHECKIN_DUE -p "$PKG" -f 32 >/dev/null
+  wait_for 90 volume_is "$low" && restored=yes
+  if event_seen VOLUME_SET_REFUSED "occurrence_id = '$id'"; then
+    refused="$(sql "SELECT payload_json FROM events WHERE type = 'VOLUME_SET_REFUSED' AND occurrence_id = '$id'" | head -1)"
+  fi
+  # Enforced, the platform drops that restore without an error (measured). The record of what to put back must then outlive it, so that the
+  # app's own screen, which hardening allows, puts the level back when it is opened.
+  local on_open=""
+  if [ -z "$restored" ]; then
+    open_app
+    wait_for 60 volume_is "$low" && on_open=yes
+    adb shell input keyevent KEYCODE_HOME
+  fi
+  local seen="$enforced; ring path=$path, alarm player started=$playing, raised $low to $max=${raised:-no}"
+  seen="$seen; $logged hardening log lines; level after force-stop $after_stop; put back to $low with the app unopened=${restored:-no}"
+  [ -z "$refused" ] || seen="$seen (VOLUME_SET_REFUSED $refused)"
+  [ -n "$restored" ] || seen="$seen; put back when the app was opened=${on_open:-no}"
+  if [ "$path" = FGS ] && [ "$playing" = yes ] && [ "$raised" = yes ] && { [ "$restored" = yes ] || [ "$on_open" = yes ]; }; then
+    result "$name" PASS "$seen"
+  else
+    result "$name" FAIL "$seen"
+  fi
+}
+
 booted() { [ "$(ash getprop sys.boot_completed)" = 1 ] && ash service list | grep -q 'activity:'; }
 
 # Last, because a reboot that hangs leaves nothing to test on. The timeout is the point: on the dev box this has hung for good.
@@ -324,7 +482,7 @@ case_reboot() {
 
 main() {
   local cases="$*"
-  [ -n "$cases" ] || cases="kill kill9 forcestop idle revoke backstop reboot"
+  [ -n "$cases" ] || cases="kill kill9 forcestop idle revoke backstop trail hardening reboot"
   adb wait-for-device
   adb logcat -G 16M
   {
@@ -338,7 +496,7 @@ main() {
   install_apk "$DEBUG_APK" || { result setup FAIL "the debug APK did not install from $DEBUG_APK"; return 1; }
   for name in $cases; do
     case "$name" in
-      kill | kill9 | forcestop | idle | revoke | backstop | reboot) ;;
+      kill | kill9 | forcestop | idle | revoke | backstop | trail | hardening | reboot) ;;
       *) result "$name" FAIL "no such case"; continue ;;
     esac
     say "=== $name"

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>COMMAND release receipt</title>
+  <link rel="stylesheet" href="status.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header>
+    <p class="muted">Project COMMAND · release receipt 1 of 2 (M17b, amendment 39) · 2026-11-07 · the second follows DC2</p>
+    <h1 id="main">Release receipt</h1>
+  </header>
+  <main>
+    <p>Spec section 8 says a compiled build is not a verified usable release, and lists what a receipt must show. Each field is below, as it stands at the end of the essentials. What was cut on 2026-11-06 is coming back (see the <a href="status.html">status page</a>), so this receipt describes the build before that, and a second receipt follows the second device checkpoint (DC2).</p>
+    <p><strong>Not yet a release for daily use.</strong> Nothing here has run on a real phone. Every device result below is from an emulator, which has no speaker and no phone maker's battery manager. The owner's real-phone checks (issue #4) come first; the <a href="PILOT-PROTOCOL.html">pilot protocol</a> starts after them.</p>
+
+    <h2>Repository, branch and source tree</h2>
+    <table>
+      <tbody>
+        <tr><th scope="row">Repository</th><td><a href="https://github.com/edwardjones3976/COMMAND">edwardjones3976/COMMAND</a></td></tr>
+        <tr><th scope="row">Branch</th><td><code>rebuild/m17b-release-receipt</code>, cut from <code>main</code> at <code>4762868</code> (PRs #28 to #59 merged). Its head commit is named in its pull request: a file cannot name the commit that contains it. Once merged, the receipt describes <code>main</code> at that merge.</td></tr>
+        <tr><th scope="row">Source tree</th><td>Git tree of <code>android/</code>: <code>300f5c2ba0827ffa271bf350a6162401d0d738cb</code>. Check it with <code>git rev-parse HEAD:android</code>. The APKs are built from this tree alone, so a later change to <code>docs/</code> or <code>scripts/</code> leaves it, and the builds, as they are.</td></tr>
+        <tr><th scope="row">Version</th><td><code>com.aistudio.command.vtxrpl</code>, versionName 4.0, versionCode 2, database version 1.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Build digests</h2>
+    <p>Built locally on 2026-11-07 from the tree above with <code>assembleDebug assembleRelease assembleNoexact</code> (JDK 21, Gradle wrapper 9.3.1), all three signed with a <strong>throwaway test identity</strong> made for this run (certificate SHA-256 <code>97df21cfc1eb9aec8fefaa20a2b32de3cc9d3e882788703fd3dac4360a81a17b</code>, not kept, never in the repository) to show the signing proposal below working. A digest covers the signature, so CI's builds of the same tree have their own digests: CI writes them, with each debug APK's signing certificate, into the summary of every run's <code>assemble</code> job.</p>
+    <table>
+      <thead><tr><th scope="col">APK</th><th scope="col">SHA-256</th></tr></thead>
+      <tbody>
+        <tr><td>debug (the build the device checks ran)</td><td><code>606f85af41add72508e6b8fcc235c02119eb4c7f1f1f81e427c0fd5ac6586666</code></td></tr>
+        <tr><td>release</td><td><code>ba2c85260aa9f34df17f241fa6684fae2be0f9276ea4aeac81e55bec87c5c300</code></td></tr>
+        <tr><td>noexact (a debug build without <code>USE_EXACT_ALARM</code>, for the fallback cases)</td><td><code>5c01d636467692bb26842cb4b0b68e1eada5b5f308d9a813e9acba14f1312998</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>Supported Android versions</h2>
+    <p>Android 7.0 (API 24) and later; built against API 36.1 with targetSdk 36. Measured on emulators only: Android 16 (API 36, local <code>command_api36</code> for DC1 and nightly CI) and Android 17 (API 37, <code>google_apis</code> x86_64 r08, locally for this receipt and nightly CI). Robolectric covers API 24 to 36. targetSdk stays 36: see the Android 17 result below.</p>
+
+    <h2>Permissions</h2>
+    <p>From the merged release manifest (<code>android/app/build/intermediates/merged_manifest/release/</code>, every module and library merged in). CI fails if this list and that manifest differ in either direction (<code>scripts/receipt-permissions.py check</code>, in the <code>assemble</code> job).</p>
+    <ul id="permissions">
+      <li><code>android.permission.READ_CALENDAR</code>: the optional calendar import, asked for on its own screen, read only.</li>
+      <li><code>android.permission.SCHEDULE_EXACT_ALARM</code> (up to API 32) and <code>android.permission.USE_EXACT_ALARM</code>: exact alarm clocks. The app asks the platform before every arm and falls back to an inexact alarm, and says so, when refused.</li>
+      <li><code>android.permission.POST_NOTIFICATIONS</code>: the ring and check-in notifications.</li>
+      <li><code>android.permission.USE_FULL_SCREEN_INTENT</code>: the ring screen over the lock screen.</li>
+      <li><code>android.permission.FOREGROUND_SERVICE</code>, <code>android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK</code> and <code>android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED</code>: the ring's foreground service (media playback at run time; the other type is declared so that it can be swapped).</li>
+      <li><code>android.permission.WAKE_LOCK</code>: keeps the phone awake for the length of a ring.</li>
+      <li><code>android.permission.RECEIVE_BOOT_COMPLETED</code>: re-arms the alarms after a restart.</li>
+      <li><code>android.permission.VIBRATE</code>: the ring's and the voice cues' vibration.</li>
+      <li><code>android.permission.INTERNET</code>, <code>android.permission.ACCESS_NETWORK_STATE</code> and <code>com.google.android.providers.gsf.permission.READ_GSERVICES</code>: added by the reCAPTCHA library under Firebase App Check (ACCESS_NETWORK_STATE also by WorkManager, which reads the network state and sends nothing). See the next paragraph.</li>
+      <li><code>com.aistudio.command.vtxrpl.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION</code>: added by AndroidX Core, signature level, so that only this app can reach its own runtime receivers.</li>
+    </ul>
+    <p id="internet-unused"><strong>INTERNET is declared, and no code that runs uses it.</strong> The Firebase libraries stay because Gemini, Studio voices and cloud sync come back after this receipt, each behind its own consent. Today: the App Check setup (<code>configureAppCheck</code>) has no caller; Firebase's start-up provider finds no Firebase configuration in a build without <code>google-services.json</code>, so Firebase never starts; and <code>NoNetworkInRuntimeCodeTest</code> fails if the app's own code gains a way to the network. Measured on the API 37 emulator: the release build ran for 45 s with no traffic recorded for its uid by <code>dumpsys netstats</code>, no socket of its uid in <code>/proc/net</code>, and no Firebase start in the log.</p>
+
+    <h2>Tests</h2>
+    <table>
+      <thead><tr><th scope="col">What</th><th scope="col">Where</th><th scope="col">Result</th></tr></thead>
+      <tbody>
+        <tr><td>Unit, Robolectric and JVM tests of every module, lint</td><td>Locally and in CI on every pull request</td><td>2,406 tests (4 skipped), 0 failures, lint clean, at the tree above</td></tr>
+        <tr><td>Publication safety (no keys, keystores, tokens, personal data, screenshots or false claims are tracked)</td><td>CI, every pull request (gitleaks and <code>PublicationSafetyTest</code>)</td><td>Passes</td></tr>
+        <tr><td>The receipt scripts (redaction, permissions list)</td><td>CI, every pull request</td><td>16 tests pass; seven deliberate breaks of their rules each caught</td></tr>
+        <tr><td>Instrumented ring tests (<code>RingSurfaceTest</code>) and <code>scripts/reliability.sh</code> (kill, kill -9, force-stop, deep idle, revoked exact alarms, backstop, reboot, and now trail and hardening)</td><td>Nightly CI on API 36 and 37 emulators; also on any pull request that changes the harness</td><td>Each run's report is in that run's summary</td></tr>
+        <tr><td>The task loop, end to end (below)</td><td>API 37 emulator, locally, <code>reliability.sh trail</code></td><td>Pass</td></tr>
+        <tr><td>Android 17 background-audio hardening (below)</td><td>API 37 emulator, locally, <code>reliability.sh hardening</code></td><td>Pass, in both modes, after the fix in this change</td></tr>
+        <tr><td>Updating in place with one signing identity (below)</td><td>API 37 emulator, by hand</td><td>Pass</td></tr>
+        <tr><td>The device checkpoint DC1: onboarding, every screen, the loop, handshakes, accessibility, a seeded calendar, the voice screen</td><td><code>command_api36</code> emulator (amendment 38)</td><td>Done, with three limits found and not fixed (below)</td></tr>
+        <tr><td>A real phone</td><td>Owner (issue #4)</td><td><strong>Not run</strong></td></tr>
+      </tbody>
+    </table>
+
+    <h2>Evidence of a working task loop</h2>
+    <p>A synthetic mission (made by the debug build's ring starter, never a person's) rang on the API 37 emulator; the ring screen was opened from its notification, answered by holding, "I am starting" was tapped, the first check-in was asked and answered Done. <code>scripts/receipt-redact.py</code> cut the database to event type, time, state and request code; it refuses a database that holds any mission it did not make.</p>
+    <table>
+      <thead><tr><th scope="col">type</th><th scope="col">time (UTC)</th><th scope="col">state</th><th scope="col">request_code</th></tr></thead>
+      <tbody>
+        <tr><td>STATE_CHANGED</td><td>2026-11-07T17:29:24.179Z</td><td>ARMED</td><td>1</td></tr>
+        <tr><td>ALARM_ARMED</td><td>2026-11-07T17:29:24.180Z</td><td>ARMED</td><td>1</td></tr>
+        <tr><td>STATE_CHANGED</td><td>2026-11-07T17:29:44.261Z</td><td>FIRING</td><td>1</td></tr>
+        <tr><td>ALARM_FIRED</td><td>2026-11-07T17:29:44.262Z</td><td>FIRING</td><td>1</td></tr>
+        <tr><td>STATE_CHANGED</td><td>2026-11-07T17:29:56.667Z</td><td>ACKNOWLEDGED</td><td>1</td></tr>
+        <tr><td>STATE_CHANGED</td><td>2026-11-07T17:29:56.682Z</td><td>GUIDED_START</td><td>1</td></tr>
+        <tr><td>STATE_CHANGED</td><td>2026-11-07T17:30:01.826Z</td><td>STARTED_SELF_REPORTED</td><td>1</td></tr>
+        <tr><td>CHECK_IN_ASKED</td><td>2026-11-07T17:30:02.791Z</td><td>STARTED_SELF_REPORTED</td><td>1</td></tr>
+        <tr><td>STATE_CHANGED</td><td>2026-11-07T17:30:08.282Z</td><td>COMPLETED_SELF_REPORTED</td><td>1</td></tr>
+      </tbody>
+    </table>
+    <p>The spoken line and the optional five-minute starter are part of the loop but not of this trail: the emulator has no speaker, and the timed starter is a separate button (both were walked in DC1). This shows the states and the order, not how it sounds or whether it helps; that is the owner's listening and the pilot.</p>
+
+    <h2>Android 17: background-audio hardening, measured before any targetSdk change</h2>
+    <p>Plan risk 7. On the API 37 emulator, enforcement was forced on with <code>cmd audio set-hardening enable</code> and then <code>throw</code> (on this image the command is <code>set-hardening</code>; the plan's <code>set-enable-hardening</code> does not exist there). With the volume consent given and the alarm level at 6 of 7:</p>
+    <ul>
+      <li><strong>The ring works in both modes</strong>: foreground service, an alarm-usage player started, the level raised 6 to 7.</li>
+      <li><strong>The restore after a ring that died is dropped.</strong> The ring's process was force-stopped mid-ring, so only the stored record was left; the next start of the process runs the reconcile from a background worker with no foreground service, and the platform ignored its volume change (<code>AS.HardeningEnforcer: AudioHardening volume control ... ignored</code>), without an error in <code>enable</code> mode and with an <code>IllegalStateException</code> in <code>throw</code> mode.</li>
+      <li><strong>Found and fixed here.</strong> The app read the level back, saw it unchanged and took that for the platform's floor, so it cleared its record and the alarm volume would have stayed at the highest for good. In <code>throw</code> mode the exception escaped the restore and the whole reconcile after the restart failed and was retried, re-arming included. Now an unchanged level and that exception are both a refusal: <code>VOLUME_SET_REFUSED{phase:restore}</code> is logged, the record stays, and the level is put back when the app is next opened (measured: back to 6 in both modes) or by any later reconcile the platform allows. The reconcile no longer fails.</li>
+      <li>On the first <code>enable</code> run the force-stop also crashed this emulator image's system server (a SIGSEGV in the input-method service's package monitor, not in this app); the next runs did not.</li>
+    </ul>
+    <p>So the ring needs no change for Android 17, and targetSdk can go to 37 later, with this run repeated then. What remains: on Android 17 a ring that is killed leaves the alarm volume raised until the app is opened.</p>
+
+    <h2>Known limitations</h2>
+    <ul>
+      <li>Nothing has run on a real phone: ringing across restarts and days of standby, loudness through a real speaker, headset and Bluetooth routing, phone makers' battery killers, TalkBack (issue #4; the listening of issue #2).</li>
+      <li>Four handshakes, not P1's seven; speech is the phone's own engine; no Gemini, Studio voices, cloud sync or P2. All are coming back.</li>
+      <li>From DC1: a cancelled exception of a synced calendar series needs two calendar reads before its alarm goes, so it can still ring if due before the second; refused alarms past the Schedule's 200 upcoming rows show only on Reliability; the time picker's AM/PM is clipped at the largest font.</li>
+      <li>On Android 17, a ring killed mid-way leaves the alarm volume raised until the app is opened (above).</li>
+      <li>The reliability harness shows an alarm armed from deep idle firing on time, not one firing while the device is still in deep idle; it does not drive the locked-screen swipe; a silent alarm stream (volume 0) needs a real phone; <code>occurrences.ring_mode</code> is never written.</li>
+      <li>The reCAPTCHA site key, an AI Studio screenshot and working notes remain in git history (no force-push); rotating the key or rewriting history is the owner's decision.</li>
+    </ul>
+
+    <h2>Installing and rolling back</h2>
+    <ol>
+      <li><strong>Before replacing a build</strong>, export your data: Settings, Your data, copy. There is no import yet, so this copy is a record, not a way back in.</li>
+      <li>Take the <code>apks</code> artifact of a green CI run of <code>main</code> and check its SHA-256 against that run's summary. Install the debug APK (<code>adb install -r app-debug.apk</code>, or open it on the phone with installs from this source allowed). The release APK from CI is unsigned and will not install as it is.</li>
+      <li><strong>Today a later build will not install over an earlier one</strong>: each CI run signs with a throwaway key of its own, and Android refuses a different key (measured: <code>INSTALL_FAILED_UPDATE_INCOMPATIBLE ... signatures do not match</code>). Uninstalling removes every alarm and the history. The phone signing identity below ends this.</li>
+      <li><strong>Rolling back</strong>: with the same identity, install the earlier APK over the later one (<code>adb install -r -d</code>). Every build so far has versionCode 2 and database version 1, so an earlier build opens the later one's data. Once a later build raises the database version, rolling back past it means uninstalling.</li>
+    </ol>
+
+    <h2>One signing identity for the owner's phone (proposal)</h2>
+    <p>The build already takes one: with <code>COMMAND_SIGNING_KEYSTORE</code> (a path outside the repository), <code>COMMAND_SIGNING_STORE_PASSWORD</code>, <code>COMMAND_SIGNING_KEY_ALIAS</code> and <code>COMMAND_SIGNING_KEY_PASSWORD</code> set, the debug, noexact and release builds all sign with that key (the Play upload key, if one is ever set, still wins for release). Without them nothing changes. Measured on the API 37 emulator with a throwaway key: the release build installed over the debug build in place (first-install time kept), and a build signed with another key was refused.</p>
+    <ol>
+      <li>Someone with the repository's admin rights creates one keystore (for example <code>keytool -genkeypair -keystore command-phone.p12 -storetype PKCS12 -alias phone -keyalg RSA -keysize 3072 -validity 10000</code>) and keeps it, with its password, outside the repository and backed up: a lost key means every later build needs an uninstall.</li>
+      <li>They store it as four repository secrets: <code>COMMAND_SIGNING_KEYSTORE_B64</code> (the file, base64), <code>COMMAND_SIGNING_STORE_PASSWORD</code>, <code>COMMAND_SIGNING_KEY_ALIAS</code>, <code>COMMAND_SIGNING_KEY_PASSWORD</code>. The <code>assemble</code> job then signs every APK with it and prints the certificate; the keystore is written to the runner's temporary folder and never uploaded. Pull requests from forks get no secrets and stay on throwaway keys.</li>
+      <li>The phone's current install has a throwaway key, so the first build with the identity needs one last uninstall (export first). After that, every build updates in place.</li>
+    </ol>
+    <p>The publication-safety test fails if a keystore (<code>.jks</code>, <code>.keystore</code>, <code>.p12</code>, <code>.pfx</code>) is ever tracked, and <code>.gitignore</code> lists them.</p>
+
+    <h2>Issue closure check</h2>
+    <p>The plan's "Closes" list against the open issues on 2026-11-07:</p>
+    <table>
+      <thead><tr><th scope="col">Issue</th><th scope="col">Plan</th><th scope="col">Now</th><th scope="col">What to do</th></tr></thead>
+      <tbody>
+        <tr><td>#4 owner's on-device voice check</td><td>Closes with the owner's real-phone sign-off</td><td>Open</td><td>Leave open for the owner.</td></tr>
+        <tr><td>#2 loudness</td><td>Closes with the owner's listening sign-off</td><td>Closed on 2026-11-07 by the owner's account, with no comment and no linked change</td><td>The plan keeps it open until the owner has listened; for the owner to confirm or reopen.</td></tr>
+        <tr><td>#16 alarms and calendar sync after a reboot</td><td>Closed by M5 (#34, #35)</td><td>Open: the keyword did not fire</td><td>The code covers it (the BOOT reconcile re-arms; the calendar sync is a periodic WorkManager job, which survives a reboot). For Cursor to check and close.</td></tr>
+        <tr><td>#19 conflict detection against the latest-ending earlier event</td><td>Closed by M11 (#46)</td><td>Open</td><td><code>ConflictDetector</code> compares each event with every one still open, not only the one before. For Cursor to check and close.</td></tr>
+        <tr><td>#21 conflict flags of existing calendar missions</td><td>Closed by M11 (#46)</td><td>Open</td><td>Conflicts are worked out again and stored on every reconcile. For Cursor to check and close.</td></tr>
+        <tr><td>#53 flaky tests</td><td>Not in the list (a record from M12b)</td><td>Open</td><td>Leave open.</td></tr>
+      </tbody>
+    </table>
+    <p>Every other issue the plan names (#6 to #13, #15, #18, #20, #22 to #25, #27) is closed; #11, #13 and #25 as not planned, which the reinstatement keeps.</p>
+  </main>
+</body>
+</html>

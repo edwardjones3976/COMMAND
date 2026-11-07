@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>COMMAND pilot protocol</title>
+  <link rel="stylesheet" href="status.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header>
+    <p class="muted">Project COMMAND · for the owner · one page</p>
+    <h1 id="main">Pilot protocol</h1>
+  </header>
+  <main>
+    <p>The spec's effectiveness gate (section 8) asks for a personal pilot that compares the reminders you use now with COMMAND. This is how to run it. It needs no app feature: COMMAND keeps no rating, and what you write down stays with you. It is one person's experience, so it supports a decision for you, not a claim about anyone else.</p>
+
+    <h2>Before you start</h2>
+    <ol>
+      <li>Install the build named in the <a href="RELEASE-RECEIPT.html">release receipt</a> on your own phone, and walk the real-phone checks there (issue #4): it rings after a restart, the voice is loud enough on the speaker, and your phone maker's battery settings leave it alone. If any of these fails, stop and report it: a pilot on an alarm that may not ring measures nothing.</li>
+      <li>Pick <strong>three to five tasks you start most weekdays</strong> and tend to put off (for example: begin the main work block, go for the walk, start the evening review). Use the same tasks in both halves.</li>
+      <li>Set the volume consent and the profile you would really use. Do not change dials during a half unless something is unbearable; if you do, note the day.</li>
+    </ol>
+
+    <h2>Two halves of one week each</h2>
+    <table>
+      <thead><tr><th scope="col">Half</th><th scope="col">What reminds you</th><th scope="col">Days</th></tr></thead>
+      <tbody>
+        <tr><td>A, baseline</td><td>What you use today (phone alarms, calendar notifications, another app). COMMAND is installed but has no missions.</td><td>7</td></tr>
+        <tr><td>B, COMMAND</td><td>One COMMAND mission per task at the same times; your old reminders for those tasks are off.</td><td>7</td></tr>
+      </tbody>
+    </table>
+    <p>If you can spare a third week, run A again: a change that comes back when COMMAND goes away is more believable than one that does not.</p>
+
+    <h2>Each day, about two minutes, at the same time in the evening</h2>
+    <p>One line per task, on paper or in a note on your phone:</p>
+    <table>
+      <thead><tr><th scope="col">Write down</th><th scope="col">How</th></tr></thead>
+      <tbody>
+        <tr><td>Started on time</td><td>yes (within 10 minutes) / late (minutes) / not at all</td></tr>
+        <tr><td>Progress</td><td>none / some / most / done</td></tr>
+        <tr><td>Got back on track after a slip</td><td>yes / no / no slip</td></tr>
+        <tr><td>Helpfulness of the reminder</td><td>1 (in the way) to 5 (it got me going)</td></tr>
+        <tr><td>Alert fatigue</td><td>1 (fine) to 5 (I dread it)</td></tr>
+      </tbody>
+    </table>
+    <p>In half B, COMMAND's History shows what you reported to it (started, done, skipped, missed). Use it to check your memory, not instead of your own line: it only knows what you told it.</p>
+
+    <h2>At the end of each half</h2>
+    <ul>
+      <li>Count, per task: on-time starts, days with progress, days done, recoveries.</li>
+      <li>Answer two questions: <em>Would I keep using this?</em> and <em>Did it make any day worse?</em></li>
+    </ul>
+
+    <h2>Stop early if</h2>
+    <ul>
+      <li>An alarm fails to ring, rings at the wrong time, or cannot be silenced at once. Report it with the time; that is a reliability bug, not a pilot result.</li>
+      <li>It costs you sleep, or you notice more stress than help on three days running. That answer is a result in itself (the spec's "hold or narrow").</li>
+    </ul>
+
+    <h2>What to report back</h2>
+    <p>Only the counts and the two answers, for example "on-time starts 9 of 25 in A, 16 of 25 in B; fatigue 2 to 3; would keep it: yes". Task names, times and notes stay with you: the repository is public. The spec reads the result as <strong>go</strong> (starts improve at a bearable cost), <strong>revise</strong> (you answer alarms but do not start more) or <strong>hold</strong> (more stress than use).</p>
+  </main>
+</body>
+</html>

@@ -39,7 +39,7 @@ class PublicationSafetyTest {
 
     @Test
     fun `tracked tree has no secret-shaped file names`() {
-        val bad = Regex("""(?i)(^|/)(\.env($|\.)|id_rsa|credentials\.json|google-services\.json|.*\.(dpapi|pem|key|jks|keystore)|local\.properties)$""")
+        val bad = Regex("""(?i)(^|/)(\.env($|\.)|id_rsa|credentials\.json|google-services\.json|.*\.(dpapi|pem|key|jks|keystore|p12|pfx)|local\.properties)$""")
         val hits = tracked.filter { bad.containsMatchIn(it) && !it.endsWith(".env.example") }
         assertTrue("secret-shaped names: $hits", hits.isEmpty())
     }
@@ -162,7 +162,8 @@ class PublicationSafetyTest {
         }
         assertTrue(File(root, "LICENSE").readText().contains("All rights reserved"))
         val ignore = File(root, ".gitignore").readText()
-        listOf(".env", "*.dpapi", "*.pem").forEach { assertTrue("gitignore lacks $it", ignore.contains(it)) }
+        // A signing key never enters the tree: the phone signing identity lives outside the repository (amendment 39).
+        listOf(".env", "*.dpapi", "*.pem", "*.jks", "*.keystore", "*.p12").forEach { assertTrue("gitignore lacks $it", ignore.contains(it)) }
     }
 
     private companion object {
