@@ -19,6 +19,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -63,6 +64,8 @@ sealed interface HandshakeEditorUiState {
  * how long a press lasts. The draft is checked as it changes by the same rules the storage and the engine use ([ChainValidation]); nothing
  * is written until Save, and a chain with a problem cannot be saved. What an asynchronous answer (the profile that was read, a save, a
  * return to the standard chain) says is applied only to the profile it was asked for, and a save says "saved" only of the draft it wrote.
+ * The row is followed for as long as the editor is open, because the dials screen, and later a sync, write it too: a draft nobody has touched
+ * becomes what is in force now, and one that has been touched stays, measured against what is in force now.
  */
 @HiltViewModel
 class HandshakeEditorViewModel @Inject constructor(private val profiles: ProfileRepository) : ViewModel() {
@@ -77,6 +80,9 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
 
     /** The last save asked for. Saves run one after another, and a return to the standard waits for them: what the person asked for last is what stays. */
     private var saving: Job? = null
+
+    /** The profile being put back on the standard. The answer shows it when it is read back, so the row is not followed until then. */
+    private var returning: String? = null
     private var nextKey = 0
 
     /** A seam for tests: runs before a save is written, so that a slow write can be made to come after something else (a return to the standard). */
@@ -92,22 +98,32 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
         opening?.cancel()
         _state.value = HandshakeEditorUiState.Loading
         opening = guardedScope.launch {
-            val profile = profiles.get(id)
-            // Another profile may have been asked for while this one was read.
-            if (profileId != id) return@launch
-            if (profile == null) {
-                _state.value = HandshakeEditorUiState.NotFound
-                return@launch
-            }
-            // Whether alarms are fired with this profile is followed for as long as the editor is open, as the list follows it: the line at the
-            // top and the note of a save say what is true now, and not what was true when the editor was opened.
-            var shown = false
-            profiles.observeInUse(id).collect { used ->
+            // The row, and whether alarms are fired with this profile, are followed for as long as the editor is open, as the list follows them:
+            // the line at the top and the note of a save say what is true now, and not what was true when the editor was opened.
+            combine(profiles.observeHandshake(id), profiles.observeInUse(id)) { profile, used -> profile to used }.collect { (profile, used) ->
+                // Another profile may have been asked for while this one was read.
                 if (profileId != id) return@collect
                 inUse = used
-                if (shown) edit { it.copy(inUse = used) } else { shown = true; show(profile, used) }
+                if (returning == id) return@collect
+                if (profile == null) _state.value = HandshakeEditorUiState.NotFound else follow(profile, used)
             }
         }
+    }
+
+    /**
+     * Takes in the profile as it is now. An editor with nothing to show shows it, and so does one with a draft nobody has touched that is no
+     * longer what is in force. A draft the person has changed, or one a save is still writing, stays: it is theirs, and whether it is a change
+     * still to save is measured against what is in force now. A draft that is what is in force keeps its steps and its notes.
+     */
+    private fun follow(profile: ProfileHandshake, used: Boolean) {
+        val current = _state.value as? HandshakeEditorUiState.Editing
+        if (current == null) return show(profile, used)
+        val touched = current.changed || saving?.isActive == true
+        inForce = profile.chain
+        val now = current.copy(
+            profileName = profile.name, difficulty = profile.difficulty, usingStandard = profile.own == null, storedUnusable = profile.storedUnusable,
+        ).with().copy(inUse = used)
+        if (now.changed && !touched) show(profile, used) else _state.value = now
     }
 
     private fun show(profile: ProfileHandshake, used: Boolean, restored: Boolean = false) {
@@ -255,16 +271,21 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
         if (_state.value !is HandshakeEditorUiState.Editing) return
         _state.value = HandshakeEditorUiState.Loading
         val earlier = saving
+        returning = id
         guardedScope.launch {
-            earlier?.join()
-            if (!profiles.useDefault(id)) {
-                if (profileId == id) _state.value = HandshakeEditorUiState.NotFound
-                return@launch
+            try {
+                earlier?.join()
+                if (!profiles.useDefault(id)) {
+                    if (profileId == id) _state.value = HandshakeEditorUiState.NotFound
+                    return@launch
+                }
+                afterUseDefault()
+                val profile = profiles.get(id)
+                if (profileId != id) return@launch
+                if (profile == null) _state.value = HandshakeEditorUiState.NotFound else show(profile, inUse, restored = profile.own == null)
+            } finally {
+                if (returning == id) returning = null
             }
-            afterUseDefault()
-            val profile = profiles.get(id)
-            if (profileId != id) return@launch
-            if (profile == null) _state.value = HandshakeEditorUiState.NotFound else show(profile, inUse, restored = profile.own == null)
         }
     }
 

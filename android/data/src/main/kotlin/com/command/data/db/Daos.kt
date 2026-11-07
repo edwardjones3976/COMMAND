@@ -327,6 +327,32 @@ interface ProfileDao {
     @Query("UPDATE execution_profiles SET handshake_chain_json = :json WHERE id = :id")
     suspend fun setChainJson(id: String, json: String?): Int
 
+    /** One profile, followed for as long as it is collected; null while there is no such profile. */
+    @Query("SELECT * FROM execution_profiles WHERE id = :id")
+    fun observe(id: String): Flow<ProfileRow?>
+
+    // One statement for one column, as for the chain: a dial that is set cannot undo a change another writer made to the rest of the row.
+    @Query("UPDATE execution_profiles SET firmness = :value WHERE id = :id")
+    suspend fun setFirmness(id: String, value: Int): Int
+
+    @Query("UPDATE execution_profiles SET obnoxiousness = :value WHERE id = :id")
+    suspend fun setObnoxiousness(id: String, value: Int): Int
+
+    @Query("UPDATE execution_profiles SET alert_intensity = :value WHERE id = :id")
+    suspend fun setAlertIntensity(id: String, value: Int): Int
+
+    @Query("UPDATE execution_profiles SET follow_up_persistence = :value WHERE id = :id")
+    suspend fun setFollowUpPersistence(id: String, value: Int): Int
+
+    @Query("UPDATE execution_profiles SET handshake_difficulty = :value WHERE id = :id")
+    suspend fun setHandshakeDifficulty(id: String, value: Int): Int
+
+    @Query("UPDATE execution_profiles SET schedule_rigidity = :value WHERE id = :id")
+    suspend fun setScheduleRigidity(id: String, value: Int): Int
+
+    @Query("UPDATE execution_profiles SET recovery_structure = :value WHERE id = :id")
+    suspend fun setRecoveryStructure(id: String, value: Int): Int
+
     /** Sets who a profile speaks as, both columns in one statement: there is no moment at which it has the words of one director and the voice of another. */
     @Query("UPDATE execution_profiles SET personality = :personality, voice_pack_id = :packId WHERE id = :id")
     suspend fun setDirector(id: String, personality: Personality, packId: String): Int
@@ -342,6 +368,13 @@ interface ActivityProfileDao {
 
     @Query("SELECT * FROM activity_profiles")
     fun observeAll(): Flow<List<ActivityProfileRow>>
+
+    /** Returns the number of rules changed: 0 when the rule is gone, so that saving it cannot bring it back. */
+    @Query("UPDATE activity_profiles SET match_category = :category, match_title_contains = :words, profile_id = :profileId WHERE id = :id")
+    suspend fun update(id: String, category: String, words: String?, profileId: String): Int
+
+    @Query("DELETE FROM activity_profiles WHERE id = :id")
+    suspend fun delete(id: String): Int
 }
 
 @Dao

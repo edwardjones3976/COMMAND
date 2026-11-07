@@ -696,9 +696,7 @@ class OccurrenceRepository @Inject constructor(
 
     private suspend fun dialsFor(mission: MissionRow?): Dials {
         val profile: ProfileRow? = profiles.resolve(mission)
-        return profile?.let {
-            Dials(it.firmness, it.obnoxiousness, it.alertIntensity, it.followUpPersistence, it.handshakeDifficulty, it.scheduleRigidity, it.recoveryStructure)
-        } ?: Presets.dialsFor(PresetOrigin.STEADY)
+        return profile?.storedDials() ?: Presets.dialsFor(PresetOrigin.STEADY)
     }
 
     /**

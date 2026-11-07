@@ -393,6 +393,22 @@ class OccurrenceStateMachineTest {
     }
 
     @Test
+    fun `persistence lowered below the questions already asked makes the waiting alarm the final timeout`() {
+        val lowered = command.copy(followUpPersistence = 1) // one question, and two have been asked
+        val end = applied(snap(GUIDED_START, lowered, asked = 2), CheckInDue(2))
+        assertEquals(UNCONFIRMED, end.state)
+        assertTrue(Effect.CancelCheckIns in end.effects)
+
+        assertEquals("a reported start stays", STARTED_SELF_REPORTED, applied(snap(STARTED_SELF_REPORTED, lowered, asked = 2), CheckInDue(2)).state)
+        val rest = applied(snap(GUIDED_START, lowered, asked = 2, restEndsAt = now + minute), CheckInDue(2))
+        assertEquals("protected time still holds it back", GUIDED_START, rest.state)
+        assertTrue(Effect.ScheduleCheckIn(2, now + minute + 10 * minute) in rest.effects)
+
+        assertTrue("an alarm from before is still stale", run(snap(GUIDED_START, lowered, asked = 2), CheckInDue(1)) is TransitionResult.Illegal)
+        assertTrue("and so is one from beyond", run(snap(GUIDED_START, lowered, asked = 2), CheckInDue(3)) is TransitionResult.Illegal)
+    }
+
+    @Test
     fun `silence after the user said they started does not rewrite the status`() {
         val started = snap(STARTED_SELF_REPORTED, command.copy(followUpPersistence = 1), asked = 1)
         val r = applied(started, CheckInDue(1))

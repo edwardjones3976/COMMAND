@@ -6,12 +6,16 @@ import com.command.data.db.ProfileRow
 import com.command.data.db.SettingRow
 import com.command.domain.dials.ChainIssue
 import com.command.domain.dials.ChainSpec
+import com.command.domain.dials.Dial
 import com.command.domain.dials.DialEffects
+import com.command.domain.dials.Dials
 import com.command.domain.dials.Personality
 import com.command.domain.dials.PresetOrigin
 import com.command.domain.dials.issues
 import com.command.domain.model.SettingKeys
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -34,6 +38,9 @@ data class ProfileHandshake(
     /** The chain that is in force for this profile. */
     val chain: ChainSpec get() = own ?: DialEffects.defaultChain(difficulty)
 }
+
+/** A profile as the dials screen sees it. What is stored is shown clamped to 1 to 5, as the screen can show nothing else. */
+data class ProfileDials(val handshake: ProfileHandshake, val dials: Dials)
 
 sealed interface SaveChainResult {
     data object Saved : SaveChainResult
@@ -58,11 +65,44 @@ internal fun activeProfileIdOf(raw: String?): String? = raw?.trim('"')?.takeIf {
 /** The profiles as the screens see them: their handshake chains, who is in use, who speaks for them and which is active. */
 @Singleton
 class ProfileRepository @Inject constructor(private val db: CommandDb) {
+    /** Dial writes land in the order they were asked for, from whichever screen: a Mutex is fair, and this class is one for the whole app. */
+    private val dialWrites = Mutex()
+
+    /** A seam for tests: runs in its turn, before a dial is written, so that a write can be made as slow as a test needs. */
+    internal var beforeDialWrite: suspend () -> Unit = {}
+
     private val resolver = ProfileResolver(db)
 
     fun observe(): Flow<List<ProfileHandshake>> = db.profiles().observeAll().map { rows -> rows.map(::handshakeOf) }
 
     suspend fun get(id: String): ProfileHandshake? = db.profiles().get(id)?.let(::handshakeOf)
+
+    /** One profile for as long as it is collected: a new value whenever its handshake changes, and null while there is no such profile. */
+    fun observeHandshake(id: String): Flow<ProfileHandshake?> = db.profiles().observe(id).map { row -> row?.let(::handshakeOf) }.distinctUntilChanged()
+
+    /** One profile and its dials for as long as it is collected, and null while there is no such profile. */
+    fun observeDials(id: String): Flow<ProfileDials?> = db.profiles().observe(id).map { row -> row?.let { ProfileDials(handshakeOf(it), it.storedDials()) } }.distinctUntilChanged()
+
+    /** The id the active-profile setting names. It may name a profile that is gone: a list shows no profile as active then. */
+    fun observeActiveId(): Flow<String?> = db.settings().observe(SettingKeys.ACTIVE_PROFILE_ID).map(::activeProfileIdOf).distinctUntilChanged()
+
+    /** Sets one dial of one profile, and nothing else of it. True if it was written: there is such a profile and the value is one a dial can have. */
+    suspend fun setDial(id: String, dial: Dial, value: Int): Boolean {
+        if (value !in Dials.RANGE) return false
+        val profiles = db.profiles()
+        return dialWrites.withLock {
+            beforeDialWrite()
+            when (dial) {
+                Dial.FIRMNESS -> profiles.setFirmness(id, value)
+                Dial.OBNOXIOUSNESS -> profiles.setObnoxiousness(id, value)
+                Dial.ALERT_INTENSITY -> profiles.setAlertIntensity(id, value)
+                Dial.FOLLOW_UP_PERSISTENCE -> profiles.setFollowUpPersistence(id, value)
+                Dial.HANDSHAKE_DIFFICULTY -> profiles.setHandshakeDifficulty(id, value)
+                Dial.SCHEDULE_RIGIDITY -> profiles.setScheduleRigidity(id, value)
+                Dial.RECOVERY_STRUCTURE -> profiles.setRecoveryStructure(id, value)
+            } > 0
+        }
+    }
 
     /** The ids of the profiles that alarms are fired with (see [ProfileResolver.observeInUse]). Editing any other reaches no alarm, and the screens say so. */
     fun observeInUse(): Flow<Set<String>> = resolver.observeInUse()
@@ -111,3 +151,19 @@ class ProfileRepository @Inject constructor(private val db: CommandDb) {
         )
     }
 }
+
+/**
+ * The dials of a stored row, for the ring and for the screens alike. What is out of range costs the setting and never the ring: it is clamped, and
+ * an alert level that cannot be read is the loudest, as it is for the spoken line.
+ */
+internal fun ProfileRow.storedDials(): Dials = Dials.coerced(
+    listOf(
+        firmness,
+        obnoxiousness,
+        alertIntensity.takeIf { it in Dials.RANGE } ?: Dials.RANGE.last,
+        followUpPersistence,
+        handshakeDifficulty,
+        scheduleRigidity,
+        recoveryStructure,
+    ),
+)

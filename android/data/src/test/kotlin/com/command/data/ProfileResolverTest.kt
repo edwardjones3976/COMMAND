@@ -11,6 +11,7 @@ import com.command.domain.model.MissionSource
 import com.command.domain.model.SettingKeys
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.OccurrenceCommand
+import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.model.EventSource
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -141,6 +142,23 @@ class ProfileResolverTest {
         assertNull(resolved(f.mission()))
         f.db.settings().put(SettingRow(SettingKeys.ACTIVE_PROFILE_ID, "\"\""))
         assertNull(resolved(null))
+    }
+
+    @Test
+    fun `a dial stored out of range costs the setting and never the ring, an alert that cannot be read is the loudest, and the screen says the same`() = run {
+        f.db.openHelper.writableDatabase.execSQL("UPDATE execution_profiles SET firmness = 9, alert_intensity = 0 WHERE id = '$active'")
+        val o = f.repo.createOccurrence(f.mission().id, f.t0 + 60_000, "UTC").occurrence
+
+        f.repo.apply(o.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+        f.repo.apply(o.id, OccurrenceCommand.Fire, EventSource.SYSTEM)
+
+        val fired = f.repo.get(o.id)!!
+        assertEquals(OccurrenceState.FIRING, fired.state)
+        assertEquals(5, f.repo.dialsOf(fired).firmness)
+        assertEquals(5, f.repo.speechLevelOf(fired).alertIntensity)
+        val shown = ProfileRepository(f.db).observeDials(active).first()!!.dials
+        assertEquals(5, shown.firmness)
+        assertEquals(5, shown.alertIntensity)
     }
 
     @Test
