@@ -529,6 +529,33 @@ class MissionRepositoryTest {
         }
     }
 
+    /**
+     * A title has no limit, so the rows can fill more than one cursor window, and each further window runs the query again. Outside a transaction a row
+     * that moved between two windows comes back twice.
+     */
+    @Test
+    fun `rows too large for one cursor window are still each in one list`() = runBlocking {
+        val longTitle = "x".repeat(150_000)
+        val ids = (1..40).map { i -> occurrencesOf(saved(draft(title = "$i $longTitle", schedule = ScheduleDraft.Once(at(i * hour))))).single().id }
+        val seen = java.util.concurrent.CopyOnWriteArrayList<List<String>>()
+        val reader = launch(kotlinx.coroutines.Dispatchers.Default) {
+            missions.observeSchedule().collect { s -> seen += (s.upcoming + s.recent).map { it.occurrenceId } }
+        }
+        try {
+            for (id in ids) {
+                f.repo.apply(id, OccurrenceCommand.Miss(MissReason.DOWNTIME, lateMs = 0), EventSource.SYSTEM)
+                kotlinx.coroutines.delay(5)
+            }
+            kotlinx.coroutines.withTimeout(30_000) {
+                while (missions.observeSchedule().first().recent.size != ids.size || seen.lastOrNull()?.toSet() != ids.toSet()) kotlinx.coroutines.delay(10)
+            }
+        } finally {
+            reader.cancel()
+        }
+        assertTrue("some reads were seen", seen.size > 1)
+        for (read in seen) assertEquals("no occurrence twice in one read", read.distinct(), read)
+    }
+
     @Test
     fun `recent keeps what happened in the last day and lets go of what is older`() = run {
         val occ = occurrencesOf(saved(draft())).single()

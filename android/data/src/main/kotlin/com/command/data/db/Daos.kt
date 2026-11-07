@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.command.domain.dials.Personality
 import com.command.domain.dials.Flexibility
@@ -164,8 +165,11 @@ interface OccurrenceDao {
     /**
      * What the schedule shows, of missions that still exist: the soonest [upcomingLimit] of what is still to come (or ringing), and the newest
      * [recentLimit] of what has happened since [fromUtc] (so the recent past shows what was just missed). One statement, so that both come from one
-     * moment of the table: read apart, an occurrence that had just moved could be in both or in neither. The order is the caller's to set.
+     * moment of the table: read apart, an occurrence that had just moved could be in both or in neither. In a transaction, because a title has no limit:
+     * rows too large for one cursor window run the statement again for each further window, and a row that moved in between would come back twice.
+     * The order is the caller's to set.
      */
+    @Transaction
     @Query(
         """SELECT * FROM (""" + SCHEDULE_SELECT + """ WHERE m.deleted_at IS NULL AND o.state IN ('SCHEDULED', 'ARMED', 'FIRING')
              ORDER BY o.scheduled_at_utc LIMIT :upcomingLimit)
