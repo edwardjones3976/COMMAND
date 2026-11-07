@@ -19,3 +19,8 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# Signing keys: the phone signing identity is kept outside the repository (amendment 39).
+*.jks
+*.keystore
+*.p12

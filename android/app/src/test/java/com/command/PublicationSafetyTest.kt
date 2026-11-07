@@ -39,7 +39,7 @@ class PublicationSafetyTest {
 
     @Test
     fun `tracked tree has no secret-shaped file names`() {
-        val bad = Regex("""(?i)(^|/)(\.env($|\.)|id_rsa|credentials\.json|google-services\.json|.*\.(dpapi|pem|key|jks|keystore)|local\.properties)$""")
+        val bad = Regex("""(?i)(^|/)(\.env($|\.)|id_rsa|credentials\.json|google-services\.json|.*\.(dpapi|pem|key|jks|keystore|p12|pfx)|local\.properties)$""")
         val hits = tracked.filter { bad.containsMatchIn(it) && !it.endsWith(".env.example") }
         assertTrue("secret-shaped names: $hits", hits.isEmpty())
     }
@@ -116,6 +116,15 @@ class PublicationSafetyTest {
             ),
             found,
         )
+        // The debug starters can arm rings and give the volume consent, and the owner's phone runs debug builds: only the shell (adb), which holds
+        // DUMP, may call them; an app installed beside COMMAND cannot get DUMP (amendment 39, from Codex's review of PR #60).
+        val guarded = Regex("""android:permission\s*=\s*"android\.permission\.DUMP"""")
+        for (path in listOf("android/app/src/debug/AndroidManifest.xml", "android/app/src/noexact/AndroidManifest.xml")) {
+            val open = component.findAll(File(root, path).readText()).map { it.value }
+                .filter { exportedTrue.containsMatchIn(it) && !guarded.containsMatchIn(it) }
+                .map { nameOf.find(it)?.groupValues?.get(1) ?: "?" }.toList()
+            assertEquals("$path: exported debug receivers without android.permission.DUMP", emptyList<String>(), open)
+        }
     }
 
     @Test
@@ -162,7 +171,8 @@ class PublicationSafetyTest {
         }
         assertTrue(File(root, "LICENSE").readText().contains("All rights reserved"))
         val ignore = File(root, ".gitignore").readText()
-        listOf(".env", "*.dpapi", "*.pem").forEach { assertTrue("gitignore lacks $it", ignore.contains(it)) }
+        // A signing key never enters the tree: the phone signing identity lives outside the repository (amendment 39).
+        listOf(".env", "*.dpapi", "*.pem", "*.jks", "*.keystore", "*.p12").forEach { assertTrue("gitignore lacks $it", ignore.contains(it)) }
     }
 
     private companion object {

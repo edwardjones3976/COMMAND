@@ -58,6 +58,9 @@ class AlarmVolumePolicyTest {
     fun setUp() {
         VolumeRefusalShadow.refuse = false
         VolumeRefusalShadow.floor = 0
+        VolumeRefusalShadow.ignore = false
+        VolumeRefusalShadow.hardeningThrows = false
+        VolumeRefusalShadow.ignoreNext = 0
         hilt.inject()
         audio = ApplicationProvider.getApplicationContext<Context>().getSystemService(AudioManager::class.java)
         assertTrue("the alarm stream has room to be raised", loudest > 5)
@@ -68,6 +71,9 @@ class AlarmVolumePolicyTest {
     fun tearDown() {
         VolumeRefusalShadow.refuse = false
         VolumeRefusalShadow.floor = 0
+        VolumeRefusalShadow.ignore = false
+        VolumeRefusalShadow.hardeningThrows = false
+        VolumeRefusalShadow.ignoreNext = 0
     }
 
     private fun armed(): OccurrenceRow = runBlocking {
@@ -239,6 +245,79 @@ class AlarmVolumePolicyTest {
         runBlocking { policy.restoreStale() }
         assertEquals(3, volume())
         assertNull(record())
+    }
+
+    @Test
+    fun `a restore the platform drops without a word is logged and kept for later, and done once it is allowed`() {
+        // Measured on an API 37 emulator with audio hardening enforced: the reconcile after a ring that died ran with no foreground service, the
+        // platform left the alarm volume where the ring had put it, and the record was cleared as though a floor had been reached.
+        allowed()
+        val o = armed()
+        runBlocking { policy.raiseFor(o) }
+
+        VolumeRefusalShadow.ignore = true
+        runBlocking { policy.restoreStale() }
+        assertEquals("still raised: the platform dropped the change", loudest, volume())
+        assertNotNull("so the record stays, for the next reconcile", record())
+        val note = events(o, EventType.VOLUME_SET_REFUSED).single().payloadJson
+        assertTrue(note.contains("restore") && note.contains("\"wanted\":\"3\""))
+
+        VolumeRefusalShadow.ignore = false
+        runBlocking { policy.restoreStale() }
+        assertEquals(3, volume())
+        assertNull(record())
+    }
+
+    @Test
+    fun `a restore that hardening makes throw is a refusal like any other, and never breaks the reconcile that asked for it`() {
+        allowed()
+        val o = armed()
+        runBlocking { policy.raiseFor(o) }
+
+        VolumeRefusalShadow.hardeningThrows = true
+        runBlocking { policy.restoreStale() } // must not throw: the reconcile re-arms alarms after this
+        assertEquals(loudest, volume())
+        assertNotNull("kept for the next reconcile", record())
+        assertTrue(events(o, EventType.VOLUME_SET_REFUSED).single().payloadJson.contains("restore"))
+
+        VolumeRefusalShadow.hardeningThrows = false
+        runBlocking { policy.restoreStale() }
+        assertEquals(3, volume())
+        assertNull(record())
+    }
+
+    @Test
+    fun `a raise that hardening makes throw is logged as refused and leaves nothing written down`() {
+        allowed()
+        val o = armed()
+        VolumeRefusalShadow.hardeningThrows = true
+        assertFalse(runBlocking { policy.raiseFor(o) })
+        assertEquals(3, volume())
+        assertNull(record())
+        assertEquals(1, events(o, EventType.VOLUME_SET_REFUSED).size)
+    }
+
+    @Test
+    fun `a raise the platform drops once is tried again while the ring sounds, and then holds`() {
+        // Measured on CI's API 37 emulator with hardening enforced: the ring's raise was dropped without an error in one run of three.
+        allowed()
+        val o = armed()
+        VolumeRefusalShadow.ignoreNext = 1
+        assertTrue(runBlocking { policy.raiseFor(o) })
+        assertEquals(loudest, volume())
+        assertEquals(3, record()!!.original)
+        assertTrue(events(o, EventType.VOLUME_SET_REFUSED).isEmpty())
+    }
+
+    @Test
+    fun `a raise the platform keeps dropping is logged as refused and leaves nothing written down`() {
+        allowed()
+        val o = armed()
+        VolumeRefusalShadow.ignore = true
+        assertFalse(runBlocking { policy.raiseFor(o) })
+        assertEquals(3, volume())
+        assertNull("nothing was raised, so there is nothing to put back", record())
+        assertTrue(events(o, EventType.VOLUME_SET_REFUSED).single().payloadJson.contains("raise"))
     }
 
     @Test

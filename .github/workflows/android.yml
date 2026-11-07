@@ -28,6 +28,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Unit tests (Android modules and pure-Kotlin modules) and lint
         run: ./gradlew --no-daemon testDebugUnitTest :domain:test :testing-jvm:test lint
+      - name: Receipt scripts (redaction and permissions list) and the reliability harness parses
+        working-directory: .
+        run: |
+          python3 -m unittest discover -s scripts/tests -v
+          bash -n scripts/reliability.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -69,14 +74,50 @@ jobs:
           distribution: temurin
           java-version: 21
       - uses: gradle/actions/setup-gradle@v4
-      - name: Assemble debug, noexact and unsigned release APKs
+      # The phone signing identity (amendment 39): when the repository holds the keystore as a secret, the APKs of a build of main are signed
+      # with it, so a later build installs over an earlier one on the owner's phone. A pull request's build runs code nobody has merged yet, so it
+      # never gets the key: it stays on a throwaway debug key and an unsigned release, as does every build without the secret. The keystore is
+      # written outside the checkout and never uploaded.
+      - name: Phone signing identity, for a build of main if the repository has one
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          KEYSTORE_B64: ${{ secrets.COMMAND_SIGNING_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/phone.jks"
+            echo "COMMAND_SIGNING_KEYSTORE=$RUNNER_TEMP/phone.jks" >> "$GITHUB_ENV"
+            echo "Signed with the phone identity." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No phone signing identity in this repository: the debug APK is signed with this runner's throwaway key and cannot update one built elsewhere." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Assemble debug, noexact and release APKs (pull request, never with the phone key)
+        if: github.event_name != 'push' || github.ref != 'refs/heads/main'
         run: ./gradlew --no-daemon assembleDebug assembleRelease assembleNoexact
+      - name: Assemble debug, noexact and release APKs (main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          COMMAND_SIGNING_STORE_PASSWORD: ${{ secrets.COMMAND_SIGNING_STORE_PASSWORD }}
+          COMMAND_SIGNING_KEY_ALIAS: ${{ secrets.COMMAND_SIGNING_KEY_ALIAS }}
+          COMMAND_SIGNING_KEY_PASSWORD: ${{ secrets.COMMAND_SIGNING_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon assembleDebug assembleRelease assembleNoexact
+      - name: The release receipt lists exactly the permissions of the merged release manifest
+        run: |
+          manifest="$(find app/build/intermediates/merged_manifest/release -name AndroidManifest.xml | head -1)"
+          test -n "$manifest"
+          python3 ../scripts/receipt-permissions.py check ../docs/RELEASE-RECEIPT.html "$manifest"
+          { echo "### Permissions of the merged release manifest"; echo '```'; python3 ../scripts/receipt-permissions.py list "$manifest"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Record APK digests
         run: |
           {
             echo "### APK SHA-256"
             echo '```'
             sha256sum app/build/outputs/apk/debug/*.apk app/build/outputs/apk/release/*.apk
+            echo '```'
+            echo "### Signing certificate of the debug APK"
+            echo '```'
+            # GitHub's Ubuntu image sets ANDROID_HOME; without it, or without build-tools, the summary says so and the job does not fail.
+            signer="$(ls -d "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/nonexistent}}"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)"
+            if [ -n "$signer" ]; then "$signer" verify --print-certs app/build/outputs/apk/debug/*.apk | grep -E 'SHA-256 digest|DN:' || true; else echo "apksigner not found"; fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4

@@ -18,6 +18,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -64,14 +65,24 @@ class AlarmVolumePolicy @Inject constructor(
         }
         // Written first, so that a ring that dies half-way leaves what is needed to undo it.
         settings.saveVolumeRestore(VolumeRestore(row.id, original = current, set = highest, atUtc = clock.nowMs()))
-        try {
-            manager.setStreamVolume(AudioManager.STREAM_ALARM, highest, 0)
-        } catch (e: SecurityException) {
-            settings.clearVolumeRestore()
-            repository.logEvent(EventType.VOLUME_SET_REFUSED, row, EventSource.SERVICE, EventPayload.EMPTY)
-            return false
+        // Android 17's background-audio hardening can drop the change without an error (measured on CI's API 37 emulator: one ring in three),
+        // so the level is read back and the change tried a few times more while the ring sounds (amendment 39).
+        repeat(RAISE_TRIES) { attempt ->
+            try {
+                manager.setStreamVolume(AudioManager.STREAM_ALARM, highest, 0)
+            } catch (e: RuntimeException) {
+                if (!isRefusal(e)) throw e
+                settings.clearVolumeRestore()
+                repository.logEvent(EventType.VOLUME_SET_REFUSED, row, EventSource.SERVICE, EventPayload.EMPTY)
+                return false
+            }
+            if (manager.getStreamVolume(AudioManager.STREAM_ALARM) != current) return true
+            if (attempt < RAISE_TRIES - 1) delay(RAISE_RETRY_MS)
         }
-        true
+        // Never took: nothing was raised, so nothing is left to put back, and the log says the platform would not have it.
+        settings.clearVolumeRestore()
+        repository.logEvent(EventType.VOLUME_SET_REFUSED, row, EventSource.SERVICE, EventPayload.of("phase" to "raise", "wanted" to highest, "got" to current))
+        false
     }
 
     /** Puts the volume back after [occurrenceId]'s ring, unless the person has changed it since. */
@@ -190,7 +201,8 @@ class AlarmVolumePolicy @Inject constructor(
         }
         try {
             manager.setStreamVolume(AudioManager.STREAM_ALARM, left.original, 0)
-        } catch (e: SecurityException) {
+        } catch (e: RuntimeException) {
+            if (!isRefusal(e)) throw e
             return false
         }
         val now = manager.getStreamVolume(AudioManager.STREAM_ALARM)
@@ -218,7 +230,8 @@ class AlarmVolumePolicy @Inject constructor(
             if (manager.getStreamVolume(AudioManager.STREAM_ALARM) == record.set) {
                 try {
                     manager.setStreamVolume(AudioManager.STREAM_ALARM, record.original, 0)
-                } catch (e: SecurityException) {
+                } catch (e: RuntimeException) {
+                    if (!isRefusal(e)) throw e
                     // Refused (Do Not Disturb can do that). The record stays, so that the next reconcile puts the volume back.
                     repository.get(record.occurrenceId)?.let {
                         repository.logEvent(EventType.VOLUME_SET_REFUSED, it, EventSource.SERVICE, EventPayload.of("phase" to "restore"))
@@ -226,6 +239,15 @@ class AlarmVolumePolicy @Inject constructor(
                     return false
                 }
                 val now = manager.getStreamVolume(AudioManager.STREAM_ALARM)
+                if (now == record.set && now != record.original) {
+                    // Nothing moved: the platform dropped the change without an error, which is what Android 17's background-audio hardening does
+                    // to a call from outside a foreground service (measured on API 37: the reconcile after a ring that died). Like a refusal, the
+                    // record stays, so that a later reconcile, or the app's own screen, puts the volume back (amendment 39).
+                    repository.get(record.occurrenceId)?.let {
+                        repository.logEvent(EventType.VOLUME_SET_REFUSED, it, EventSource.SERVICE, EventPayload.of("phase" to "restore", "wanted" to record.original, "got" to now))
+                    }
+                    return false
+                }
                 if (now != record.original) {
                     // The platform keeps an app without its privileged audio permission above a floor of its own, so a level below it cannot be
                     // put back. The record is cleared (nothing more can be done) but the log says what was wanted and what came out, and the
@@ -247,5 +269,16 @@ class AlarmVolumePolicy @Inject constructor(
 
     private companion object {
         const val TAG = "AlarmVolumePolicy"
+
+        /** A ring's raise is tried this many times, this far apart, before it counts as refused: about two seconds into the ring at most. */
+        const val RAISE_TRIES = 5
+        const val RAISE_RETRY_MS = 500L
+
+        /**
+         * The platform saying no to a volume change: a SecurityException (Do Not Disturb can do that), or the IllegalStateException that Android
+         * 17's background-audio hardening throws when it is set to throw (measured on API 37). Either is handled as a refusal, never let through,
+         * because the reconcile that asks for a restore re-arms alarms after it (amendment 39).
+         */
+        fun isRefusal(e: RuntimeException): Boolean = e is SecurityException || e is IllegalStateException
     }
 }

@@ -1,6 +1,7 @@
 package com.command.alarm
 
 import android.content.Context
+import android.util.Log
 import com.command.data.MissionRepository
 import com.command.data.OccurrenceRepository
 import com.command.data.ReconcileReport
@@ -9,6 +10,7 @@ import com.command.data.SessionPlan
 import com.command.domain.model.EventSource
 import com.command.domain.time.Clock
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -27,8 +29,15 @@ class ArmingReconciler @Inject constructor(
     private val clock: Clock,
 ) {
     suspend fun run(trigger: ReconcileTrigger): ReconcileReport {
-        // What a ring that died raised is put back (a ring that is still going is left alone).
-        volume.restoreStale()
+        // What a ring that died raised is put back (a ring that is still going is left alone). Best effort: whatever the platform's volume call
+        // throws, the alarms below are still re-armed, and the record stays for the next reconcile (amendment 39).
+        try {
+            volume.restoreStale()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "the alarm volume could not be put back this time; the alarms are re-armed anyway", e)
+        }
         // Then what the platform allows now, so a permission that was just taken away is on the record before alarms are re-armed.
         monitor.refresh()
         val report = missions.reconcile(trigger)
@@ -52,5 +61,9 @@ class ArmingReconciler @Inject constructor(
                 occurrences.armCycleEnd(row.id, clock.nowMs() + plan.totalMs - elapsed)
             }
         }
+    }
+
+    private companion object {
+        const val TAG = "ArmingReconciler"
     }
 }

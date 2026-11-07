@@ -58,7 +58,7 @@ jobs:
           disable-animations: true
           working-directory: android
           # One line: the action runs each line on its own and stops at the first failure, and the reliability cases must run either way.
-          script: rc=0; timeout 1500 ./gradlew --no-daemon :app:connectedDebugAndroidTest || rc=1; timeout 60 adb logcat -d > logcat-instrumented.txt; REPORT=reliability-report.md timeout 1800 bash ../scripts/reliability.sh || rc=1; cat reliability-report.md >> "$GITHUB_STEP_SUMMARY"; exit $rc
+          script: rc=0; timeout 1500 ./gradlew --no-daemon :app:connectedDebugAndroidTest || rc=1; timeout 60 adb logcat -d > logcat-instrumented.txt; REPORT=reliability-report.md timeout 1800 bash ../scripts/reliability.sh || rc=1; cat reliability-report.md >> "$GITHUB_STEP_SUMMARY"; if [ -f task-loop-trail.md ]; then echo >> "$GITHUB_STEP_SUMMARY"; cat task-loop-trail.md >> "$GITHUB_STEP_SUMMARY"; fi; exit $rc
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -67,5 +67,6 @@ jobs:
             android/app/build/reports/androidTests
             android/app/build/outputs/androidTest-results
             android/reliability-report.md
+            android/task-loop-trail.md
             android/logcat-*.txt
           if-no-files-found: warn
