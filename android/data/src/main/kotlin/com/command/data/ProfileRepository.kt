@@ -4,6 +4,7 @@ import androidx.room.withTransaction
 import com.command.data.db.CommandDb
 import com.command.data.db.ProfileRow
 import com.command.data.db.SettingRow
+import com.command.data.db.VoicePackRow
 import com.command.domain.dials.ChainIssue
 import com.command.domain.dials.ChainSpec
 import com.command.domain.dials.Dial
@@ -13,7 +14,10 @@ import com.command.domain.dials.Personality
 import com.command.domain.dials.PresetOrigin
 import com.command.domain.dials.issues
 import com.command.domain.model.SettingKeys
+import com.command.domain.voice.BuiltInVoicePacks
+import com.command.domain.voice.SpeechVoice
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -48,6 +52,15 @@ sealed interface SaveChainResult {
     data object NotFound : SaveChainResult
 }
 
+/**
+ * A voice pack as the voice screen sees it. [voice] is what the ring asks of the phone's engine for this pack, and [personality] whose words it
+ * goes with; [trimDb] is its loudness trim as stored.
+ */
+data class VoicePackChoice(val id: String, val name: String, val personality: Personality, val trimDb: Float, val voice: SpeechVoice)
+
+/** A profile as the voice screen sees it: its dials (the alert intensity sets a preview's loudness), who speaks for it, and who could. */
+data class ProfileVoice(val dials: ProfileDials, val voicePackId: String?, val packs: List<VoicePackChoice>)
+
 /** What choosing a director did. */
 sealed interface DirectorResult {
     data class Chosen(val profileId: String, val personality: Personality, val voicePackId: String) : DirectorResult
@@ -70,6 +83,12 @@ class ProfileRepository @Inject constructor(private val db: CommandDb) {
 
     /** A seam for tests: runs in its turn, before a dial is written, so that a write can be made as slow as a test needs. */
     internal var beforeDialWrite: suspend () -> Unit = {}
+
+    /** The same for the choice of a voice and for its trim: the choice tapped last, and the trim set last, are the ones that stay. */
+    private val voiceWrites = Mutex()
+
+    /** A seam for tests: runs in its turn, before a voice is written, so that a write can be made as slow as a test needs. */
+    internal var beforeVoiceWrite: suspend () -> Unit = {}
 
     private val resolver = ProfileResolver(db)
 
@@ -104,6 +123,23 @@ class ProfileRepository @Inject constructor(private val db: CommandDb) {
         }
     }
 
+    /** One profile with who speaks for it and every pack it could choose, for as long as it is collected, and null while there is no such profile. */
+    fun observeVoice(id: String): Flow<ProfileVoice?> = combine(db.profiles().observe(id), db.voicePacks().observeAll()) { row, packs ->
+        row?.let { ProfileVoice(ProfileDials(handshakeOf(it), it.storedDials()), it.voicePackId, packs.map(::choiceOf)) }
+    }.distinctUntilChanged()
+
+    /**
+     * Sets the loudness trim of one pack, for every profile that speaks with it, from the next ring on: a ring keeps what it was fired with. True if it
+     * was written: there is such a pack and the value is one a trim can have (amendment 2: 0 to +8 dB, above the alert intensity's loudness).
+     */
+    suspend fun setVoiceTrim(packId: String, trimDb: Float): Boolean {
+        if (trimDb.isNaN() || trimDb !in 0f..BuiltInVoicePacks.MAX_TRIM_DB) return false
+        return voiceWrites.withLock {
+            beforeVoiceWrite()
+            db.voicePacks().setLoudnessTrim(packId, trimDb) > 0
+        }
+    }
+
     /** The ids of the profiles that alarms are fired with (see [ProfileResolver.observeInUse]). Editing any other reaches no alarm, and the screens say so. */
     fun observeInUse(): Flow<Set<String>> = resolver.observeInUse()
 
@@ -121,11 +157,14 @@ class ProfileRepository @Inject constructor(private val db: CommandDb) {
      * Makes the director of pack [packId] the one who speaks for a profile ([profileId], or the active one when it is null): the pack's
      * personality and the pack, together. Nothing changes when there is no such pack or no such profile.
      */
-    suspend fun chooseDirector(packId: String, profileId: String? = null): DirectorResult = db.withTransaction {
-        val pack = db.voicePacks().get(packId) ?: return@withTransaction DirectorResult.NoSuchPack
-        val target = profileId ?: activeProfileIdOf(db.settings().get(SettingKeys.ACTIVE_PROFILE_ID)) ?: return@withTransaction DirectorResult.NoProfile
-        if (db.profiles().setDirector(target, pack.defaultPersonality, pack.id) == 0) return@withTransaction DirectorResult.NoProfile
-        DirectorResult.Chosen(target, pack.defaultPersonality, pack.id)
+    suspend fun chooseDirector(packId: String, profileId: String? = null): DirectorResult = voiceWrites.withLock {
+        beforeVoiceWrite()
+        db.withTransaction {
+            val pack = db.voicePacks().get(packId) ?: return@withTransaction DirectorResult.NoSuchPack
+            val target = profileId ?: activeProfileIdOf(db.settings().get(SettingKeys.ACTIVE_PROFILE_ID)) ?: return@withTransaction DirectorResult.NoProfile
+            if (db.profiles().setDirector(target, pack.defaultPersonality, pack.id) == 0) return@withTransaction DirectorResult.NoProfile
+            DirectorResult.Chosen(target, pack.defaultPersonality, pack.id)
+        }
     }
 
     /** Makes [id] the active profile, if there is one by that name. The setting is one row, so there is never more than one active profile. */
@@ -137,6 +176,8 @@ class ProfileRepository @Inject constructor(private val db: CommandDb) {
 
     /** Goes back to the default chain of the profile's difficulty. True if the profile exists. */
     suspend fun useDefault(id: String): Boolean = db.profiles().setChainJson(id, null) > 0
+
+    private fun choiceOf(row: VoicePackRow) = VoicePackChoice(row.id, row.name, row.defaultPersonality, row.loudnessTrimDb, row.speechVoice())
 
     private fun handshakeOf(row: ProfileRow): ProfileHandshake {
         val own = ChainJson.decode(row.handshakeChainJson)
@@ -151,6 +192,9 @@ class ProfileRepository @Inject constructor(private val db: CommandDb) {
         )
     }
 }
+
+/** What a pack asks of the phone's engine, for the ring and for its preview alike. */
+internal fun VoicePackRow.speechVoice(): SpeechVoice = SpeechVoice(locale, pitch, rate, BuiltInVoicePacks.isFemale(id))
 
 /**
  * The dials of a stored row, for the ring and for the screens alike. What is out of range costs the setting and never the ring: it is clamped, and

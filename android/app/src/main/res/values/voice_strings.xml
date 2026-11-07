@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The voice screen. Says what the voices are and are not: every pack is the phone's own speech engine with other settings. -->
+    <string name="voice_title">Voice</string>
+    <string name="voice_honest">Every voice here is your phone\'s own speech engine. The packs differ only by pitch, speaking rate and which installed voice the phone picks for them, so on some phones two packs can sound much alike. The names are characters.</string>
+    <string name="voice_choose_explained">Choosing a voice also chooses the words it speaks. It decides from the next ring: an alarm already ringing keeps its voice.</string>
+    <string name="voice_preview_explained">Hear plays the line on the alarm stream, at the loudness a ring of this profile would use, as loud as your alarm volume is set now. It plays without the alarm tone, and it does not raise the volume, as a ring does if you agreed to that.</string>
+    <string name="voice_none_chosen">No voice is chosen for this profile, so its alarms use the phone\'s default voice.</string>
+    <string name="voice_facts">%1$s. Language %2$s, pitch %3$s, rate %4$s, trim %5$s.</string>
+    <string name="voice_hear">Hear it</string>
+    <string name="voice_hear_named">Hear %1$s</string>
+    <string name="voice_stop">Stop</string>
+    <string name="voice_stop_named">Stop %1$s</string>
+    <string name="voice_trim">Voice loudness trim</string>
+    <string name="voice_trim_value">+%1$s dB</string>
+    <string name="voice_trim_explained">Extra loudness on top of what the alert intensity dial sets, for this voice on every profile that uses it. A limiter keeps the peaks in check, so the higher steps can add less than they say, and on some lines little.</string>
+    <string name="voice_write_failed">That could not be saved. What is shown is what is stored.</string>
+    <string name="voice_not_heard_ring">An alarm is ringing, and it comes first. Try again when it is over.</string>
+    <string name="voice_not_heard_no_voice">This phone has no speech voice installed that works offline, so nothing can be said. A ring would still sound its tone and show its words. You can add a voice in Android\'s text-to-speech settings.</string>
+    <string name="voice_not_heard_headset">You asked for speech only through a headset, and none can be used. Connect one to hear it.</string>
+    <string name="voice_not_heard_engine">The phone\'s speech engine did not answer. A ring would still sound its tone and show its words.</string>
+    <string name="voice_not_heard_failed">The line could not be played. A ring would still sound its tone and show its words.</string>
+    <string name="voice_words_executive">Speaks as an executive director</string>
+    <string name="voice_words_drill">Speaks as a drill sergeant</string>
+    <string name="voice_words_partner">Speaks as an accountability partner</string>
+    <string name="voice_words_coach">Speaks as a supportive coach</string>
+    <string name="voice_words_minimalist">Speaks as a minimalist</string>
+    <string name="voice_words_custom">Speaks in your own words</string>
+    <string name="profiles_voice">Voice</string>
+    <string name="profiles_voice_named">Voice of %1$s</string>
+</resources>

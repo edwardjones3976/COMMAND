@@ -30,6 +30,7 @@ import com.command.onboarding.WelcomeScreen
 import com.command.profiles.ActivityRulesRoute
 import com.command.profiles.DialsRoute
 import com.command.profiles.ProfilesRoute
+import com.command.profiles.VoiceRoute
 import com.command.rest.RestWindowsRoute
 import com.command.reliability.ReliabilityRoute
 import com.command.schedule.ScheduleRoute
@@ -54,6 +55,7 @@ object Routes {
     const val ARG_ID = "id"
     private const val HANDSHAKE_EDITOR = "handshake"
     private const val DIALS = "dials"
+    private const val VOICE = "voice"
     private const val DETAIL = "detail"
     private const val EDITOR = "mission"
     private const val FOLLOW_UP = "followup"
@@ -82,6 +84,11 @@ object Routes {
     const val DIALS_PATTERN = "$DIALS/{$ARG_ID}"
 
     fun dials(profileId: String): String = "$DIALS/$profileId"
+
+    /** Who speaks for the profile with this id. */
+    const val VOICE_PATTERN = "$VOICE/{$ARG_ID}"
+
+    fun voice(profileId: String): String = "$VOICE/$profileId"
 }
 
 /** The screens of the app and the ways between them. The lock-screen flow is a separate activity and is not part of this. */
@@ -176,6 +183,7 @@ private fun CommandNavHost(
             ProfilesRoute(
                 onBack = { navController.popBackStack() },
                 onOpenDials = { navController.navigate(Routes.dials(it)) },
+                onOpenVoice = { navController.navigate(Routes.voice(it)) },
                 onOpenHandshake = { navController.navigate(Routes.handshakeEditor(it)) },
                 onOpenRules = { navController.navigate(Routes.RULES) },
             )
@@ -189,6 +197,12 @@ private fun CommandNavHost(
                 onBack = { navController.popBackStack() },
                 onOpenHandshake = { navController.navigate(Routes.handshakeEditor(it)) },
             )
+        }
+        composable(
+            Routes.VOICE_PATTERN,
+            arguments = listOf(navArgument(Routes.ARG_ID) { type = NavType.StringType }),
+        ) { entry ->
+            VoiceRoute(profileId = entry.arguments?.getString(Routes.ARG_ID).orEmpty(), onBack = { navController.popBackStack() })
         }
         composable(Routes.RULES) { ActivityRulesRoute(onBack = { navController.popBackStack() }) }
         composable(Routes.REST_WINDOWS) { RestWindowsRoute(onBack = { navController.popBackStack() }) }

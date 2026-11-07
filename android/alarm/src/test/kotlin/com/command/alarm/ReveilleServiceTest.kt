@@ -521,6 +521,24 @@ class ReveilleServiceTest {
     }
 
     @Test
+    fun `a degraded ring cuts off a preview too, whether or not the service ever started`() {
+        val o = armed()
+        var cuts = 0
+        var posted = false
+        session.onRingStarting = {
+            cuts++
+            posted = notifications().getNotification(o.id, AlarmContract.ID_FALLBACK) != null
+        }
+
+        runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
+
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        assertEquals(1, cuts)
+        assertTrue("the ring is out before a preview is dealt with", posted)
+    }
+
+    @Test
     fun `the degraded ring fires the occurrence, logs why, and rings from a full-screen notification that times itself out`() {
         val o = armed()
         runBlocking { resolver.degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
@@ -557,7 +575,7 @@ class ReveilleServiceTest {
             override val sealed: Boolean get() = ++looks > 1
         }
 
-        runBlocking { RingModeResolver(context, repo, clock, closesMeanwhile).degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
+        runBlocking { RingModeResolver(context, repo, clock, closesMeanwhile, session).degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
 
         assertTrue("nothing sounds behind the erase", notifications().allNotifications.isEmpty())
     }
@@ -570,7 +588,7 @@ class ReveilleServiceTest {
             override val sealed: Boolean get() = ++looks > 2
         }
 
-        runBlocking { RingModeResolver(context, repo, clock, closesAfterPosting).degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
+        runBlocking { RingModeResolver(context, repo, clock, closesAfterPosting, session).degrade(o.id, o.requestCode, "ForegroundServiceStartNotAllowedException", o.scheduledAtUtc) }
 
         assertTrue("it was posted and then taken down, so nothing is left to sound", notifications().allNotifications.isEmpty())
         assertTrue("and it was looked at after the post", closesAfterPosting.looks >= 3)

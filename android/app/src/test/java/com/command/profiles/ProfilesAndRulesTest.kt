@@ -58,6 +58,7 @@ class ProfilesAndRulesTest {
     @Inject lateinit var db: CommandDb
 
     private val openedDials = ArrayList<String>()
+    private val openedVoice = ArrayList<String>()
     private val openedHandshake = ArrayList<String>()
     private var openedRules = 0
 
@@ -70,7 +71,7 @@ class ProfilesAndRulesTest {
     private fun showProfiles() {
         val vm = ProfilesViewModel(profiles)
         compose.setContent {
-            CommandTheme { ProfilesRoute(onBack = {}, onOpenDials = { openedDials += it }, onOpenHandshake = { openedHandshake += it }, onOpenRules = { openedRules++ }, viewModel = vm) }
+            CommandTheme { ProfilesRoute(onBack = {}, onOpenDials = { openedDials += it }, onOpenHandshake = { openedHandshake += it }, onOpenRules = { openedRules++ }, onOpenVoice = { openedVoice += it }, viewModel = vm) }
         }
         waitFor(ProfilesTags.LIST)
     }
