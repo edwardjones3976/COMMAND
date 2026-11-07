@@ -66,6 +66,7 @@ object ScheduleTags {
     const val LINK_SETTINGS = "schedule_link_settings"
     fun row(occurrenceId: String) = "schedule_row_$occurrenceId"
     fun conflict(occurrenceId: String) = "schedule_conflict_$occurrenceId"
+    fun refused(occurrenceId: String) = "schedule_refused_$occurrenceId"
 }
 
 @Composable
@@ -169,11 +170,11 @@ fun ScheduleScreen(
                 }
                 if (state.upcoming.isNotEmpty()) {
                     item { SectionTitle(stringResource(R.string.schedule_section_upcoming)) }
-                    items(state.upcoming, key = { it.occurrenceId }) { RowCard(it, zone, today, state.pausedUntilUtcMs, onOpen, onOpenOccurrence, it.occurrenceId in state.conflicted) }
+                    items(state.upcoming, key = { it.occurrenceId }) { RowCard(it, zone, today, state.pausedUntilUtcMs, onOpen, onOpenOccurrence, onOpenReliability, it.occurrenceId in state.conflicted) }
                 }
                 if (state.recent.isNotEmpty()) {
                     item { SectionTitle(stringResource(R.string.schedule_section_recent)) }
-                    items(state.recent, key = { it.occurrenceId }) { RowCard(it, zone, today, state.pausedUntilUtcMs, onOpen, onOpenOccurrence) }
+                    items(state.recent, key = { it.occurrenceId }) { RowCard(it, zone, today, state.pausedUntilUtcMs, onOpen, onOpenOccurrence, onOpenReliability) }
                 }
                 // Room under the last row for the new-mission button.
                 item { Spacer(Modifier.height(72.dp)) }
@@ -228,9 +229,10 @@ private fun AttentionBanner(problems: Int, onAction: () -> Unit) {
 }
 
 @Composable
-private fun RowCard(row: ScheduleRow, zone: ZoneId, today: LocalDate, pausedUntilUtcMs: Long?, onOpen: (String) -> Unit, onOpenOccurrence: (String) -> Unit, conflicted: Boolean = false) {
+private fun RowCard(row: ScheduleRow, zone: ZoneId, today: LocalDate, pausedUntilUtcMs: Long?, onOpen: (String) -> Unit, onOpenOccurrence: (String) -> Unit, onOpenReliability: () -> Unit, conflicted: Boolean = false) {
     val whenText = whenLabel(row.scheduledAtUtc, zone, today)
     val state = stateLabel(row, pausedUntilUtcMs)
+    val refused = isRefused(row, pausedUntilUtcMs)
     val described = stringResource(R.string.schedule_row_description, row.title, whenText, state)
     val warning = stringResource(R.string.schedule_conflict)
     val description = if (conflicted) "$described, $warning" else described
@@ -250,7 +252,12 @@ private fun RowCard(row: ScheduleRow, zone: ZoneId, today: LocalDate, pausedUnti
                 )
             }
             Text(whenText, style = MaterialTheme.typography.bodyLarge)
-            Text(state, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.secondary)
+            Text(state, style = MaterialTheme.typography.bodyLarge, color = if (refused) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary)
+            if (refused) {
+                TextButton(onClick = onOpenReliability, modifier = Modifier.heightIn(min = 48.dp).testTag(ScheduleTags.refused(row.occurrenceId))) {
+                    Text(stringResource(R.string.schedule_link_reliability), style = MaterialTheme.typography.labelLarge)
+                }
+            }
             if (conflicted) {
                 Text(
                     stringResource(R.string.schedule_conflict),
@@ -263,14 +270,21 @@ private fun RowCard(row: ScheduleRow, zone: ZoneId, today: LocalDate, pausedUnti
     }
 }
 
+/** Whether this row is still to come and will not ring because the platform refused its alarm. Inside a pause it is the pause that holds it back. */
+private fun isRefused(row: ScheduleRow, pausedUntilUtcMs: Long?): Boolean =
+    (row.state == OccurrenceState.SCHEDULED || row.state == OccurrenceState.ARMED) && row.armMode == ArmMode.REFUSED && !isHeld(row, pausedUntilUtcMs)
+
+/** Inside a pause nothing is armed, whatever the row says: it will not ring. */
+private fun isHeld(row: ScheduleRow, pausedUntilUtcMs: Long?): Boolean = pausedUntilUtcMs != null && row.scheduledAtUtc < pausedUntilUtcMs
+
 /** What happened to an occurrence, in the plain words the history will use. Silenced and missed are never called started. */
 @Composable
 private fun stateLabel(row: ScheduleRow, pausedUntilUtcMs: Long?): String = stringResource(
     when (row.state) {
         OccurrenceState.SCHEDULED, OccurrenceState.ARMED ->
             when {
-                // Inside a pause nothing is armed, whatever the row says: it will not ring.
-                pausedUntilUtcMs != null && row.scheduledAtUtc < pausedUntilUtcMs -> R.string.schedule_state_held
+                isHeld(row, pausedUntilUtcMs) -> R.string.schedule_state_held
+                isRefused(row, pausedUntilUtcMs) -> R.string.schedule_state_refused
                 row.armMode == ArmMode.INEXACT -> R.string.schedule_state_set_inexact
                 else -> R.string.schedule_state_set
             }
