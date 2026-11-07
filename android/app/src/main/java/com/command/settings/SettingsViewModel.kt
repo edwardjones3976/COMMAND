@@ -1,12 +1,13 @@
 package com.command.settings
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
+import com.command.alarm.RingPreferences
 import com.command.data.AppSettings
 import com.command.data.MissionRepository
 import com.command.data.Pause
 import com.command.domain.time.Clock
 import com.command.domain.voice.RoutePolicy
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,9 +25,9 @@ sealed interface SettingsUiState {
 
     /**
      * [routePolicy] is where the spoken line of a ring is heard; the tone and the vibration ring on every route. [pausedUntilUtcMs] is
-     * when the pause in force ends, or null when COMMAND is not paused.
+     * when the pause in force ends, or null when COMMAND is not paused. [gradualStart] is whether the tone rises to full at the start of a ring.
      */
-    data class Ready(val routePolicy: RoutePolicy, val pausedUntilUtcMs: Long? = null) : SettingsUiState
+    data class Ready(val routePolicy: RoutePolicy, val pausedUntilUtcMs: Long? = null, val gradualStart: Boolean = false) : SettingsUiState
 }
 
 /**
@@ -38,6 +39,7 @@ class SettingsViewModel @Inject constructor(
     private val settings: AppSettings,
     private val missions: MissionRepository,
     private val clock: Clock,
+    private val ringPreferences: RingPreferences,
 ) : ViewModel() {
 
     /** A pause is over when its end passes, before anything has had the time to close it, so the clock is looked at now and then. */
@@ -48,11 +50,11 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    val state: StateFlow<SettingsUiState> = combine<RoutePolicy, Pause?, Unit, SettingsUiState>(
-        settings.observeRoutePolicy(), missions.observePause(), everyHalfMinute,
-    ) { route, pause, _ ->
-        SettingsUiState.Ready(route, pause?.untilUtcMs?.takeIf { it > clock.nowMs() })
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsUiState.Loading)
+    val state: StateFlow<SettingsUiState> = combine<RoutePolicy, Pause?, Boolean, Unit, SettingsUiState>(
+        settings.observeRoutePolicy(), missions.observePause(), ringPreferences.observeGradualStart(), everyHalfMinute,
+    ) { route, pause, gradual, _ ->
+        SettingsUiState.Ready(route, pause?.untilUtcMs?.takeIf { it > clock.nowMs() }, gradual)
+    }.stateIn(guardedScope, SharingStarted.Eagerly, SettingsUiState.Loading)
 
     /** Writes wait for each other, so that two quick choices land in the order they were made. */
     private val writes = Mutex()
@@ -63,7 +65,7 @@ class SettingsViewModel @Inject constructor(
     fun chooseRoutePolicy(policy: RoutePolicy) {
         if ((chosen ?: (state.value as? SettingsUiState.Ready)?.routePolicy) == policy) return
         chosen = policy
-        viewModelScope.launch {
+        guardedScope.launch {
             writes.withLock {
                 try {
                     settings.setRoutePolicy(policy)
@@ -76,14 +78,17 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    /** Whether the tone of the next ring rises to full. The alarm volume is not involved, and off is the default. */
+    fun setGradualStart(on: Boolean) = ringPreferences.setGradualStart(on)
+
     /** Pauses COMMAND for [hours] hours: nothing that comes due before then rings. */
     fun pauseFor(hours: Int) {
-        viewModelScope.launch { missions.pause(hours * HOUR_MS) }
+        guardedScope.launch { missions.pause(hours * HOUR_MS) }
     }
 
     /** Ends the pause now. */
     fun endPause() {
-        viewModelScope.launch { missions.resume() }
+        guardedScope.launch { missions.resume() }
     }
 
     private companion object {

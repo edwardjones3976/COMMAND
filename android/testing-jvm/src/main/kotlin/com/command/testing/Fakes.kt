@@ -19,10 +19,12 @@ class FakeClock(
     var nowMs: Long = 0L,
     var elapsedMs: Long = 0L,
     var zone: ZoneId = ZoneOffset.UTC,
+    var bootId: String? = null,
 ) : Clock {
     override fun nowMs(): Long = nowMs
     override fun elapsedRealtimeMs(): Long = elapsedMs
     override fun zone(): ZoneId = zone
+    override fun bootId(): String? = bootId
 
     /** Moves wall-clock and monotonic time forward together. */
     fun advance(ms: Long) {
@@ -33,12 +35,20 @@ class FakeClock(
 
 /** Remembers what is armed, keyed by identity exactly like platform alarms, and records every call. */
 class FakeAlarmScheduler(var exactAllowed: Boolean = true) : AlarmScheduler {
+    /** The platform holds as many alarms as it allows, so it takes no more. */
+    var refusing = false
+
     val armed: MutableMap<String, AlarmRequest> = java.util.Collections.synchronizedMap(LinkedHashMap())
     val calls: MutableList<String> = java.util.Collections.synchronizedList(ArrayList())
 
     override fun canScheduleExact(): Boolean = exactAllowed
 
     override fun arm(request: AlarmRequest): ArmMode {
+        if (refusing) {
+            armed.remove(request.identity)
+            calls += "refused ${request.identity}"
+            return ArmMode.REFUSED
+        }
         val mode = if (exactAllowed) ArmMode.EXACT else ArmMode.INEXACT
         armed[request.identity] = request
         calls += "arm ${request.identity} $mode"

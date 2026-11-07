@@ -16,6 +16,9 @@ interface Clock {
 
     /** The device's current time zone. */
     fun zone(): ZoneId
+
+    /** Names the current boot, so a monotonic time can be known to be from another one. Null when the platform does not say. */
+    fun bootId(): String? = null
 }
 
 /** JVM clock for tools and tests that do not need a fake. */

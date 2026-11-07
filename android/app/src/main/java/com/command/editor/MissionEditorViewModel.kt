@@ -2,7 +2,6 @@ package com.command.editor
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.data.DraftProblem
 import com.command.data.MissionDraft
 import com.command.data.MissionRepository
@@ -16,6 +15,7 @@ import com.command.domain.schedule.Frequency
 import com.command.domain.schedule.RRule
 import com.command.domain.time.Clock
 import com.command.nav.Routes
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -78,13 +78,13 @@ class MissionEditorViewModel @Inject constructor(
     val state: StateFlow<EditorState> = _state.asStateFlow()
 
     init {
-        viewModelScope.launch {
+        guardedScope.launch {
             profiles.observe().collect { all -> _state.update { s -> s.copy(profiles = all.map { ProfileChoice(it.id, it.name) }) } }
         }
         if (missionId == null) {
             _state.update { it.copy(loading = false) }
         } else {
-            viewModelScope.launch {
+            guardedScope.launch {
                 val mission = missions.get(missionId)
                 val draft = mission?.let { missions.draftOf(it) }
                 val conflicts = missions.conflictsOf(missionId)
@@ -150,7 +150,7 @@ class MissionEditorViewModel @Inject constructor(
         val s = _state.value
         if (s.busy || s.loading || s.imported) return
         _state.update { it.copy(busy = true) }
-        viewModelScope.launch {
+        guardedScope.launch {
             when (val result = missions.save(s.toDraft(missionId))) {
                 is SaveResult.Saved -> _state.update { it.copy(busy = false, finished = true) }
                 is SaveResult.Invalid -> _state.update { it.copy(busy = false, problems = result.problems) }
@@ -162,7 +162,7 @@ class MissionEditorViewModel @Inject constructor(
     fun testRing() {
         val s = _state.value
         if (s.busy || s.loading) return
-        viewModelScope.launch {
+        guardedScope.launch {
             missions.testRing(TestRingSpec(s.title, s.firstAction, s.flexibility, s.starterMinutes, s.profileId, s.category))
             _state.update { it.copy(message = EditorMessage.TEST_STARTED) }
         }
@@ -174,7 +174,7 @@ class MissionEditorViewModel @Inject constructor(
         val id = missionId ?: return
         if (_state.value.busy) return
         _state.update { it.copy(busy = true) }
-        viewModelScope.launch {
+        guardedScope.launch {
             missions.delete(id)
             _state.update { it.copy(busy = false, finished = true) }
         }

@@ -65,6 +65,9 @@ object AlarmContract {
     /** The notice that stays in the shade while COMMAND is paused. Negative for the same reason as [ID_RECONCILE]. */
     const val ID_PAUSED = -2
 
+    /** A start of the ring service that has no ring to show, which must still answer the foreground contract. Negative for the same reason. */
+    const val ID_RING_STARTING = -3
+
     private val OCCURRENCE_ID = Regex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
     /**

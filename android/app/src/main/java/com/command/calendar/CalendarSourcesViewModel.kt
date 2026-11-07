@@ -2,7 +2,6 @@ package com.command.calendar
 
 import android.content.Context
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.alarm.CalendarSyncScheduler
 import com.command.data.CalendarSync
 import com.command.data.ConsentStore
@@ -10,6 +9,7 @@ import com.command.data.ProfileRepository
 import com.command.data.db.CalendarSourceRow
 import com.command.domain.dials.Flexibility
 import com.command.domain.model.ConsentKey
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -47,21 +47,21 @@ class CalendarSourcesViewModel @Inject constructor(
         consents.observe(ConsentKey.CALENDAR_READ), permitted, sync.observeSources(), profiles.observe(),
     ) { consented, permission, sources, known ->
         CalendarSourcesUiState.Ready(consented, permission, sources, known.map { ProfileChoice(it.id, it.name) })
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarSourcesUiState.Loading)
+    }.stateIn(guardedScope, SharingStarted.WhileSubscribed(5_000), CalendarSourcesUiState.Loading)
 
     /** The person agreed on this screen. Android's own question follows, from the screen. */
     fun consent() {
-        viewModelScope.launch { sync.allow() }
+        guardedScope.launch { sync.allow() }
     }
 
     /** Android answered, or the screen came back: the permission can change in Android's settings at any time. */
     fun refresh() {
         permitted.value = sync.hasPermission()
-        if (permitted.value) viewModelScope.launch { sync.refreshSources() }
+        if (permitted.value) guardedScope.launch { sync.refreshSources() }
     }
 
     fun setSelected(calendarId: Long, selected: Boolean) {
-        viewModelScope.launch {
+        guardedScope.launch {
             sync.setSelected(calendarId, selected)
             CalendarSyncScheduler.ensure(context)
             CalendarSyncScheduler.syncNow(context)
@@ -69,7 +69,7 @@ class CalendarSourcesViewModel @Inject constructor(
     }
 
     fun setDefaults(source: CalendarSourceRow, flexibility: Flexibility, profileId: String?) {
-        viewModelScope.launch {
+        guardedScope.launch {
             sync.setDefaults(source.calendarId, flexibility, profileId)
             CalendarSyncScheduler.syncNow(context)
         }

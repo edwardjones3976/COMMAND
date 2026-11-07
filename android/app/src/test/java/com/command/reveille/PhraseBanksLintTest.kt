@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.command.domain.coaching.DirectiveLint
 import com.command.domain.dials.Personality
-import com.example.R
+import com.command.R
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith

@@ -27,10 +27,13 @@ enum class ReconcileTrigger {
     PAUSE_STARTED,
 
     /** A calendar sync changed the plan: this arms what it created and moved. It runs every hour, so it is not worth a line by itself. */
-    CALENDAR_SYNC;
+    CALENDAR_SYNC,
+
+    /** A ring began, so the week of alarms is one shorter: this tops it up. It comes with every ring, so it is not worth a line by itself. */
+    RING_FIRED;
 
     /** A run the person did not start is worth a line in the audit log even when it found nothing to do. */
-    val alwaysLogged: Boolean get() = this != OPEN && this != PERIODIC && this != CALENDAR_SYNC
+    val alwaysLogged: Boolean get() = this != OPEN && this != PERIODIC && this != CALENDAR_SYNC && this != RING_FIRED
 }
 
 /**
@@ -39,7 +42,7 @@ enum class ReconcileTrigger {
  * different precision than they had (an exact alarm that can only be inexact now because the permission was taken away, or the
  * other way round); [repaired] is how many had been stored but never armed (the app stopped between saving and arming) and now are;
  * [paused] is how many armed alarms a global pause had to take down in this run, and [swallowed] how many occurrences it had held back
- * were recorded as missed because of it when it ended.
+ * were recorded as missed because of it when it ended; [refused] is how many alarms the platform would not take: an armed one put back, one never armed until now, or a follow-up.
  */
 data class ReconcileReport(
     val created: Int = 0,
@@ -51,6 +54,7 @@ data class ReconcileReport(
     val repaired: Int = 0,
     val paused: Int = 0,
     val swallowed: Int = 0,
+    val refused: Int = 0,
 ) {
-    val changedAnything: Boolean get() = created + discarded + lost + missed + precisionChanged + repaired + paused + swallowed > 0
+    val changedAnything: Boolean get() = created + discarded + lost + missed + precisionChanged + repaired + paused + swallowed + refused > 0
 }

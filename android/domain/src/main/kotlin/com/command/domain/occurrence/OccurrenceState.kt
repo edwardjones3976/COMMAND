@@ -30,7 +30,8 @@ enum class MissReason { TIMEOUT, DOWNTIME, PAUSED }
 
 enum class RecoveryChoice { RESET, SMALLER }
 
-enum class ArmMode { EXACT, INEXACT, NONE }
+/** How an alarm stands with the platform. REFUSED: the platform would not take it, because the app holds as many as it allows. */
+enum class ArmMode { EXACT, INEXACT, NONE, REFUSED }
 
 enum class WorkKind { PRERENDER, PREFETCH }
 

@@ -1,7 +1,6 @@
 package com.command.followup
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.data.ApplyResult
 import com.command.data.OccurrenceRepository
 import com.command.data.db.OccurrenceRow
@@ -16,6 +15,7 @@ import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.RecoveryChoice
 import com.command.domain.occurrence.SkipReason
 import com.command.reveille.FrictionPrompt
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -92,7 +92,7 @@ class FollowUpViewModel @Inject constructor(
         _friction.value = null
         _notice.value = null
         _state.value = FollowUpUiState.Loading
-        observing = viewModelScope.launch {
+        observing = guardedScope.launch {
             repository.observe(id).collectLatest { row ->
                 if (row?.state == OccurrenceState.ACKNOWLEDGED) {
                     // Acknowledged but never moved on to guided start (the process died between the two): finish the step, so that the answers
@@ -140,7 +140,7 @@ class FollowUpViewModel @Inject constructor(
     /** "Need a reset": the recovery menu, unless this occurrence has already had all the resets it is allowed. */
     fun needReset() {
         val id = occurrenceId ?: return
-        viewModelScope.launch {
+        guardedScope.launch {
             if (repository.apply(id, OccurrenceCommand.RequestRecovery, EventSource.USER) is ApplyResult.RecoveryExhausted) {
                 _notice.value = FollowUpNotice.RESETS_USED_UP
             }
@@ -175,14 +175,14 @@ class FollowUpViewModel @Inject constructor(
     private fun command(c: OccurrenceCommand) {
         val id = occurrenceId ?: return
         _notice.value = null
-        viewModelScope.launch { repository.apply(id, c, EventSource.USER) }
+        guardedScope.launch { repository.apply(id, c, EventSource.USER) }
     }
 
     /** Tries the command bare; if the mission is fixed and wants more, asks, then tries again with what the person gave. */
     private fun withFriction(build: (FrictionEvidence) -> OccurrenceCommand) {
         val id = occurrenceId ?: return
         fun attempt(evidence: FrictionEvidence) {
-            viewModelScope.launch {
+            guardedScope.launch {
                 when (val result = repository.apply(id, build(evidence), EventSource.USER)) {
                     is ApplyResult.NeedsFriction -> _friction.value = FrictionPrompt(result.required) { given -> attempt(given) }
                     else -> _friction.value = null

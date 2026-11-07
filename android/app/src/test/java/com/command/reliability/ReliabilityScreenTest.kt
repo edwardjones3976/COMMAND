@@ -103,6 +103,30 @@ class ReliabilityScreenTest {
     }
 
     @Test
+    fun `alarms the platform refused are counted among what can stop an alarm, and say what they cost`() {
+        show(ready().copy(refusedAlarms = 2))
+        compose.onNodeWithText("1 thing can stop an alarm").assertIsDisplayed()
+        compose.onNodeWithText("Needs attention").assertIsDisplayed()
+        compose.onNodeWithTag(ReliabilityTags.ALARM_LIMIT).assertIsDisplayed()
+        compose.onNodeWithText("2 alarms refused in the last day").assertIsDisplayed()
+        compose.onNodeWithText("A refused alarm will not ring", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun `with something else wrong too it says so once, and counts both`() {
+        show(ready(report(Precondition.ALARM_VOLUME to "muted")).copy(refusedAlarms = 1))
+        compose.onNodeWithText("2 things can stop an alarm").assertIsDisplayed()
+        compose.onNodeWithText("Needs attention").assertIsDisplayed()
+        compose.onNodeWithText("1 alarm refused in the last day").assertIsDisplayed()
+    }
+
+    @Test
+    fun `with no alarm refused there is no word of it`() {
+        show(ready())
+        compose.onNodeWithTag(ReliabilityTags.ALARM_LIMIT).assertDoesNotExist()
+    }
+
+    @Test
     fun `one problem says thing, not things`() {
         show(ready(report(Precondition.ALARM_VOLUME to "muted")))
         compose.onNodeWithText("1 thing can stop an alarm").assertIsDisplayed()

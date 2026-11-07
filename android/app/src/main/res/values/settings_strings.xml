@@ -3,6 +3,8 @@
     <string name="settings_title">Settings</string>
     <string name="settings_back">Back</string>
 
+    <string name="settings_gradual_title">Bring the alarm in gradually</string>
+    <string name="settings_gradual_detail">The tone starts quiet and rises to full in about 10 seconds. It ends just as loud, the vibration starts at once, and your alarm volume is not changed.</string>
     <string name="settings_route_title">Where the spoken line is heard</string>
     <string name="settings_route_body">An alarm always plays its tone and vibrates. This decides only where the one spoken line is said.</string>
     <string name="settings_route_speaker">Speaker and headset</string>

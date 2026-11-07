@@ -45,7 +45,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.history.reasonLabelRes
 import com.command.ui.whenLabel
-import com.example.R
+import com.command.R
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId

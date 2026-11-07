@@ -1,8 +1,8 @@
 package com.command.nav
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.data.AppSettings
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +24,6 @@ class AppEntryViewModel @Inject constructor(settings: AppSettings) : ViewModel()
     val start: StateFlow<String?> = _start
 
     init {
-        viewModelScope.launch { _start.value = if (settings.onboardingDone.first()) Routes.SCHEDULE else Routes.WELCOME }
+        guardedScope.launch { _start.value = if (settings.onboardingDone.first()) Routes.SCHEDULE else Routes.WELCOME }
     }
 }

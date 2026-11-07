@@ -17,6 +17,9 @@ data class SessionData(
     val chainStep: Int = 0,
     val starterDeadlineUtc: Long? = null,
     val starterStartUtc: Long? = null,
+    /** The follow-up alarm that should be set: a question, or the final timeout. Only this row can say so once the alarm is gone or was refused. */
+    val pendingCheckInIndex: Int? = null,
+    val pendingCheckInAtUtc: Long? = null,
     /** When the ring plan ends, in wall-clock and monotonic time; a restart past this must not ring again. */
     val planEndUtc: Long? = null,
     val planEndElapsed: Long? = null,

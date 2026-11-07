@@ -1,7 +1,6 @@
 package com.command.history
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.data.MissionRepository
 import com.command.data.db.ScheduleRow
 import com.command.domain.history.HistoryCalculator
@@ -9,6 +8,7 @@ import com.command.domain.history.HistoryOccurrence
 import com.command.domain.history.HistoryReason
 import com.command.domain.history.WindowSummary
 import com.command.domain.time.Clock
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
@@ -61,7 +61,7 @@ class HistoryViewModel @Inject constructor(
     val state: StateFlow<HistoryUiState> = everyMinute
         .flatMapLatest { missions.observeHistory(MONTH_DAYS) }
         .map { rows -> build(rows) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryUiState.Loading)
+        .stateIn(guardedScope, SharingStarted.WhileSubscribed(5_000), HistoryUiState.Loading)
 
     private fun build(rows: List<ScheduleRow>): HistoryUiState.Ready {
         // One reading of today and one rule for what the window holds: the list and the counts are made from the same occurrences, so they

@@ -17,7 +17,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,7 +45,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.data.DataOverview
-import com.example.R
+import com.command.R
+import com.command.ui.SafeQuestion
 import kotlinx.coroutines.delay
 
 object DataTags {
@@ -218,27 +218,22 @@ private fun EraseSection(erase: EraseStatus, enabled: Boolean, onAskErase: () ->
     }
 }
 
-/** The question that comes before it: what goes, that it cannot be undone, and what stays. The safe answer is the one that is focused first. */
+/**
+ * The question that comes before it: what goes, that it cannot be undone, and what stays. The safe answer is above the other, whatever the width of
+ * the screen and the size of the type, and is the wider and heavier of the two. The message scrolls, so a very large font cannot push the answers out of reach.
+ */
 @Composable
 private fun ConfirmErase(onErase: () -> Unit, onKeep: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onKeep,
-        modifier = Modifier.testTag(DataTags.ERASE_DIALOG),
-        title = { Text(stringResource(R.string.data_erase_confirm_title)) },
-        // It scrolls, so that a very large font cannot push what stays, and the buttons under it, out of reach.
-        text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text(stringResource(R.string.data_erase_confirm_body)) } },
-        confirmButton = {
-            TextButton(onClick = onKeep, modifier = Modifier.heightIn(min = 56.dp).testTag(DataTags.ERASE_KEEP)) {
-                Text(stringResource(R.string.data_erase_keep))
-            }
-        },
-        dismissButton = {
-            TextButton(
-                onClick = onErase,
-                modifier = Modifier.heightIn(min = 56.dp).testTag(DataTags.ERASE_CONFIRM),
-                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-            ) { Text(stringResource(R.string.data_erase_confirm)) }
-        },
+    SafeQuestion(
+        tag = DataTags.ERASE_DIALOG,
+        title = stringResource(R.string.data_erase_confirm_title),
+        message = stringResource(R.string.data_erase_confirm_body),
+        keepLabel = R.string.data_erase_keep,
+        keepTag = DataTags.ERASE_KEEP,
+        onKeep = onKeep,
+        throwAwayLabel = R.string.data_erase_confirm,
+        throwAwayTag = DataTags.ERASE_CONFIRM,
+        onThrowAway = onErase,
     )
 }
 

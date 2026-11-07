@@ -1,12 +1,12 @@
 package com.command.schedule
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.alarm.ReliabilityMonitor
 import com.command.data.MissionRepository
 import com.command.data.db.ScheduleRow
 import com.command.domain.time.Clock
 import com.command.domain.reliability.Reliability
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
@@ -71,19 +71,19 @@ class ScheduleViewModel @Inject constructor(
             schedule.upcoming, schedule.recent, problemCount, pause?.untilUtcMs?.takeIf { it > clock.nowMs() },
             Instant.ofEpochMilli(clock.nowMs()).atZone(clock.zone()).toLocalDate(), conflicted,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ScheduleUiState.Loading)
+    }.stateIn(guardedScope, SharingStarted.WhileSubscribed(5_000), ScheduleUiState.Loading)
 
     /**
      * Android lets the person change any of what alarms depend on outside the app, so the screen asks again when it returns. What
      * it finds is also written down, so a permission taken away in settings is on the record the moment the app is looked at.
      */
     fun onResume() {
-        viewModelScope.launch { problems.value = Reliability.assess(monitor.refresh()).problems.size }
+        guardedScope.launch { problems.value = Reliability.assess(monitor.refresh()).problems.size }
     }
 
     /** Ends the pause now. */
     fun endPause() {
-        viewModelScope.launch { missions.resume() }
+        guardedScope.launch { missions.resume() }
     }
 
     private companion object {

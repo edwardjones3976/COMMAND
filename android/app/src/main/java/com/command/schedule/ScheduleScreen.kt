@@ -49,7 +49,7 @@ import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.SkipReason
 import com.command.ui.pauseTitle
 import com.command.ui.whenLabel
-import com.example.R
+import com.command.R
 import java.time.LocalDate
 import java.time.ZoneId
 

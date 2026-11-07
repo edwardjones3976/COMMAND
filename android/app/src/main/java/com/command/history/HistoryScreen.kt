@@ -40,7 +40,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.domain.history.HistoryReason
 import com.command.domain.history.WindowSummary
-import com.example.R
+import com.command.R
 import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
