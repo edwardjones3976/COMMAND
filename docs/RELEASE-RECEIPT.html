@@ -22,13 +22,13 @@
       <tbody>
         <tr><th scope="row">Repository</th><td><a href="https://github.com/edwardjones3976/COMMAND">edwardjones3976/COMMAND</a></td></tr>
         <tr><th scope="row">Branch</th><td><code>rebuild/m17b-release-receipt</code>, cut from <code>main</code> at <code>4762868</code> (PRs #28 to #59 merged). Its head commit is named in its pull request: a file cannot name the commit that contains it. Once merged, the receipt describes <code>main</code> at that merge.</td></tr>
-        <tr><th scope="row">Source tree</th><td>Git tree of <code>android/</code>: <code>300f5c2ba0827ffa271bf350a6162401d0d738cb</code>. Check it with <code>git rev-parse HEAD:android</code>. The APKs are built from this tree alone, so a later change to <code>docs/</code> or <code>scripts/</code> leaves it, and the builds, as they are.</td></tr>
+        <tr><th scope="row">Source tree</th><td>Git tree of <code>android/</code>: <code>201263da999b59e19560868405c0be60d123c1a2</code>. Check it with <code>git rev-parse HEAD:android</code>. The local builds and device runs below were made at the first commit of this change (tree <code>300f5c2ba0827ffa271bf350a6162401d0d738cb</code>); the review fix since then only guards the reconcile against an exception from the volume restore (<code>ArmingReconciler</code>), and the nightly emulator job runs on the head. The APKs are built from this tree alone, so a later change to <code>docs/</code> or <code>scripts/</code> leaves it, and the builds, as they are.</td></tr>
         <tr><th scope="row">Version</th><td><code>com.aistudio.command.vtxrpl</code>, versionName 4.0, versionCode 2, database version 1.</td></tr>
       </tbody>
     </table>
 
     <h2>Build digests</h2>
-    <p>Built locally on 2026-11-07 from the tree above with <code>assembleDebug assembleRelease assembleNoexact</code> (JDK 21, Gradle wrapper 9.3.1), all three signed with a <strong>throwaway test identity</strong> made for this run (certificate SHA-256 <code>97df21cfc1eb9aec8fefaa20a2b32de3cc9d3e882788703fd3dac4360a81a17b</code>, not kept, never in the repository) to show the signing proposal below working. A digest covers the signature, so CI's builds of the same tree have their own digests: CI writes them, with each debug APK's signing certificate, into the summary of every run's <code>assemble</code> job.</p>
+    <p>Built locally on 2026-11-07 from tree <code>300f5c2</code> with <code>assembleDebug assembleRelease assembleNoexact</code> (JDK 21, Gradle wrapper 9.3.1), all three signed with a <strong>throwaway test identity</strong> made for this run (certificate SHA-256 <code>97df21cfc1eb9aec8fefaa20a2b32de3cc9d3e882788703fd3dac4360a81a17b</code>, not kept, never in the repository) to show the signing proposal below working. A digest covers the signature, so CI's builds of the same tree have their own digests: CI writes them, with each debug APK's signing certificate, into the summary of every run's <code>assemble</code> job.</p>
     <table>
       <thead><tr><th scope="col">APK</th><th scope="col">SHA-256</th></tr></thead>
       <tbody>
@@ -61,10 +61,10 @@
     <table>
       <thead><tr><th scope="col">What</th><th scope="col">Where</th><th scope="col">Result</th></tr></thead>
       <tbody>
-        <tr><td>Unit, Robolectric and JVM tests of every module, lint</td><td>Locally and in CI on every pull request</td><td>2,406 tests (4 skipped), 0 failures, lint clean, at the tree above</td></tr>
+        <tr><td>Unit, Robolectric and JVM tests of every module, lint</td><td>Locally and in CI on every pull request</td><td>2,407 tests (4 skipped), 0 failures, lint clean, at the tree above</td></tr>
         <tr><td>Publication safety (no keys, keystores, tokens, personal data, screenshots or false claims are tracked)</td><td>CI, every pull request (gitleaks and <code>PublicationSafetyTest</code>)</td><td>Passes</td></tr>
         <tr><td>The receipt scripts (redaction, permissions list)</td><td>CI, every pull request</td><td>16 tests pass; seven deliberate breaks of their rules each caught</td></tr>
-        <tr><td>Instrumented ring tests (<code>RingSurfaceTest</code>) and <code>scripts/reliability.sh</code> (kill, kill -9, force-stop, deep idle, revoked exact alarms, backstop, reboot, and now trail and hardening)</td><td>Nightly CI on API 36 and 37 emulators; also on any pull request that changes the harness</td><td>Each run's report is in that run's summary</td></tr>
+        <tr><td>Instrumented ring tests (<code>RingSurfaceTest</code>) and <code>scripts/reliability.sh</code> (kill, kill -9, force-stop, deep idle, revoked exact alarms, backstop, reboot, and now trail and hardening)</td><td>Nightly CI on API 36 and 37 emulators; also on any pull request that changes the harness</td><td>On this change's first commit, API 36: the eight cases that apply all pass (kill 552 ms late, idle 152 ms late, trail 9 events, a real reboot); hardening is N/A there. API 37: all ten pass, both hardening modes included, the same result as the local run. Each run's report is in its summary.</td></tr>
         <tr><td>The task loop, end to end (below)</td><td>API 37 emulator, locally, <code>reliability.sh trail</code></td><td>Pass</td></tr>
         <tr><td>Android 17 background-audio hardening (below)</td><td>API 37 emulator, locally, <code>reliability.sh hardening</code></td><td>Pass, in both modes, after the fix in this change</td></tr>
         <tr><td>Updating in place with one signing identity (below)</td><td>API 37 emulator, by hand</td><td>Pass</td></tr>

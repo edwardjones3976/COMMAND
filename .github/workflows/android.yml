@@ -109,7 +109,9 @@ jobs:
             echo '```'
             echo "### Signing certificate of the debug APK"
             echo '```'
-            "$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner" verify --print-certs app/build/outputs/apk/debug/*.apk | grep -E 'SHA-256 digest|DN:' || true
+            # GitHub's Ubuntu image sets ANDROID_HOME; without it, or without build-tools, the summary says so and the job does not fail.
+            signer="$(ls -d "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/nonexistent}}"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)"
+            if [ -n "$signer" ]; then "$signer" verify --print-certs app/build/outputs/apk/debug/*.apk | grep -E 'SHA-256 digest|DN:' || true; else echo "apksigner not found"; fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4

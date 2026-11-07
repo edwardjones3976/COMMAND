@@ -20,6 +20,7 @@ class VolumeRefusalShadow : ShadowAudioManager() {
         if (ignore) return
         // ... and with `cmd audio set-hardening throw` it throws instead (measured on API 37: the BOOT reconcile then failed and was retried).
         if (hardeningThrows) throw IllegalStateException("AudioHardening volume control for api 100 ignored")
+        broken?.let { throw it }
         super.setStreamVolume(streamType, maxOf(index, floor), flags)
     }
 
@@ -35,5 +36,9 @@ class VolumeRefusalShadow : ShadowAudioManager() {
 
         @JvmStatic
         var hardeningThrows = false
+
+        /** Something nobody expected, thrown by the platform's volume call. */
+        @JvmStatic
+        var broken: RuntimeException? = null
     }
 }
