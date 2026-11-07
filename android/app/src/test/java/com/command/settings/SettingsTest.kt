@@ -1,6 +1,8 @@
 package com.command.settings
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -8,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.room.InvalidationTracker
+import com.command.alarm.RingPreferences
 import com.command.data.AppSettings
 import com.command.data.MissionRepository
 import com.command.data.db.CommandDb
@@ -47,6 +50,7 @@ class SettingsViewModelTest {
     @Inject lateinit var db: CommandDb
     @Inject lateinit var missions: MissionRepository
     @Inject lateinit var clock: FakeClock
+    @Inject lateinit var ring: RingPreferences
 
     @Before
     fun setUp() {
@@ -65,29 +69,54 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun `a pause the repository refuses is logged and ends nothing but itself`() {
+        org.robolectric.shadows.ShadowLog.reset()
+        val vm = SettingsViewModel(settings, missions, clock, ring)
+        awaitUntil(message = "ready") { ready(vm) != null }
+
+        vm.pauseFor(1_000) // longer than a pause may last: the repository throws
+
+        awaitUntil(message = "logged") { org.robolectric.shadows.ShadowLog.getLogsForTag("ScreenWork").isNotEmpty() }
+        vm.pauseFor(1)
+        awaitUntil(message = "the next one works") { ready(vm)?.pausedUntilUtcMs != null }
+    }
+
+    @Test
+    fun `gradual start is off until it is turned on, and is written the moment it is chosen`() {
+        val vm = SettingsViewModel(settings, missions, clock, ring)
+        awaitUntil(message = "ready") { ready(vm) != null }
+        assertEquals(false, ready(vm)!!.gradualStart)
+
+        vm.setGradualStart(true)
+
+        awaitUntil(message = "shown") { ready(vm)?.gradualStart == true }
+        assertEquals(true, RingPreferences(androidx.test.core.app.ApplicationProvider.getApplicationContext()).gradualStart)
+    }
+
+    @Test
     fun `the line is heard on the speaker and a headset until the person says otherwise`() {
-        val vm = SettingsViewModel(settings, missions, clock)
+        val vm = SettingsViewModel(settings, missions, clock, ring)
         awaitUntil(message = "ready") { ready(vm) != null }
         assertEquals(RoutePolicy.SPEAKER_AND_HEADSET, ready(vm)!!.routePolicy)
     }
 
     @Test
     fun `choosing headset only is written down, and then shown`() {
-        val vm = SettingsViewModel(settings, missions, clock)
+        val vm = SettingsViewModel(settings, missions, clock, ring)
         awaitUntil(message = "ready") { ready(vm) != null }
 
         vm.chooseRoutePolicy(RoutePolicy.HEADSET_ONLY)
         awaitUntil(message = "written and shown") { ready(vm)?.routePolicy == RoutePolicy.HEADSET_ONLY }
         assertEquals("what is shown is what is stored", RoutePolicy.HEADSET_ONLY, runBlocking { settings.routePolicy() })
 
-        val reopened = SettingsViewModel(settings, missions, clock)
+        val reopened = SettingsViewModel(settings, missions, clock, ring)
         awaitUntil(message = "ready again") { ready(reopened) != null }
         assertEquals("and it is still chosen when the screen is opened again", RoutePolicy.HEADSET_ONLY, ready(reopened)!!.routePolicy)
     }
 
     @Test
     fun `choosing what is already chosen writes nothing`() {
-        val vm = SettingsViewModel(settings, missions, clock)
+        val vm = SettingsViewModel(settings, missions, clock, ring)
         awaitUntil(message = "ready") { ready(vm) != null }
         // The database seeds the default route when it is created, so a write is told from the seed by watching the settings table.
         var writes = 0
@@ -108,7 +137,7 @@ class SettingsViewModelTest {
 
     @Test
     fun `pausing for some hours is shown until its end, and ending the pause brings the choices back`() {
-        val vm = SettingsViewModel(settings, missions, clock)
+        val vm = SettingsViewModel(settings, missions, clock, ring)
         awaitUntil(message = "ready") { ready(vm) != null }
         assertNull(ready(vm)!!.pausedUntilUtcMs)
 
@@ -121,7 +150,7 @@ class SettingsViewModelTest {
 
     @Test
     fun `a pause whose end has passed is no longer shown, before anything has closed it`() {
-        val vm = SettingsViewModel(settings, missions, clock)
+        val vm = SettingsViewModel(settings, missions, clock, ring)
         awaitUntil(message = "ready") { ready(vm) != null }
         vm.pauseFor(1)
         awaitUntil(message = "paused") { ready(vm)?.pausedUntilUtcMs != null }
@@ -140,6 +169,7 @@ class SettingsScreenTest {
     @get:Rule val compose = createComposeRule()
 
     private class Taps {
+        val gradual = ArrayList<Boolean>()
         val routes = ArrayList<RoutePolicy>()
         var history = 0
         var reliability = 0
@@ -158,11 +188,11 @@ class SettingsScreenTest {
 
     private fun timeOf(utcMs: Long) = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).format(Instant.ofEpochMilli(utcMs).atZone(ZoneOffset.UTC))
 
-    private fun show(policy: RoutePolicy = RoutePolicy.SPEAKER_AND_HEADSET, taps: Taps = Taps(), pausedUntil: Long? = null): Taps {
+    private fun show(policy: RoutePolicy = RoutePolicy.SPEAKER_AND_HEADSET, taps: Taps = Taps(), pausedUntil: Long? = null, gradual: Boolean = false): Taps {
         compose.setContent {
             CommandTheme(darkTheme = true) {
                 SettingsScreen(
-                    state = SettingsUiState.Ready(policy, pausedUntil),
+                    state = SettingsUiState.Ready(policy, pausedUntil, gradual),
                     onBack = { taps.back++ },
                     onChooseRoute = { taps.routes += it },
                     onOpenHistory = { taps.history++ },
@@ -173,6 +203,7 @@ class SettingsScreenTest {
                     version = "4.0",
                     onPause = { taps.pauses += it },
                     onEndPause = { taps.endPause++ },
+                    onSetGradual = { taps.gradual += it },
                     zone = ZoneOffset.UTC,
                     today = today,
                 )
@@ -189,6 +220,24 @@ class SettingsScreenTest {
         compose.onNodeWithTag(SettingsTags.ROUTE_HEADSET).assertIsSelected()
         compose.onNodeWithTag(SettingsTags.ROUTE_SPEAKER).assertIsNotSelected()
         compose.onNodeWithText("Without one, the tone and the vibration still ring.", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun `gradual start says what it does and what stays as it is, is off by default, and reports the choice`() {
+        val taps = show()
+        compose.onNodeWithText("Bring the alarm in gradually").assertIsDisplayed()
+        compose.onNodeWithText("your alarm volume is not changed", substring = true).assertIsDisplayed()
+        compose.onNodeWithTag(SettingsTags.GRADUAL).assertIsOff()
+        compose.onNodeWithTag(SettingsTags.GRADUAL).performClick()
+        assertEquals(listOf(true), taps.gradual)
+    }
+
+    @Test
+    fun `gradual start shows what is stored, and turning it off reports that`() {
+        val taps = show(gradual = true)
+        compose.onNodeWithTag(SettingsTags.GRADUAL).assertIsOn()
+        compose.onNodeWithTag(SettingsTags.GRADUAL).performClick()
+        assertEquals(listOf(false), taps.gradual)
     }
 
     @Test

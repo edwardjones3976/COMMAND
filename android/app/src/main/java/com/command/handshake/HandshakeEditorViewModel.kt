@@ -1,7 +1,6 @@
 package com.command.handshake
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.data.ProfileHandshake
 import com.command.data.ProfileRepository
 import com.command.data.SaveChainResult
@@ -14,6 +13,7 @@ import com.command.domain.dials.DialEffects
 import com.command.domain.dials.HandshakeMode
 import com.command.domain.dials.StepSpec
 import com.command.domain.handshake.ChainState
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -97,7 +97,7 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
         inForce = null
         opening?.cancel()
         _state.value = HandshakeEditorUiState.Loading
-        opening = viewModelScope.launch {
+        opening = guardedScope.launch {
             // The row, and whether alarms are fired with this profile, are followed for as long as the editor is open, as the list follows them:
             // the line at the top and the note of a save say what is true now, and not what was true when the editor was opened.
             combine(profiles.observeHandshake(id), profiles.observeInUse(id)) { profile, used -> profile to used }.collect { (profile, used) ->
@@ -241,7 +241,7 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
         if (!current.canSave) return
         val spec = ChainSpec(current.op, current.steps.map { it.toSpec() })
         val earlier = saving
-        saving = viewModelScope.launch {
+        saving = guardedScope.launch {
             earlier?.join()
             beforeSaveWrite()
             val result = profiles.saveChain(id, spec)
@@ -272,7 +272,7 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
         _state.value = HandshakeEditorUiState.Loading
         val earlier = saving
         returning = id
-        viewModelScope.launch {
+        guardedScope.launch {
             try {
                 earlier?.join()
                 if (!profiles.useDefault(id)) {

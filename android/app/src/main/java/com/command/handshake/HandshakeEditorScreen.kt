@@ -29,8 +29,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material3.AlertDialogDefaults
-import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -74,7 +72,8 @@ import com.command.domain.dials.ChainLimits
 import com.command.domain.dials.ChainOp
 import com.command.domain.dials.HandshakeMode
 import com.command.domain.handshake.ChainState
-import com.example.R
+import com.command.R
+import com.command.ui.SafeQuestion
 
 /** Everything the editor can ask for, so the screen can be tested without a view model. */
 class HandshakeEditorActions(
@@ -286,7 +285,7 @@ private fun Outcome(state: HandshakeEditorUiState.Editing) {
 /** The question before changes are thrown away; the answer that keeps them is the first (see [Question]). */
 @Composable
 private fun LeaveDialog(onKeep: () -> Unit, onLeave: () -> Unit) {
-    Question(
+    SafeQuestion(
         tag = HandshakeTags.LEAVE_DIALOG,
         title = stringResource(R.string.handshake_leave_title),
         message = stringResource(R.string.handshake_leave_body),
@@ -302,7 +301,7 @@ private fun LeaveDialog(onKeep: () -> Unit, onLeave: () -> Unit) {
 /** The question before the saved handshake is deleted; the answer that keeps it is the first, as in [LeaveDialog]. */
 @Composable
 private fun StandardDialog(difficulty: Int, onKeep: () -> Unit, onConfirm: () -> Unit) {
-    Question(
+    SafeQuestion(
         tag = HandshakeTags.STANDARD_DIALOG,
         title = stringResource(R.string.handshake_standard_title),
         message = stringResource(R.string.handshake_standard_body, difficulty),
@@ -313,58 +312,6 @@ private fun StandardDialog(difficulty: Int, onKeep: () -> Unit, onConfirm: () ->
         throwAwayTag = HandshakeTags.STANDARD_CONFIRM,
         onThrowAway = onConfirm,
     )
-}
-
-/**
- * A question with two answers, one under the other and each as wide as the dialog: the answer that keeps what the person has comes first (of
- * the two answers it is the first in reading, swipe and Tab order, which is the order they are composed in; Back and a tap outside answer it
- * too), and the answer that throws something away is under it, in the colour of an error.
- * They are stacked on purpose: Material's own alert dialog puts its buttons in a row that wraps, and when the row does not fit it puts the
- * confirm button on top, which would make the answer that throws work away the first one met. The message scrolls, so that large type
- * cannot cut it off; the answers are outside the scroll, so they are always in reach.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun Question(
-    tag: String,
-    title: String,
-    message: String,
-    keepLabel: Int,
-    keepTag: String,
-    onKeep: () -> Unit,
-    throwAwayLabel: Int,
-    throwAwayTag: String,
-    onThrowAway: () -> Unit,
-) {
-    BasicAlertDialog(onDismissRequest = onKeep, modifier = Modifier.testTag(tag)) {
-        Surface(
-            modifier = Modifier.sizeIn(minWidth = 280.dp, maxWidth = 560.dp),
-            shape = AlertDialogDefaults.shape,
-            color = AlertDialogDefaults.containerColor,
-            tonalElevation = AlertDialogDefaults.TonalElevation,
-        ) {
-            Column(Modifier.padding(24.dp)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = AlertDialogDefaults.titleContentColor,
-                    modifier = Modifier.semantics { heading() },
-                )
-                Column(Modifier.weight(1f, fill = false).padding(top = 16.dp, bottom = 24.dp).verticalScroll(rememberScrollState())) {
-                    Text(message, style = MaterialTheme.typography.bodyMedium, color = AlertDialogDefaults.textContentColor)
-                }
-                Button(onClick = onKeep, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(keepTag)) {
-                    Text(stringResource(keepLabel))
-                }
-                Spacer(Modifier.height(8.dp))
-                TextButton(
-                    onClick = onThrowAway,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(throwAwayTag),
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                ) { Text(stringResource(throwAwayLabel)) }
-            }
-        }
-    }
 }
 
 @Composable

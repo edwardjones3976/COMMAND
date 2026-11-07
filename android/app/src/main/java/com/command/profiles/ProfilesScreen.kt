@@ -42,10 +42,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewModelScope
 import com.command.data.ProfileHandshake
 import com.command.data.ProfileRepository
-import com.example.R
+import com.command.R
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.SharingStarted
@@ -71,11 +71,11 @@ class ProfilesViewModel @Inject constructor(private val profiles: ProfileReposit
         profiles.observeActiveId(),
         profiles.observeInUse(),
     ) { all, active, inUse -> ProfilesUiState.Ready(all, active, inUse) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), ProfilesUiState.Loading)
+        .stateIn(guardedScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), ProfilesUiState.Loading)
 
     /** A profile that has gone meanwhile is not made active, and the list then no longer shows it. Leaving the screen at once does not undo the choice. */
     fun activate(id: String) {
-        viewModelScope.launch { withContext(NonCancellable) { profiles.activate(id) } }
+        guardedScope.launch { withContext(NonCancellable) { profiles.activate(id) } }
     }
 
     private companion object {

@@ -1001,4 +1001,126 @@ class OccurrenceRepositoryTest {
         assertTrue(r is ApplyResult.Rejected)
         assertTrue(f.scheduler.armed.isEmpty())
     }
+
+    @Test
+    fun `the alarm that ends a ring is set back only while it is ringing, however old the caller's reading is`() = runBlocking {
+        val row = armedRow()
+        f.repo.apply(row.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+        f.repo.apply(row.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+        val cycleEnd = AlarmRequest(row.id, row.requestCode, AlarmKind.CYCLE_END, 0).identity
+        f.scheduler.armed.clear()
+
+        f.repo.armCycleEnd(row.id, f.t0 + 5_000)
+        assertEquals(f.t0 + 5_000, f.scheduler.armed[cycleEnd]?.atUtcMs)
+
+        f.repo.apply(row.id, OccurrenceCommand.SafetySilence, EventSource.USER)
+        f.scheduler.armed.clear()
+        f.repo.armCycleEnd(row.id, f.t0 + 9_000)
+        assertEquals("the ring was answered in between", null, f.scheduler.armed[cycleEnd])
+    }
+
+    @Test
+    fun `the alarm that ends a ring, set back when the platform refuses, is logged`() = runBlocking {
+        val row = armedRow()
+        f.repo.apply(row.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+        f.repo.apply(row.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+        f.scheduler.refusing = true
+
+        f.repo.armCycleEnd(row.id, f.t0 + 5_000)
+
+        assertEquals(1, refusals(row.id).size)
+    }
+
+    @Test
+    fun `a ring stores which boot its monotonic deadline belongs to`() = runBlocking {
+        f.clock.bootId = "7"
+        val row = armedRow()
+        f.repo.apply(row.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+        f.repo.apply(row.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+        assertEquals("7", Codec.decodeSession(f.repo.get(row.id)!!.sessionJson).bootId)
+    }
+
+    @Test
+    fun `the real clock names the boot by the platform's count, and says nothing when the platform does not`() {
+        val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val settings = context.contentResolver
+        android.provider.Settings.Global.putString(settings, android.provider.Settings.Global.BOOT_COUNT, null)
+        assertEquals(null, AndroidClock(context).bootId())
+        android.provider.Settings.Global.putInt(settings, android.provider.Settings.Global.BOOT_COUNT, 12)
+        assertEquals("12", AndroidClock(context).bootId())
+    }
+
+    @Test
+    fun `a Fire tops up the window, and a rejected one does not`() = runBlocking {
+        val row = armedRow()
+        f.repo.apply(row.id, OccurrenceCommand.Fire, EventSource.SERVICE) // not armed yet: rejected
+        assertEquals(0, f.roller.rolls)
+        f.repo.apply(row.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+        f.repo.apply(row.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+        assertEquals(1, f.roller.rolls)
+    }
+
+    // --- the platform's limit ------------------------------------------------------------------------------------------
+
+    private suspend fun armedRow(): OccurrenceRow {
+        val mission = Fixture.missionRow("Standup", startAt = f.t0 + 3_600_000)
+        f.db.missions().insert(mission)
+        val row = f.repo.createOccurrence(mission.id, f.t0 + 3_600_000, "UTC").occurrence
+        return row
+    }
+
+    private suspend fun refusals(id: String) = f.db.events().forOccurrence(id).filter { it.type == EventType.ALARM_CAP }
+
+    @Test
+    fun `an alarm the platform refuses is logged as ALARM_CAP, and the row says it was refused`() = runBlocking {
+        val row = armedRow()
+        f.scheduler.refusing = true
+
+        f.repo.apply(row.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+
+        assertEquals(1, refusals(row.id).size)
+        assertTrue(refusals(row.id).single().payloadJson.contains("FIRE"))
+        assertEquals(ArmMode.REFUSED, f.repo.get(row.id)!!.armMode)
+        assertEquals("it is still meant to ring", OccurrenceState.ARMED, f.repo.get(row.id)!!.state)
+    }
+
+    @Test
+    fun `the alarm that ends a ring and a follow-up question are logged when refused too`() = runBlocking {
+        val row = armedRow()
+        f.repo.apply(row.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+        f.scheduler.refusing = true
+
+        f.repo.apply(row.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+        assertTrue(refusals(row.id).single().payloadJson.contains("CYCLE_END"))
+
+        f.repo.apply(row.id, OccurrenceCommand.Acknowledge(), EventSource.USER)
+        f.repo.apply(row.id, OccurrenceCommand.StartGuidance, EventSource.USER)
+        assertTrue(refusals(row.id).any { it.payloadJson.contains("CHECK_IN") })
+    }
+
+    @Test
+    fun `an alarm that is moved or set again and refused is logged`() = runBlocking {
+        val row = armedRow()
+        f.repo.apply(row.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+        f.scheduler.refusing = true
+
+        assertEquals(ArmMode.REFUSED, f.repo.rearm(row.id))
+        assertEquals(1, refusals(row.id).size)
+        assertTrue(f.repo.reschedule(row.id, f.t0 + 7_200_000, "UTC"))
+        assertEquals(2, refusals(row.id).size)
+        assertEquals(ArmMode.REFUSED, f.repo.get(row.id)!!.armMode)
+    }
+
+    @Test
+    fun `room again puts the row right, and nothing more is logged`() = runBlocking {
+        val row = armedRow()
+        f.scheduler.refusing = true
+        f.repo.apply(row.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+        f.scheduler.refusing = false
+
+        assertEquals(ArmMode.EXACT, f.repo.rearm(row.id))
+
+        assertEquals(ArmMode.EXACT, f.repo.get(row.id)!!.armMode)
+        assertEquals(1, refusals(row.id).size)
+    }
 }

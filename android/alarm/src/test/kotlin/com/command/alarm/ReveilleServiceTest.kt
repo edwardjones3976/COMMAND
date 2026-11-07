@@ -63,6 +63,7 @@ class ReveilleServiceTest {
     @Inject lateinit var latch: ErasureLatch
     @Inject lateinit var eraser: DataEraser
     @Inject lateinit var consents: com.command.data.ConsentStore
+    @Inject lateinit var roller: com.command.testing.android.FakeWindowRoller
 
     private lateinit var context: Context
 
@@ -482,6 +483,41 @@ class ReveilleServiceTest {
         val service = startService(Intent(context, ReveilleService::class.java).setAction(AlarmContract.ACTION_FIRE)).get()
         assertTrue("it went foreground, then dropped it", shadowOf(service).isForegroundStopped)
         assertTrue(shadowOf(service).isStoppedBySelf)
+    }
+
+    @Test
+    fun `a ring that begins asks once for the week to be topped up, and a stale alarm does not`() {
+        val o = armed()
+        startService(fireIntent(o))
+        awaitUntil(message = "the ring") { stateOf(o) == OccurrenceState.FIRING }
+        awaitUntil(message = "the roll") { roller.rolls == 1 }
+
+        startService(fireIntent(o)) // the same alarm delivered twice
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, roller.rolls)
+    }
+
+    @Test
+    fun `a start with nothing to ring for uses an id no occurrence can have, not the request code of the first one ever made`() {
+        val service = startService(Intent(context, ReveilleService::class.java).setAction(AlarmContract.ACTION_FIRE)).get()
+        assertTrue("request codes count up from 1", shadowOf(service).lastForegroundNotificationId < 0)
+    }
+
+    @Test
+    fun `a start with nothing to ring for leaves the ring that is sounding its notification, with its way to silence it`() {
+        val o = armed()
+        assertEquals("the first occurrence ever made", 1, o.requestCode)
+        val service = startService(fireIntent(o)).get()
+        awaitUntil(message = "the ring") { service.ringingOccurrenceId == o.id }
+
+        service.onStartCommand(Intent(context, ReveilleService::class.java).setAction(AlarmContract.ACTION_FIRE), 0, 2)
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(o.id, service.ringingOccurrenceId)
+        assertEquals(o.requestCode, shadowOf(service).lastForegroundNotificationId)
+        val foreground = shadowOf(service).lastForegroundNotification
+        assertEquals(AlarmContract.CHANNEL_ALARM, foreground.channelId)
+        assertTrue("Safety silence is still there", foreground.actions.any { it.title == context.getString(R.string.action_silence) })
     }
 
     @Test

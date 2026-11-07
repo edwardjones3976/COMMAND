@@ -1,11 +1,11 @@
 package com.command.detail
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.data.OccurrenceDetail
 import com.command.data.OccurrenceRepository
 import com.command.domain.history.HistoryOccurrence
 import com.command.domain.history.HistoryReason
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,7 +53,7 @@ class OccurrenceDetailViewModel @Inject constructor(
         observing?.cancel()
         shown = id
         _state.value = DetailUiState.Loading
-        observing = viewModelScope.launch {
+        observing = guardedScope.launch {
             repository.observeDetail(id).collectLatest { _state.value = project(it) }
         }
     }

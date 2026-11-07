@@ -28,7 +28,7 @@ class ReliabilityRepositoryTest {
     @Before
     fun setUp() {
         f = Fixture(ApplicationProvider.getApplicationContext())
-        repository = ReliabilityRepository(f.db)
+        repository = ReliabilityRepository(f.db, f.clock)
     }
 
     @After
@@ -126,5 +126,20 @@ class ReliabilityRepositoryTest {
         assertTrue(recent().isEmpty())
         event(id, EventType.ALARM_FIRED, f.t0 + 61_000)
         assertEquals(1, recent().size)
+    }
+
+    @Test
+    fun `alarms refused in the last day are counted, each once, and what is older is not`() = run {
+        val a = alarm("A", offsetMs = 60_000)
+        val b = alarm("B", offsetMs = 120_000)
+        val old = alarm("Old", offsetMs = 180_000)
+        assertEquals(0, repository.refusedAlarms().first())
+
+        event(a, EventType.ALARM_CAP, f.t0)
+        event(a, EventType.ALARM_CAP, f.t0 + 1_000) // the same alarm, tried again
+        event(b, EventType.ALARM_CAP, f.t0 - 3_600_000)
+        event(old, EventType.ALARM_CAP, f.t0 - 25 * 3_600_000)
+
+        assertEquals(2, repository.refusedAlarms().first())
     }
 }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -26,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -43,13 +45,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.domain.voice.RoutePolicy
 import com.command.ui.pauseTitle
-import com.example.R
+import com.command.R
 import java.time.LocalDate
 import java.time.ZoneId
 
 object SettingsTags {
     const val ROUTE_SPEAKER = "settings_route_speaker"
     const val ROUTE_HEADSET = "settings_route_headset"
+    const val GRADUAL = "settings_gradual_start"
     const val LINK_HISTORY = "settings_link_history"
     const val LINK_RELIABILITY = "settings_link_reliability"
     const val LINK_CONSENTS = "settings_link_consents"
@@ -82,6 +85,7 @@ fun SettingsRoute(
         state = state,
         onBack = onBack,
         onChooseRoute = viewModel::chooseRoutePolicy,
+        onSetGradual = viewModel::setGradualStart,
         onOpenHistory = onOpenHistory,
         onOpenReliability = onOpenReliability,
         onOpenConsents = onOpenConsents,
@@ -89,7 +93,7 @@ fun SettingsRoute(
         onOpenHandshakes = onOpenHandshakes,
         onOpenCalendars = onOpenCalendars,
         onOpenProfiles = onOpenProfiles,
-        version = com.example.BuildConfig.VERSION_NAME,
+        version = com.command.BuildConfig.VERSION_NAME,
         onPause = viewModel::pauseFor,
         onEndPause = viewModel::endPause,
     )
@@ -108,6 +112,7 @@ fun SettingsScreen(
     version: String,
     onPause: (hours: Int) -> Unit = {},
     onEndPause: () -> Unit = {},
+    onSetGradual: (Boolean) -> Unit = {},
     zone: ZoneId = ZoneId.systemDefault(),
     today: LocalDate = LocalDate.now(zone),
     onOpenData: () -> Unit = {},
@@ -156,6 +161,7 @@ fun SettingsScreen(
                         )
                     }
                 }
+                item { GradualStartRow(state.gradualStart, onSetGradual) }
                 item { PauseSection(state.pausedUntilUtcMs, zone, today, onPause, onEndPause) }
                 item {
                     Text(
@@ -180,6 +186,26 @@ fun SettingsScreen(
                 }
             }
         }
+    }
+}
+
+/** Whether the tone rises at the start of a ring. It says what stays as it is: the volume, and how loud the tone ends up. */
+@Composable
+private fun GradualStartRow(on: Boolean, onSet: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .toggleable(value = on, onValueChange = onSet, role = Role.Switch)
+            .padding(top = 16.dp, bottom = 8.dp)
+            .testTag(SettingsTags.GRADUAL),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f).padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(stringResource(R.string.settings_gradual_title), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.settings_gradual_detail), style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(checked = on, onCheckedChange = null)
     }
 }
 

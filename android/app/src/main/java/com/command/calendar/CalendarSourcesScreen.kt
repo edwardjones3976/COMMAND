@@ -44,7 +44,7 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.data.db.CalendarSourceRow
 import com.command.domain.dials.Flexibility
-import com.example.R
+import com.command.R
 
 object CalendarTags {
     const val ALLOW = "calendars_allow"

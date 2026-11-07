@@ -3,7 +3,7 @@ package com.command.reveille
 import android.content.Context
 import com.command.domain.dials.Personality
 import com.command.domain.handshake.TryId
-import com.example.R
+import com.command.R
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn

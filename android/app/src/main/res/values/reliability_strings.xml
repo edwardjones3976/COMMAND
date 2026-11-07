@@ -14,6 +14,12 @@
     <string name="reliability_summary_warnings_title">Your alarms should ring, with some risk</string>
     <string name="reliability_summary_warnings_body">Nothing blocks an alarm, but Android is limiting COMMAND in ways that can make one late or lost.</string>
 
+    <string name="reliability_limit_title">Android refused alarms</string>
+    <plurals name="reliability_limit_state">
+        <item quantity="one">%1$d alarm refused in the last day</item>
+        <item quantity="other">%1$d alarms refused in the last day</item>
+    </plurals>
+    <string name="reliability_limit_body">Android limits how many alarms one app can hold, and COMMAND has reached that limit. A refused alarm will not ring. COMMAND tries again each time it opens and every few hours. Deleting missions you no longer need makes room.</string>
     <string name="reliability_section_problems">Needs attention</string>
     <string name="reliability_section_warnings">Worth knowing</string>
     <string name="reliability_section_advice">For your information</string>

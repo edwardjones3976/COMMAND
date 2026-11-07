@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.first
 import com.command.testing.android.awaitUntil
 import kotlinx.coroutines.runBlocking
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowLog
 import java.util.concurrent.CountDownLatch
 import kotlin.concurrent.thread
 import android.os.Looper
@@ -128,6 +129,21 @@ class DialsTest {
         }
 
         staysAt(Dial.ALERT_INTENSITY, 5)
+    }
+
+    @Test
+    fun `a dial write that fails ends nothing, and the next tap is still written`() {
+        val database = db.openHelper.writableDatabase
+        runBlocking(Dispatchers.IO) { database.execSQL("CREATE TRIGGER refuse BEFORE UPDATE ON execution_profiles BEGIN SELECT RAISE(ABORT, 'refused'); END") }
+        ShadowLog.reset()
+        vm.open("builtin_steady")
+
+        vm.set(Dial.FIRMNESS, 5)
+        awaitUntil(message = "the failure to be logged") { ShadowLog.getLogsForTag("ScreenWork").isNotEmpty() }
+        runBlocking(Dispatchers.IO) { database.execSQL("DROP TRIGGER refuse") }
+        vm.set(Dial.FIRMNESS, 1)
+
+        staysAt(Dial.FIRMNESS, 1)
     }
 
     @Test

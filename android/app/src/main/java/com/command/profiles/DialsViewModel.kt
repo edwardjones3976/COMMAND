@@ -1,7 +1,6 @@
 package com.command.profiles
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.data.ProfileHandshake
 import com.command.data.ProfileRepository
 import com.command.data.TemplateOverrideRepository
@@ -11,6 +10,7 @@ import com.command.domain.coaching.CoachingPhase
 import com.command.domain.coaching.TemplateOverrides
 import com.command.domain.dials.Dial
 import com.command.domain.dials.Dials
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -54,7 +54,7 @@ class DialsViewModel @Inject constructor(private val profiles: ProfileRepository
     fun open(id: String) {
         if (profileId == id) return
         profileId = id
-        viewModelScope.launch {
+        guardedScope.launch {
             val overrides = readOverrides()
             combine(profiles.observeDials(id), profiles.observeInUse(id)) { profile, used -> profile to used }.collect { (profile, used) ->
                 _state.value = if (profile == null) DialsUiState.NotFound else DialsUiState.Ready(profile.handshake, profile.dials, used, overrides)
@@ -66,7 +66,7 @@ class DialsViewModel @Inject constructor(private val profiles: ProfileRepository
         val id = profileId ?: return
         // A tap is written even if the person leaves the screen at once: nothing else on this screen says it was not. This runs at once up to
         // the repository's queue, on the thread of the tap, so that the value tapped last is the one that stays, on this screen or one opened after it.
-        viewModelScope.launch { withContext(NonCancellable) { profiles.setDial(id, dial, value) } }
+        guardedScope.launch { withContext(NonCancellable) { profiles.setDial(id, dial, value) } }
     }
 
     /** A row that cannot be read (from a newer version, say) costs the person's own wording in the preview, as it does on the ring. */

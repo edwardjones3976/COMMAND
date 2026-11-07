@@ -224,6 +224,10 @@ interface EventDao {
     )
     fun observeLineNotSpoken(occurrenceId: String): Flow<Boolean>
 
+    /** How many occurrences had an alarm refused by the platform since [sinceUtc]. A refusal that goes on is logged again at each try. */
+    @Query("SELECT COUNT(DISTINCT occurrence_id) FROM events WHERE type = 'ALARM_CAP' AND at_utc >= :sinceUtc")
+    fun observeAlarmsRefused(sinceUtc: Long): Flow<Int>
+
     /** Whether the occurrence was ever acknowledged: its handshake was passed, as against a silence that was picked up again. */
     @Query(
         """SELECT EXISTS(SELECT 1 FROM events WHERE occurrence_id = :occurrenceId

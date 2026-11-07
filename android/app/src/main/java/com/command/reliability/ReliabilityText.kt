@@ -7,7 +7,7 @@ import com.command.domain.reliability.Precondition
 import com.command.domain.reliability.PreconditionValue
 import com.command.domain.reliability.ReliabilityItem
 import com.command.domain.reliability.Severity
-import com.example.R
+import com.command.R
 
 /** What the reliability page and the first-run permissions screen say about each precondition, in plain words. */
 

@@ -1,13 +1,13 @@
 package com.command.profiles
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
 import com.command.data.ActivityRule
 import com.command.data.ActivityRuleRepository
 import com.command.data.ProfileHandshake
 import com.command.data.ProfileRepository
 import com.command.data.RuleProblem
 import com.command.data.SaveRuleResult
+import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,7 +54,7 @@ class ActivityRulesViewModel @Inject constructor(private val rules: ActivityRule
     ) { all, profileRows, written ->
         val names = profileRows.associate { it.id to it.name }
         ActivityRulesUiState.Ready(all.map { RuleLine(it, names[it.profileId]) }, profileRows, written)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), ActivityRulesUiState.Loading)
+    }.stateIn(guardedScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), ActivityRulesUiState.Loading)
 
     fun startNew() {
         draft.value = RuleDraft(id = null, category = "", words = "", profileId = null)
@@ -77,7 +77,7 @@ class ActivityRulesViewModel @Inject constructor(private val rules: ActivityRule
     fun save() {
         val sent = draft.value?.takeUnless { it.saving }?.copy(problems = emptySet(), saving = true) ?: return
         draft.value = sent
-        viewModelScope.launch {
+        guardedScope.launch {
             // What was accepted is written even if the person leaves the screen at once.
             val result = withContext(NonCancellable) {
                 beforeWrite()
@@ -95,7 +95,7 @@ class ActivityRulesViewModel @Inject constructor(private val rules: ActivityRule
     }
 
     fun delete(id: String) {
-        viewModelScope.launch {
+        guardedScope.launch {
             withContext(NonCancellable) {
                 beforeWrite()
                 rules.delete(id)

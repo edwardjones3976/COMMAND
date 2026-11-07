@@ -42,7 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.domain.dials.Dial
 import com.command.domain.dials.Dials
 import com.command.domain.dials.Personality
-import com.example.R
+import com.command.R
 
 object DialsTags {
     const val LIST = "dials_list"

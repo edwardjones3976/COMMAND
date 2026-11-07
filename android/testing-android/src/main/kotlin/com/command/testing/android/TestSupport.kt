@@ -166,6 +166,11 @@ class FakeSpeaker : Speaker {
     }
 }
 
+class FakeWindowRoller : WindowRoller {
+    @Volatile var rolls = 0
+    override fun roll() { rolls++ }
+}
+
 class FakeAudioRoutes : AudioRoutes {
     var headset = false
     override fun headsetConnected(): Boolean = headset
@@ -200,7 +205,8 @@ object FakeAlarmModule {
     @Provides @Singleton fun work(fake: FakeWorkEnqueuer): WorkEnqueuer = fake
     @Provides @Singleton fun poster(): RecordingPoster = RecordingPoster()
     @Provides @Singleton fun checkInPoster(fake: RecordingPoster): CheckInPoster = fake
-    @Provides @Singleton fun roller(): WindowRoller = WindowRoller { }
+    @Provides @Singleton fun fakeRoller(): FakeWindowRoller = FakeWindowRoller()
+    @Provides @Singleton fun roller(fake: FakeWindowRoller): WindowRoller = fake
     @Provides @Singleton fun fakePause(): FakePauseEffects = FakePauseEffects()
     @Provides @Singleton fun pauseEffects(fake: FakePauseEffects): PauseEffects = fake
     @Provides @Singleton fun fakeMonitor(recorder: PreconditionRecorder): FakeReliabilityMonitor = FakeReliabilityMonitor(recorder)

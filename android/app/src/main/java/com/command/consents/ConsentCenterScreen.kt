@@ -50,7 +50,7 @@ import com.command.domain.model.ConsentOwner
 import com.command.domain.model.ConsentSource
 import com.command.domain.reliability.Fix
 import com.command.reliability.SystemLinks
-import com.example.R
+import com.command.R
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter

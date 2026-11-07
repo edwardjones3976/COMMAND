@@ -49,8 +49,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.data.ActivityRule
 import com.command.data.ProfileHandshake
 import com.command.data.RuleProblem
-import com.command.handshake.Question
-import com.example.R
+import com.command.R
+import com.command.ui.SafeQuestion
 
 object RulesTags {
     const val LIST = "rules_list"
@@ -142,7 +142,7 @@ private fun RuleList(rules: List<RuleLine>, actions: RulesActions, modifier: Mod
         }
     }
     deleting?.let { id ->
-        Question(
+        SafeQuestion(
             tag = RulesTags.DELETE_DIALOG,
             title = stringResource(R.string.rules_delete_title),
             message = stringResource(R.string.rules_delete_message),

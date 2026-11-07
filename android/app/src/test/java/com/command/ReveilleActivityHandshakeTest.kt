@@ -281,7 +281,10 @@ class ReveilleActivityHandshakeTest {
         open(o)
         waitForTag(ReveilleTags.HOLD)
         repeat(4) { n ->
-            compose.waitForIdle() // the screen for this try is drawn: a press on the one before it is about a try that is over
+            // The screen for this try is drawn: a press on the one before it is about a try that is over, and counts as nothing. The row of the
+            // try before commits before the screen is drawn again, and Compose cannot see the database, so its going idle says nothing about this.
+            // The hint is drawn with the new try, and a press takes it away again. It can only be waited for once there has been a press.
+            if (n > 0) waitForText("Released early. Hold the full 3 seconds.")
             press(400)
             compose.waitUntil(timeoutMillis = 30_000) { outcomes(o).count { it == ChallengeOutcome.FAILED } == n + 1 }
         }

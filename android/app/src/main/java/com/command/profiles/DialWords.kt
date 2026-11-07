@@ -10,7 +10,7 @@ import com.command.domain.dials.ImperativeTier
 import com.command.domain.dials.LockPolicy
 import com.command.domain.dials.RecoveryOption
 import com.command.handshake.chainWords
-import com.example.R
+import com.command.R
 
 /** The name of a dial. */
 @Composable

@@ -1,4 +1,4 @@
-package com.example
+package com.command
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -133,6 +133,21 @@ class PublicationSafetyTest {
     }
 
     @Test
+    fun `the app is com_command in its namespace and in CI, and the installed id does not move`() {
+        val gradle = File(root, "android/app/build.gradle.kts").readText()
+        assertTrue(gradle.contains("""namespace = "com.command""""))
+        assertTrue("an installed app keeps its data only under its own id", gradle.contains("""applicationId = "com.aistudio.command.vtxrpl""""))
+        assertTrue(
+            "the CI step must name this test where it now lives, or it runs nothing",
+            File(root, ".github/workflows/android.yml").readText().contains("--tests ${PublicationSafetyTest::class.java.name}"),
+        )
+        // The one place the old package may be named: what the previous version left behind, which has to be found by its old names.
+        val outsideNames = tracked.filter { it.startsWith("android/") && it.endsWith(".kt") && it != SELF && it != OLD_NAMES }
+            .filter { Regex("""\bcom\.example\.(R|BuildConfig|service)\b""").containsMatchIn(File(root, it).readText()) }
+        assertEquals(emptyList<String>(), outsideNames)
+    }
+
+    @Test
     fun `required project files exist and public docs carry a content security policy`() {
         listOf("README.md", "AGENTS.md", "LICENSE", ".gitignore", "docs/index.html", "docs/status.html", "docs/status.css")
             .forEach { rel ->
@@ -151,7 +166,8 @@ class PublicationSafetyTest {
     }
 
     private companion object {
-        const val SELF = "android/app/src/test/java/com/example/PublicationSafetyTest.kt"
+        const val SELF = "android/app/src/test/java/com/command/PublicationSafetyTest.kt"
+        const val OLD_NAMES = "android/data/src/main/kotlin/com/command/data/LegacyAlarmCanceller.kt"
         val DOCS_THAT_QUOTE_CLAIMS = setOf("docs/RECONSTRUCTION-DESIGN.html")
 
         // A raster image needs a provenance note here. The placeholder art of the original import went with the legacy UI.

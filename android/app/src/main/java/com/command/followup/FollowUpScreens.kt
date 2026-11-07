@@ -50,7 +50,7 @@ import com.command.domain.dials.SkipReasonCode
 import com.command.domain.occurrence.OccurrenceCommand
 import com.command.reveille.FrictionDialog
 import com.command.reveille.FrictionPrompt
-import com.example.R
+import com.command.R
 
 object FollowUpTags {
     const val STARTED = "followup_started"
