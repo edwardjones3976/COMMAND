@@ -18,6 +18,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -64,15 +65,24 @@ class AlarmVolumePolicy @Inject constructor(
         }
         // Written first, so that a ring that dies half-way leaves what is needed to undo it.
         settings.saveVolumeRestore(VolumeRestore(row.id, original = current, set = highest, atUtc = clock.nowMs()))
-        try {
-            manager.setStreamVolume(AudioManager.STREAM_ALARM, highest, 0)
-        } catch (e: RuntimeException) {
-            if (!isRefusal(e)) throw e
-            settings.clearVolumeRestore()
-            repository.logEvent(EventType.VOLUME_SET_REFUSED, row, EventSource.SERVICE, EventPayload.EMPTY)
-            return false
+        // Android 17's background-audio hardening can drop the change without an error (measured on CI's API 37 emulator: one ring in three),
+        // so the level is read back and the change tried a few times more while the ring sounds (amendment 39).
+        repeat(RAISE_TRIES) { attempt ->
+            try {
+                manager.setStreamVolume(AudioManager.STREAM_ALARM, highest, 0)
+            } catch (e: RuntimeException) {
+                if (!isRefusal(e)) throw e
+                settings.clearVolumeRestore()
+                repository.logEvent(EventType.VOLUME_SET_REFUSED, row, EventSource.SERVICE, EventPayload.EMPTY)
+                return false
+            }
+            if (manager.getStreamVolume(AudioManager.STREAM_ALARM) != current) return true
+            if (attempt < RAISE_TRIES - 1) delay(RAISE_RETRY_MS)
         }
-        true
+        // Never took: nothing was raised, so nothing is left to put back, and the log says the platform would not have it.
+        settings.clearVolumeRestore()
+        repository.logEvent(EventType.VOLUME_SET_REFUSED, row, EventSource.SERVICE, EventPayload.of("phase" to "raise", "wanted" to highest, "got" to current))
+        false
     }
 
     /** Puts the volume back after [occurrenceId]'s ring, unless the person has changed it since. */
@@ -259,6 +269,10 @@ class AlarmVolumePolicy @Inject constructor(
 
     private companion object {
         const val TAG = "AlarmVolumePolicy"
+
+        /** A ring's raise is tried this many times, this far apart, before it counts as refused: about two seconds into the ring at most. */
+        const val RAISE_TRIES = 5
+        const val RAISE_RETRY_MS = 500L
 
         /**
          * The platform saying no to a volume change: a SecurityException (Do Not Disturb can do that), or the IllegalStateException that Android

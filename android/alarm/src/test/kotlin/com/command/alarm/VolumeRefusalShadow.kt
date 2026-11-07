@@ -18,6 +18,10 @@ class VolumeRefusalShadow : ShadowAudioManager() {
         if (refuse) throw SecurityException("Not allowed to change Do Not Disturb state")
         // Android 17's background-audio hardening drops a volume change from outside a foreground service without an error (measured on API 37).
         if (ignore) return
+        if (ignoreNext > 0) {
+            ignoreNext--
+            return
+        }
         // ... and with `cmd audio set-hardening throw` it throws instead (measured on API 37: the BOOT reconcile then failed and was retried).
         if (hardeningThrows) throw IllegalStateException("AudioHardening volume control for api 100 ignored")
         broken?.let { throw it }
@@ -33,6 +37,10 @@ class VolumeRefusalShadow : ShadowAudioManager() {
 
         @JvmStatic
         var ignore = false
+
+        /** How many of the next calls are dropped without a word, before they go through again. */
+        @JvmStatic
+        var ignoreNext = 0
 
         @JvmStatic
         var hardeningThrows = false

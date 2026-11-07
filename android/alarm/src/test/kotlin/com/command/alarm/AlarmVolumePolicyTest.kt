@@ -60,6 +60,7 @@ class AlarmVolumePolicyTest {
         VolumeRefusalShadow.floor = 0
         VolumeRefusalShadow.ignore = false
         VolumeRefusalShadow.hardeningThrows = false
+        VolumeRefusalShadow.ignoreNext = 0
         hilt.inject()
         audio = ApplicationProvider.getApplicationContext<Context>().getSystemService(AudioManager::class.java)
         assertTrue("the alarm stream has room to be raised", loudest > 5)
@@ -72,6 +73,7 @@ class AlarmVolumePolicyTest {
         VolumeRefusalShadow.floor = 0
         VolumeRefusalShadow.ignore = false
         VolumeRefusalShadow.hardeningThrows = false
+        VolumeRefusalShadow.ignoreNext = 0
     }
 
     private fun armed(): OccurrenceRow = runBlocking {
@@ -293,6 +295,29 @@ class AlarmVolumePolicyTest {
         assertEquals(3, volume())
         assertNull(record())
         assertEquals(1, events(o, EventType.VOLUME_SET_REFUSED).size)
+    }
+
+    @Test
+    fun `a raise the platform drops once is tried again while the ring sounds, and then holds`() {
+        // Measured on CI's API 37 emulator with hardening enforced: the ring's raise was dropped without an error in one run of three.
+        allowed()
+        val o = armed()
+        VolumeRefusalShadow.ignoreNext = 1
+        assertTrue(runBlocking { policy.raiseFor(o) })
+        assertEquals(loudest, volume())
+        assertEquals(3, record()!!.original)
+        assertTrue(events(o, EventType.VOLUME_SET_REFUSED).isEmpty())
+    }
+
+    @Test
+    fun `a raise the platform keeps dropping is logged as refused and leaves nothing written down`() {
+        allowed()
+        val o = armed()
+        VolumeRefusalShadow.ignore = true
+        assertFalse(runBlocking { policy.raiseFor(o) })
+        assertEquals(3, volume())
+        assertNull("nothing was raised, so there is nothing to put back", record())
+        assertTrue(events(o, EventType.VOLUME_SET_REFUSED).single().payloadJson.contains("raise"))
     }
 
     @Test

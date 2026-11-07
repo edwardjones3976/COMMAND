@@ -435,6 +435,8 @@ hardening_run() { # hardening_run <enable|throw>
   adb shell am force-stop "$PKG"
   sleep 3
   local after_stop; after_stop="$(alarm_volume | cut -d' ' -f1)"
+  # The ring's half of the log is kept before the reconcile's half is read on its own.
+  timeout 60 adb logcat -d >"${LOG_DIR:-.}/logcat-case-$name-ring.txt"
   adb logcat -c
   # After a force-stop Android redelivers BOOT_COMPLETED when the process next starts, and that reconcile restores what a dead ring raised.
   adb shell am broadcast -a com.command.debug.CHECKIN_DUE -p "$PKG" -f 32 >/dev/null
