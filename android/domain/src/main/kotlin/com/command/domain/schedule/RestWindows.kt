@@ -21,8 +21,11 @@ object RestWindows {
     fun contains(windows: List<RestWindow>, atUtcMs: Long, zone: ZoneId): Boolean {
         if (windows.isEmpty()) return false
         val local = Instant.ofEpochMilli(atUtcMs).atZone(zone)
-        val day = local.dayOfWeek
-        val time = local.toLocalTime()
+        return containsLocal(windows, local.dayOfWeek, local.toLocalTime())
+    }
+
+    /** Whether [time] on [day], on the wall clock, falls inside any of the windows. A window that starts one evening also covers the next morning. */
+    fun containsLocal(windows: List<RestWindow>, day: DayOfWeek, time: LocalTime): Boolean {
         val yesterday = day.minus(1)
         return windows.any { w ->
             if (w.overnight) {

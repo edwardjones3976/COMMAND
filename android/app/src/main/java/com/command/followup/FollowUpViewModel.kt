@@ -14,6 +14,7 @@ import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.RecoveryChoice
 import com.command.domain.occurrence.SkipReason
+import com.command.reveille.FrictionAction
 import com.command.reveille.FrictionPrompt
 import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -147,13 +148,13 @@ class FollowUpViewModel @Inject constructor(
         }
     }
 
-    fun delay(minutes: Int) = withFriction { evidence -> OccurrenceCommand.Delay(minutes, evidence) }
-    fun skip() = withFriction { evidence -> OccurrenceCommand.Skip(SkipReason.USER, evidence) }
+    fun delay(minutes: Int) = withFriction(FrictionAction.DELAY) { evidence -> OccurrenceCommand.Delay(minutes, evidence) }
+    fun skip() = withFriction(FrictionAction.SKIP) { evidence -> OccurrenceCommand.Skip(SkipReason.USER, evidence) }
 
     // --- the recovery menu --------------------------------------------------------------------------------------
 
     fun restart() = command(OccurrenceCommand.AcceptRecovery(RecoveryChoice.RESET))
-    fun rescheduleTo(minutes: Int) = withFriction { evidence -> OccurrenceCommand.RescheduleRecovery(minutes, evidence) }
+    fun rescheduleTo(minutes: Int) = withFriction(FrictionAction.DELAY) { evidence -> OccurrenceCommand.RescheduleRecovery(minutes, evidence) }
 
     /** Not now: the occurrence is left unconfirmed, which is a record of what happened and not a mark against anyone. */
     fun notNow() = command(OccurrenceCommand.NoResponse)
@@ -179,12 +180,12 @@ class FollowUpViewModel @Inject constructor(
     }
 
     /** Tries the command bare; if the mission is fixed and wants more, asks, then tries again with what the person gave. */
-    private fun withFriction(build: (FrictionEvidence) -> OccurrenceCommand) {
+    private fun withFriction(action: FrictionAction, build: (FrictionEvidence) -> OccurrenceCommand) {
         val id = occurrenceId ?: return
         fun attempt(evidence: FrictionEvidence) {
             guardedScope.launch {
                 when (val result = repository.apply(id, build(evidence), EventSource.USER)) {
-                    is ApplyResult.NeedsFriction -> _friction.value = FrictionPrompt(result.required) { given -> attempt(given) }
+                    is ApplyResult.NeedsFriction -> _friction.value = FrictionPrompt(result.required, action) { given -> attempt(given) }
                     else -> _friction.value = null
                 }
             }

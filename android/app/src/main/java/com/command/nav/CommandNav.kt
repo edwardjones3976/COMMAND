@@ -31,6 +31,7 @@ import com.command.profiles.ActivityRulesRoute
 import com.command.profiles.DialsRoute
 import com.command.profiles.ProfilesRoute
 import com.command.profiles.VoiceRoute
+import com.command.rest.RestWindowsRoute
 import com.command.reliability.ReliabilityRoute
 import com.command.schedule.ScheduleRoute
 import com.command.settings.SettingsRoute
@@ -50,6 +51,7 @@ object Routes {
     const val CALENDARS = "calendars"
     const val PROFILES = "profiles"
     const val RULES = "activity_rules"
+    const val REST_WINDOWS = "rest_windows"
     const val ARG_ID = "id"
     private const val HANDSHAKE_EDITOR = "handshake"
     private const val DIALS = "dials"
@@ -162,6 +164,7 @@ private fun CommandNavHost(
                 onOpenHandshakes = { navController.navigate(Routes.HANDSHAKES) },
                 onOpenCalendars = { navController.navigate(Routes.CALENDARS) },
                 onOpenProfiles = { navController.navigate(Routes.PROFILES) },
+                onOpenRestWindows = { navController.navigate(Routes.REST_WINDOWS) },
             )
         }
         composable(Routes.CALENDARS) {
@@ -202,6 +205,7 @@ private fun CommandNavHost(
             VoiceRoute(profileId = entry.arguments?.getString(Routes.ARG_ID).orEmpty(), onBack = { navController.popBackStack() })
         }
         composable(Routes.RULES) { ActivityRulesRoute(onBack = { navController.popBackStack() }) }
+        composable(Routes.REST_WINDOWS) { RestWindowsRoute(onBack = { navController.popBackStack() }) }
         composable(Routes.DATA) { DataRoute(onBack = { navController.popBackStack() }) }
         composable(
             Routes.DETAIL_PATTERN,

@@ -275,6 +275,20 @@ class ReveilleViewModelTest {
     }
 
     @Test
+    fun `the question knows whether it is about a delay or a skip`() {
+        val o = ringing(flexibility = Flexibility.RIGID, lock = LockPolicy.CONFIRM)
+        vm.show(o.id)
+        awaitUi("firing") { it is ReveilleUiState.Firing }
+        vm.delay(10)
+        awaitUntil(message = "the delay's prompt") { vm.friction.value != null }
+        assertEquals(FrictionAction.DELAY, vm.friction.value!!.action)
+        vm.dismissFriction()
+        vm.skip()
+        awaitUntil(message = "the skip's prompt") { vm.friction.value != null }
+        assertEquals(FrictionAction.SKIP, vm.friction.value!!.action)
+    }
+
+    @Test
     fun `dismissing the friction prompt changes nothing`() {
         val o = ringing(flexibility = Flexibility.RIGID, lock = LockPolicy.CONFIRM)
         vm.show(o.id)

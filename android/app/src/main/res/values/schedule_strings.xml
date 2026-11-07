@@ -25,6 +25,7 @@
 
     <string name="schedule_state_set">Set</string>
     <string name="schedule_state_set_inexact">Set, may be late</string>
+    <string name="schedule_state_refused">Will not ring. Android refused this alarm.</string>
     <string name="schedule_state_ringing">Ringing now</string>
     <string name="schedule_state_acknowledged">Acknowledged</string>
     <string name="schedule_state_started">Started</string>
