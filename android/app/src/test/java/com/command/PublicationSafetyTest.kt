@@ -116,6 +116,15 @@ class PublicationSafetyTest {
             ),
             found,
         )
+        // The debug starters can arm rings and give the volume consent, and the owner's phone runs debug builds: only the shell (adb), which holds
+        // DUMP, may call them; an app installed beside COMMAND cannot get DUMP (amendment 39, from Codex's review of PR #60).
+        val guarded = Regex("""android:permission\s*=\s*"android\.permission\.DUMP"""")
+        for (path in listOf("android/app/src/debug/AndroidManifest.xml", "android/app/src/noexact/AndroidManifest.xml")) {
+            val open = component.findAll(File(root, path).readText()).map { it.value }
+                .filter { exportedTrue.containsMatchIn(it) && !guarded.containsMatchIn(it) }
+                .map { nameOf.find(it)?.groupValues?.get(1) ?: "?" }.toList()
+            assertEquals("$path: exported debug receivers without android.permission.DUMP", emptyList<String>(), open)
+        }
     }
 
     @Test

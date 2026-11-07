@@ -7,12 +7,12 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:node="replace" />
 
     <application>
-        <receiver android:name="com.command.debug.DebugRingReceiver" android:exported="true">
+        <receiver android:name="com.command.debug.DebugRingReceiver" android:exported="true" android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="com.command.debug.RING" />
             </intent-filter>
         </receiver>
-        <receiver android:name="com.command.debug.DebugCheckInReceiver" android:exported="true">
+        <receiver android:name="com.command.debug.DebugCheckInReceiver" android:exported="true" android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="com.command.debug.CHECKIN_DUE" />
                 <action android:name="com.command.debug.CHECKIN_ARM" />
