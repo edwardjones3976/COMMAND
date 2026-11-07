@@ -119,11 +119,13 @@ fun ScheduleScreen(
 ) {
     Scaffold(
         floatingActionButton = {
+            val addLabel = stringResource(R.string.schedule_add)
             ExtendedFloatingActionButton(
                 onClick = onAdd,
-                modifier = Modifier.testTag(ScheduleTags.ADD),
+                // Material3 clears the semantics of the text slot, so a screen reader would find this button unnamed (DC1, amendment 38).
+                modifier = Modifier.testTag(ScheduleTags.ADD).semantics { contentDescription = addLabel },
                 icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text(stringResource(R.string.schedule_add), style = MaterialTheme.typography.labelLarge) },
+                text = { Text(addLabel, style = MaterialTheme.typography.labelLarge) },
             )
         },
     ) { padding ->
