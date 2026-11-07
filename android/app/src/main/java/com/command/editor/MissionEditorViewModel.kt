@@ -6,6 +6,7 @@ import com.command.data.DraftProblem
 import com.command.data.MissionDraft
 import com.command.data.MissionRepository
 import com.command.data.ProfileRepository
+import com.command.data.RestWindowRepository
 import com.command.data.SaveResult
 import com.command.data.ScheduleDraft
 import com.command.data.TestRingSpec
@@ -13,6 +14,8 @@ import com.command.domain.dials.Flexibility
 import com.command.domain.model.MissionSource
 import com.command.domain.schedule.Frequency
 import com.command.domain.schedule.RRule
+import com.command.domain.schedule.RestWindow
+import com.command.domain.schedule.RestWindows
 import com.command.domain.time.Clock
 import com.command.nav.Routes
 import com.command.ui.guardedScope
@@ -61,7 +64,20 @@ data class EditorState(
     val imported: Boolean = false,
     /** How many of this mission's coming alarms overlap something else. */
     val conflicts: Int = 0,
-)
+    /** The person's rest windows, which the warning below is worked out from. */
+    val restWindows: List<RestWindow> = emptyList(),
+) {
+    /** The days on which this alarm falls inside a rest window. It still rings on them. */
+    val restWarningDays: Set<DayOfWeek>
+        get() {
+            val ringing = when (repeat) {
+                RepeatKind.ONCE -> setOf(date.dayOfWeek)
+                RepeatKind.DAILY -> DayOfWeek.values().toSet()
+                RepeatKind.WEEKLY -> days
+            }
+            return ringing.filterTo(LinkedHashSet()) { RestWindows.containsLocal(restWindows, it, time) }
+        }
+}
 
 /** Creates a mission or edits one (the id arrives as the navigation argument). */
 @HiltViewModel
@@ -69,6 +85,7 @@ class MissionEditorViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val missions: MissionRepository,
     private val profiles: ProfileRepository,
+    private val restWindows: RestWindowRepository,
     private val clock: Clock,
 ) : ViewModel() {
 
@@ -80,6 +97,9 @@ class MissionEditorViewModel @Inject constructor(
     init {
         guardedScope.launch {
             profiles.observe().collect { all -> _state.update { s -> s.copy(profiles = all.map { ProfileChoice(it.id, it.name) }) } }
+        }
+        guardedScope.launch {
+            restWindows.observeWindows().collect { all -> _state.update { it.copy(restWindows = all) } }
         }
         if (missionId == null) {
             _state.update { it.copy(loading = false) }

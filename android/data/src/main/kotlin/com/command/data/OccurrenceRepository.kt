@@ -54,7 +54,6 @@ import com.command.domain.handshake.Attempt
 import com.command.domain.voice.SpeechLevel
 import com.command.domain.voice.SpeechVoice
 import com.command.domain.occurrence.TransitionResult
-import com.command.domain.schedule.RestWindow
 import com.command.domain.schedule.RestWindows
 import com.command.domain.time.Clock
 import kotlinx.coroutines.CancellationException
@@ -712,12 +711,7 @@ class OccurrenceRepository @Inject constructor(
     private suspend fun restWindowEndsAt(nowMs: Long): Long? {
         val rows: List<RestWindowRow> = db.restWindows().all()
         if (rows.isEmpty()) return null
-        val windows = rows.mapNotNull { row ->
-            runCatching {
-                RestWindow(DayOfWeek.of(row.weekday), LocalTime.parse(row.startLocal), LocalTime.parse(row.endLocal), row.kind)
-            }.getOrNull()
-        }
-        return RestWindows.endOf(windows, nowMs, clock.zone())
+        return RestWindows.endOf(rows.mapNotNull { it.toWindow() }, nowMs, clock.zone())
     }
 
     private suspend fun log(type: EventType, occ: OccurrenceRow?, source: EventSource, payload: EventPayload = EventPayload.EMPTY) {

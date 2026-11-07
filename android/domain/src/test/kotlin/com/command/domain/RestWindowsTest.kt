@@ -82,4 +82,19 @@ class RestWindowsTest {
         // The titles grants are refinements: dropping one never drops the wider grant.
         assertEquals(listOf(ConsentKey.GEMINI_TEXT_TITLES), ConsentCascade.withDependents(ConsentKey.GEMINI_TEXT_TITLES))
     }
+
+    @Test
+    fun `the wall clock gives the same answers as an instant, at both edges and across midnight`() {
+        val monday = DayOfWeek.MONDAY
+        val tuesday = DayOfWeek.TUESDAY
+        assertTrue(RestWindows.containsLocal(listOf(lunch), monday, LocalTime.of(12, 0)))
+        assertTrue(RestWindows.containsLocal(listOf(lunch), monday, LocalTime.of(12, 59)))
+        assertFalse("the end is not inside", RestWindows.containsLocal(listOf(lunch), monday, LocalTime.of(13, 0)))
+        assertFalse(RestWindows.containsLocal(listOf(lunch), tuesday, LocalTime.of(12, 30)))
+        assertTrue(RestWindows.containsLocal(listOf(sleep), monday, LocalTime.of(22, 0)))
+        assertTrue("early Tuesday is still Monday night", RestWindows.containsLocal(listOf(sleep), tuesday, LocalTime.of(5, 59)))
+        assertFalse(RestWindows.containsLocal(listOf(sleep), tuesday, LocalTime.of(6, 0)))
+        assertFalse("early Monday is Sunday night, which has no window", RestWindows.containsLocal(listOf(sleep), monday, LocalTime.of(5, 0)))
+        assertFalse(RestWindows.containsLocal(emptyList(), monday, LocalTime.of(5, 0)))
+    }
 }

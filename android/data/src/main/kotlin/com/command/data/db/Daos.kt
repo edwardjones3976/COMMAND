@@ -384,6 +384,12 @@ interface RestWindowDao {
 
     @Query("SELECT * FROM rest_windows")
     suspend fun all(): List<RestWindowRow>
+
+    @Query("SELECT * FROM rest_windows")
+    fun observeAll(): Flow<List<RestWindowRow>>
+
+    @Query("DELETE FROM rest_windows WHERE id IN (:ids)")
+    suspend fun delete(ids: List<Long>): Int
 }
 
 @Dao

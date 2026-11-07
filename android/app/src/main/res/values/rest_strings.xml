@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_link_rest_windows">Rest windows</string>
+    <string name="rest_title">Rest windows</string>
+    <string name="rest_form_title">Rest window</string>
+    <string name="rest_back">Back</string>
+    <string name="rest_intro">A rest window is time that is yours. Follow-up questions wait until it ends. An alarm you set still rings.</string>
+    <string name="rest_empty">No rest windows yet.</string>
+    <string name="rest_add">Add a rest window</string>
+    <string name="rest_hours">%1$s to %2$s</string>
+    <string name="rest_hours_overnight">%1$s to %2$s the next day</string>
+    <string name="rest_line">%1$s, %2$s, %3$s</string>
+    <string name="rest_kind_sleep">Sleep</string>
+    <string name="rest_kind_leisure">Leisure</string>
+    <string name="rest_kind_driving">Driving</string>
+    <string name="rest_edit">Change</string>
+    <string name="rest_edit_named">Change %1$s</string>
+    <string name="rest_delete">Delete</string>
+    <string name="rest_delete_named">Delete %1$s</string>
+    <string name="rest_delete_title">Delete this rest window?</string>
+    <string name="rest_delete_message">Follow-up questions will stop waiting for it.</string>
+    <string name="rest_delete_keep">Keep it</string>
+    <string name="rest_delete_confirm">Delete it</string>
+    <string name="rest_field_days">Days</string>
+    <string name="rest_field_start">Starts at %1$s</string>
+    <string name="rest_field_end">Ends at %1$s</string>
+    <string name="rest_ends_next_day">It ends the next day.</string>
+    <string name="rest_field_kind">What it is for</string>
+    <string name="rest_save">Save</string>
+    <string name="rest_problem_days">Choose at least one day.</string>
+    <string name="rest_problem_times">The start and the end cannot be the same time.</string>
+    <string name="rest_problem_failed">That could not be saved. Try again.</string>
+    <string name="editor_rest_warning">This alarm falls inside a rest window on %1$s. It still rings. Only the follow-up questions wait until the window ends.</string>
+    <string name="reveille_friction_delay_confirm_title">Put off a fixed commitment?</string>
+    <string name="reveille_friction_delay_confirm_body">This one is set as fixed. Confirm that you want to put it off.</string>
+    <string name="reveille_friction_delay_reason_title">Why put it off?</string>
+    <string name="reveille_friction_delay_recovery_title">Before you put it off</string>
+    <string name="reveille_friction_delay_recovery_body">This is a fixed commitment. Starting a smaller step is still possible. Put it off anyway?</string>
+    <string name="reveille_friction_delay_confirm">Put it off anyway</string>
+</resources>

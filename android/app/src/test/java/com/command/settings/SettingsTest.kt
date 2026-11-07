@@ -179,6 +179,7 @@ class SettingsScreenTest {
         val pauses = ArrayList<Int>()
         var endPause = 0
         var handshakes = 0
+        var restWindows = 0
     }
 
     private val today = LocalDate.of(2026, 11, 2)
@@ -200,6 +201,7 @@ class SettingsScreenTest {
                     onOpenConsents = { taps.consents++ },
                     onOpenData = { taps.data++ },
                     onOpenHandshakes = { taps.handshakes++ },
+                    onOpenRestWindows = { taps.restWindows++ },
                     version = "4.0",
                     onPause = { taps.pauses += it },
                     onEndPause = { taps.endPause++ },
@@ -256,6 +258,13 @@ class SettingsScreenTest {
         assertEquals(1, taps.history)
         assertEquals(1, taps.reliability)
         assertEquals(1, taps.consents)
+    }
+
+    @Test
+    fun `the rest windows are one tap away`() {
+        val taps = show()
+        compose.onNodeWithTag(SettingsTags.LINK_REST_WINDOWS).performClick()
+        assertEquals(1, taps.restWindows)
     }
 
     @Test

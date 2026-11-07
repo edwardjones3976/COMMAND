@@ -148,7 +148,7 @@ fun FollowUpScreen(
         }
     }
     if (friction != null) {
-        FrictionDialog(friction.required, reasons, actions.onFrictionConfirm, actions.onFrictionDismiss)
+        FrictionDialog(friction.required, friction.action, reasons, actions.onFrictionConfirm, actions.onFrictionDismiss)
     }
 }
 

@@ -5,6 +5,8 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
@@ -317,6 +319,44 @@ class ReveilleScreenTest {
         show(ReveilleUiState.Direction("x", "y", 5), r, FrictionPrompt(LockPolicy.RECOVERY_OFFER) { })
         compose.onNodeWithText("Before you skip").assertIsDisplayed()
         compose.onNodeWithText("Skip anyway").performClick()
+        assertEquals(listOf<FrictionEvidence>(FrictionEvidence.RecoveryDeclined), r.frictionGiven)
+    }
+
+    /** The screen behind the dialog has a Skip button of its own, so this looks in the dialog only. */
+    private fun assertDialogDoesNotSaySkip() {
+        compose.onNodeWithText("Keep going").assertIsDisplayed() // the dialog is there to look in
+        assertEquals(0, compose.onAllNodes(hasText("Skip", substring = true, ignoreCase = true) and hasAnyAncestor(isDialog())).fetchSemanticsNodes().size)
+    }
+
+    @Test
+    fun `a delay asks to confirm in its own words, with no skip in them`() {
+        val r = Recorder()
+        show(ReveilleUiState.Direction("x", "y", 5), r, FrictionPrompt(LockPolicy.CONFIRM, FrictionAction.DELAY) { })
+        compose.onNodeWithText("Put off a fixed commitment?").assertIsDisplayed()
+        compose.onNodeWithText("Confirm that you want to put it off", substring = true).assertIsDisplayed()
+        assertDialogDoesNotSaySkip()
+        compose.onNodeWithText("Put it off anyway").performClick()
+        assertEquals(listOf<FrictionEvidence>(FrictionEvidence.Confirmed), r.frictionGiven)
+    }
+
+    @Test
+    fun `a delay asks for a reason in its own words`() {
+        val r = Recorder()
+        show(ReveilleUiState.Direction("x", "y", 5), r, FrictionPrompt(LockPolicy.REASON, FrictionAction.DELAY) { })
+        compose.onNodeWithText("Why put it off?").assertIsDisplayed()
+        assertDialogDoesNotSaySkip()
+        compose.onNodeWithText("Need rest").performClick()
+        assertEquals(listOf<FrictionEvidence>(FrictionEvidence.Reason(SkipReasonCode.NEED_REST)), r.frictionGiven)
+    }
+
+    @Test
+    fun `a delay's recovery offer is in its own words too, and reports the decline`() {
+        val r = Recorder()
+        show(ReveilleUiState.Direction("x", "y", 5), r, FrictionPrompt(LockPolicy.RECOVERY_OFFER, FrictionAction.DELAY) { })
+        compose.onNodeWithText("Before you put it off").assertIsDisplayed()
+        compose.onNodeWithText("Put it off anyway?", substring = true).assertIsDisplayed()
+        assertDialogDoesNotSaySkip()
+        compose.onNodeWithText("Put it off anyway").performClick()
         assertEquals(listOf<FrictionEvidence>(FrictionEvidence.RecoveryDeclined), r.frictionGiven)
     }
 

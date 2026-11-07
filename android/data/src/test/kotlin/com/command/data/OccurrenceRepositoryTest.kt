@@ -675,6 +675,19 @@ class OccurrenceRepositoryTest {
     }
 
     @Test
+    fun `a window saved in the editor holds the question back, and an alarm inside it still rings`() = run {
+        RestWindowRepository(f.db).save(emptyList(), setOf(java.time.DayOfWeek.MONDAY), java.time.LocalTime.of(8, 0), java.time.LocalTime.of(10, 0), com.command.domain.model.RestKind.LEISURE)
+        val o = scheduled() // a minute from now, inside the window
+        apply(o, OccurrenceCommand.Arm(ArmMode.EXACT))
+        assertTrue("armed although it falls inside the window", f.scheduler.armed.isNotEmpty())
+        assertTrue(apply(o, OccurrenceCommand.Fire) is ApplyResult.Applied)
+        assertEquals(OccurrenceState.FIRING, state(o))
+        apply(o, OccurrenceCommand.Acknowledge()); apply(o, OccurrenceCommand.StartGuidance)
+        val firstQuestion = f.scheduler.armed.values.single { it.kind == AlarmKind.CHECK_IN }
+        assertEquals(f.t0 + 60 * 60_000L + 10 * 60_000L, firstQuestion.atUtcMs)
+    }
+
+    @Test
     fun `every way out of a ring tells the service to stop the sound`() = run {
         val o = scheduled()
         apply(o, OccurrenceCommand.Arm(ArmMode.EXACT)); apply(o, OccurrenceCommand.Fire)

@@ -14,6 +14,7 @@ import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.OccurrenceState
+import com.command.reveille.FrictionAction
 import com.command.reveille.FrictionPrompt
 import com.command.testing.android.FakeAlarmModule
 import com.command.testing.android.awaitUntil
@@ -300,6 +301,26 @@ class FollowUpViewModelTest {
         vm.confirmFriction(FrictionEvidence.Reason(SkipReasonCode.NOT_RELEVANT_TODAY))
         awaitUntil(message = "skipped") { stateOf(o) == OccurrenceState.SKIPPED }
         assertNull(vm.friction.value)
+    }
+
+    @Test
+    fun `the question knows what it is asking about, a delay, a later time or a skip`() {
+        val o = guided(flexibility = Flexibility.RIGID, lock = LockPolicy.CONFIRM)
+        vm.show(o.id)
+        awaitUi("ask") { it is FollowUpUiState.Ask }
+        fun asked(what: () -> Unit): FrictionAction {
+            vm.dismissFriction()
+            what()
+            awaitUntil(message = "friction") { vm.friction.value != null }
+            return vm.friction.value!!.action
+        }
+        assertEquals(FrictionAction.DELAY, asked { vm.delay(10) })
+        assertEquals(FrictionAction.SKIP, asked { vm.skip() })
+        vm.dismissFriction()
+        vm.needReset()
+        awaitUi("menu") { it is FollowUpUiState.Recovery }
+        assertEquals("a later time is putting it off", FrictionAction.DELAY, asked { vm.rescheduleTo(30) })
+        vm.dismissFriction()
     }
 
     @Test

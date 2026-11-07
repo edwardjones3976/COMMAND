@@ -171,7 +171,7 @@ fun ReveilleContent(
     // alarm rings they carry a silence of their own, so that nothing stands between the person and the quiet.
     if (escapeOpen) EscapeSheet(actions, onDismiss = { openedFor = null })
     if (friction != null) {
-        FrictionDialog(friction.required, reasons, onFrictionConfirm, onFrictionDismiss, onSilence = if (ringing != null) actions.onSilence else null)
+        FrictionDialog(friction.required, friction.action, reasons, onFrictionConfirm, onFrictionDismiss, onSilence = if (ringing != null) actions.onSilence else null)
     }
 }
 
@@ -631,15 +631,17 @@ private fun Closed(message: String, onClose: () -> Unit, title: String? = null, 
 @Composable
 internal fun FrictionDialog(
     required: LockPolicy,
+    action: FrictionAction,
     reasons: List<SkipReasonCode>,
     onConfirm: (FrictionEvidence) -> Unit,
     onDismiss: () -> Unit,
     onSilence: (() -> Unit)? = null,
 ) {
+    val delay = action == FrictionAction.DELAY
     val title = when (required) {
-        LockPolicy.REASON -> stringResource(R.string.reveille_friction_reason_title)
-        LockPolicy.RECOVERY_OFFER -> stringResource(R.string.reveille_friction_recovery_title)
-        else -> stringResource(R.string.reveille_friction_confirm_title)
+        LockPolicy.REASON -> stringResource(if (delay) R.string.reveille_friction_delay_reason_title else R.string.reveille_friction_reason_title)
+        LockPolicy.RECOVERY_OFFER -> stringResource(if (delay) R.string.reveille_friction_delay_recovery_title else R.string.reveille_friction_recovery_title)
+        else -> stringResource(if (delay) R.string.reveille_friction_delay_confirm_title else R.string.reveille_friction_confirm_title)
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -653,15 +655,15 @@ internal fun FrictionDialog(
                             Text(reasonLabel(reason))
                         }
                     }
-                    LockPolicy.RECOVERY_OFFER -> Text(stringResource(R.string.reveille_friction_recovery_body))
-                    else -> Text(stringResource(R.string.reveille_friction_confirm_body))
+                    LockPolicy.RECOVERY_OFFER -> Text(stringResource(if (delay) R.string.reveille_friction_delay_recovery_body else R.string.reveille_friction_recovery_body))
+                    else -> Text(stringResource(if (delay) R.string.reveille_friction_delay_confirm_body else R.string.reveille_friction_confirm_body))
                 }
             }
         },
         confirmButton = {
             if (required != LockPolicy.REASON) {
                 TextButton(onClick = { onConfirm(if (required == LockPolicy.RECOVERY_OFFER) FrictionEvidence.RecoveryDeclined else FrictionEvidence.Confirmed) }) {
-                    Text(stringResource(R.string.reveille_friction_confirm))
+                    Text(stringResource(if (delay) R.string.reveille_friction_delay_confirm else R.string.reveille_friction_confirm))
                 }
             }
         },
