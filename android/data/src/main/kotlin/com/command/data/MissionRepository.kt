@@ -186,6 +186,15 @@ class MissionRepository @Inject constructor(
         return db.occurrences().forMission(missionId).count { it.id in conflicted }
     }
 
+    /** When this mission's alarms still to come will ring, on the phone's clock. A calendar series is one mission with one start and many occurrences, so only these say all of its days. */
+    suspend fun comingAlarmsOf(missionId: String): List<LocalDateTime> {
+        val now = clock.nowMs()
+        val zone = clock.zone()
+        return db.occurrences().forMission(missionId)
+            .filter { it.scheduledAtUtc >= now && (it.state == OccurrenceState.SCHEDULED || it.state == OccurrenceState.ARMED) }
+            .map { java.time.Instant.ofEpochMilli(it.scheduledAtUtc).atZone(zone).toLocalDateTime() }
+    }
+
     // --- writes -------------------------------------------------------------------------------------------------
 
     suspend fun save(draft: MissionDraft): SaveResult = writes.withLock {

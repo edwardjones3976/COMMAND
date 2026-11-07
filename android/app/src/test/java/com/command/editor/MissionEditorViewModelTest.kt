@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.command.data.DraftProblem
 import com.command.data.MissionDraft
 import com.command.data.MissionRepository
+import com.command.data.OccurrenceRepository
 import com.command.data.ProfileRepository
 import com.command.data.RestWindowRepository
 import com.command.data.SaveResult
@@ -11,12 +12,15 @@ import com.command.data.ScheduleDraft
 import com.command.data.db.ActivityProfileRow
 import com.command.data.db.CommandDb
 import com.command.domain.dials.Flexibility
+import com.command.domain.model.MissionSource
 import com.command.domain.model.RestKind
+import com.command.domain.model.StartKind
 import com.command.domain.occurrence.OccurrenceState
 import com.command.nav.Routes
 import com.command.testing.FakeAlarmScheduler
 import com.command.testing.FakeClock
 import com.command.testing.android.awaitUntil
+import com.command.testing.android.testMission
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import dagger.hilt.android.testing.HiltTestApplication
@@ -45,6 +49,7 @@ class MissionEditorViewModelTest {
     @get:Rule val hilt = HiltAndroidRule(this)
 
     @Inject lateinit var missions: MissionRepository
+    @Inject lateinit var occurrences: OccurrenceRepository
     @Inject lateinit var db: CommandDb
     @Inject lateinit var clock: FakeClock
     @Inject lateinit var scheduler: FakeAlarmScheduler
@@ -329,5 +334,21 @@ class MissionEditorViewModelTest {
         vm.save()
         vm.await("saved") { s -> s.finished }
         assertTrue(scheduler.armed.isNotEmpty())
+    }
+
+    @Test
+    fun `a calendar series is warned about on a later day, though the mission holds only its first start`() {
+        val monday = clock.nowMs() + 60 * 60_000L
+        val mission = testMission(title = "Series").copy(source = MissionSource.DEVICE_CALENDAR, startKind = StartKind.ONE_OFF, startAtUtc = monday)
+        runBlocking {
+            db.missions().insert(mission)
+            occurrences.createOccurrence(mission.id, monday, "UTC")
+            occurrences.createOccurrence(mission.id, monday + 24 * 60 * 60_000L, "UTC")
+            val at = ready(mission.id).state.value.comingAlarms.last()
+            assertEquals(DayOfWeek.TUESDAY, at.dayOfWeek)
+            RestWindowRepository(db).save(emptyList(), setOf(DayOfWeek.TUESDAY), at.toLocalTime(), at.toLocalTime().plusMinutes(30), RestKind.LEISURE)
+        }
+        val vm = ready(mission.id)
+        vm.await("the warning") { s -> s.restWarningDays == setOf(DayOfWeek.TUESDAY) }
     }
 }

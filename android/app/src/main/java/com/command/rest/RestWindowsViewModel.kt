@@ -69,8 +69,9 @@ class RestWindowsViewModel @Inject constructor(private val windows: RestWindowRe
 
     fun setKind(kind: RestKind) = change { it.copy(kind = kind) }
 
+    /** Not while a save is on its way: the list would be back showing rows that save is about to replace, and a change or a delete of them would come to nothing. */
     fun cancel() {
-        draft.value = null
+        draft.update { now -> if (now?.saving == true) now else null }
     }
 
     fun save() {

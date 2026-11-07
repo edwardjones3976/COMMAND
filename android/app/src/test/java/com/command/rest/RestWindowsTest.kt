@@ -261,6 +261,28 @@ class RestWindowsTest {
     }
 
     @Test
+    fun `the form stays until its save is done, so the old line never comes back to be changed or deleted`() {
+        stored(setOf(MONDAY))
+        val vm = show()
+        val old = firstId()
+        val gate = CompletableDeferred<Unit>()
+        vm.beforeWrite = { gate.await() }
+        waitFor(RestWindowsTags.edit(old))
+        tap(RestWindowsTags.edit(old))
+        waitFor(RestWindowsTags.FORM)
+        tap(RestWindowsTags.day(TUESDAY))
+        vm.save()
+        vm.cancel()
+        compose.waitForIdle()
+        assertTrue("still on the form", exists(RestWindowsTags.FORM))
+        assertFalse(exists(RestWindowsTags.delete(old)))
+
+        gate.complete(Unit)
+        waitGone(RestWindowsTags.FORM)
+        assertEquals(listOf(1, 2), rows().map { it.weekday })
+    }
+
+    @Test
     fun `leaving the form keeps what is stored`() {
         stored()
         val vm = show()

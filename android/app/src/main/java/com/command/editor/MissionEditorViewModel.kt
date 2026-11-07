@@ -66,10 +66,15 @@ data class EditorState(
     val conflicts: Int = 0,
     /** The person's rest windows, which the warning below is worked out from. */
     val restWindows: List<RestWindow> = emptyList(),
+    /** A calendar copy's alarms still to come. It has no rule to read, and its one start is only the first of them. */
+    val comingAlarms: List<LocalDateTime> = emptyList(),
 ) {
     /** The days on which this alarm falls inside a rest window. It still rings on them. */
     val restWarningDays: Set<DayOfWeek>
         get() {
+            if (imported) {
+                return comingAlarms.filter { RestWindows.containsLocal(restWindows, it.dayOfWeek, it.toLocalTime()) }.mapTo(LinkedHashSet()) { it.dayOfWeek }
+            }
             val ringing = when (repeat) {
                 RepeatKind.ONCE -> setOf(date.dayOfWeek)
                 RepeatKind.DAILY -> DayOfWeek.values().toSet()
@@ -108,9 +113,10 @@ class MissionEditorViewModel @Inject constructor(
                 val mission = missions.get(missionId)
                 val draft = mission?.let { missions.draftOf(it) }
                 val conflicts = missions.conflictsOf(missionId)
+                val coming = missions.comingAlarmsOf(missionId)
                 _state.update {
                     if (draft == null) it.copy(loading = false, notFound = true)
-                    else fill(it, draft).copy(imported = mission.source != MissionSource.MANUAL, conflicts = conflicts)
+                    else fill(it, draft).copy(imported = mission.source != MissionSource.MANUAL, conflicts = conflicts, comingAlarms = coming)
                 }
             }
         }

@@ -18,7 +18,7 @@
     <string name="rest_delete">Delete</string>
     <string name="rest_delete_named">Delete %1$s</string>
     <string name="rest_delete_title">Delete this rest window?</string>
-    <string name="rest_delete_message">Follow-up questions will stop waiting for it.</string>
+    <string name="rest_delete_message">New follow-up questions will not wait for it. A question already put off keeps its time.</string>
     <string name="rest_delete_keep">Keep it</string>
     <string name="rest_delete_confirm">Delete it</string>
     <string name="rest_field_days">Days</string>
