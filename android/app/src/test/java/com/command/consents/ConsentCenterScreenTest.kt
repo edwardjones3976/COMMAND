@@ -98,6 +98,23 @@ class ConsentCenterScreenTest {
     }
 
     @Test
+    fun nfcRowRendersAndToggles() {
+        val flips = ArrayList<Pair<ConsentKey, Boolean>>()
+        show(ConsentCenterUiState.Ready(listOf(item(ConsentKey.NFC, emptyList()))), onToggle = { key, on -> flips += key to on })
+        compose.onNodeWithText("Touch a tag").assertIsDisplayed()
+        compose.onNodeWithText("Read the id of a tag you touch to the phone", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Only a fingerprint of each id is kept.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Never reads tags in the background", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Withdrawing it keeps your registered tags", substring = true).assertIsDisplayed()
+        compose.onNodeWithTag(ConsentTags.switch(ConsentKey.NFC)).assertIsOff()
+        compose.onNodeWithTag(ConsentTags.switch(ConsentKey.NFC)).assertContentDescriptionEquals("Touch a tag")
+        compose.onNodeWithTag(ConsentTags.settings(ConsentKey.NFC)).assertDoesNotExist()
+
+        compose.onNodeWithTag(ConsentTags.switch(ConsentKey.NFC)).performClick()
+        assertEquals(listOf(ConsentKey.NFC to true), flips)
+    }
+
+    @Test
     fun `before anything has been recorded the state is not claimed`() {
         show(everyConsent())
         compose.onNodeWithTag(ConsentTags.state(ConsentKey.NOTIFICATIONS)).assertIsDisplayed()

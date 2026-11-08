@@ -62,6 +62,7 @@ class ConsentCenterViewModelTest {
     fun `every consent that exists in this version is listed in order, Android's are unknown until the phone is asked, and the app's are off`() {
         awaitUntil(message = "ready") { ready() != null }
         assertEquals(ConsentBoundaries.all.map { it.key }, ready()!!.items.map { it.boundary.key })
+        assertTrue("the tag consent is listed, after the camera's", ready()!!.items.map { it.boundary.key }.takeLast(2) == listOf(ConsentKey.CAMERA_QR, ConsentKey.NFC))
         for (item in ready()!!.items) {
             if (item.boundary.owner == ConsentOwner.PLATFORM) {
                 assertNull("nothing recorded yet for ${item.boundary.key}", item.granted)

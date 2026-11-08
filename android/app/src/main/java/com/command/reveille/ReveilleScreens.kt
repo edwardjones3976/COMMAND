@@ -66,6 +66,7 @@ import kotlinx.coroutines.launch
 import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.LockPolicy
 import com.command.domain.dials.SkipReasonCode
+import com.command.domain.handshake.TagRead
 import com.command.domain.handshake.TryId
 import com.command.R
 
@@ -96,6 +97,10 @@ object ReveilleTags {
     const val QR_CANNOT_SCAN = "reveille_qr_cannot_scan"
     const val QR_INSTRUCTION = "reveille_qr_instruction"
     const val QR_VIEWFINDER = "reveille_qr_viewfinder"
+    const val NFC_AREA = "reveille_nfc_area"
+    const val NFC_WORDS = "reveille_nfc_words"
+    const val NFC_INSTRUCTION = "reveille_nfc_instruction"
+    const val NFC_CANNOT_TOUCH = "reveille_nfc_cannot_touch"
     fun alternative(position: Int) = "reveille_alternative_$position"
     const val HANDSHAKE_PROMPT = "reveille_handshake_prompt"
     const val UNSPOKEN_LINE = "reveille_unspoken_line"
@@ -126,8 +131,12 @@ class ReveilleActions(
     val onSwitch: (Int) -> Unit = {},
     /** The camera read a code while the try [TryId] was on screen. */
     val onQrScanned: (TryId, String) -> Unit = { _, _ -> },
-    /** The camera cannot be used now. */
-    val onQrUnavailable: () -> Unit = {},
+    /** The camera cannot be used now, or the person cannot scan, while the try [TryId] was on screen. */
+    val onQrUnavailable: (TryId) -> Unit = {},
+    /** A tag was touched while the try [TryId] was on screen. Only its fingerprint is carried. */
+    val onNfcRead: (TryId, TagRead) -> Unit = { _, _ -> },
+    /** The tag reader cannot be used now, or the person cannot touch a tag, while the try [TryId] was on screen. */
+    val onNfcUnavailable: (TryId) -> Unit = {},
     val onSilence: () -> Unit,
     val onResume: () -> Unit,
     val onStarted: () -> Unit,
@@ -267,6 +276,7 @@ private fun Firing(state: ReveilleUiState.Firing, actions: ReveilleActions) {
                 when (val challenge = state.challenge) {
                     is Challenge.Hold -> HoldArea(state, challenge, actions)
                     is Challenge.Qr -> QrArea(state, challenge, actions)
+                    is Challenge.Nfc -> NfcArea(state, challenge, actions)
                     else -> Column(
                         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -286,6 +296,7 @@ private fun Firing(state: ReveilleUiState.Firing, actions: ReveilleActions) {
                             Challenge.OutOfTries -> OutOfTriesNote()
                             is Challenge.Hold -> Unit
                             is Challenge.Qr -> Unit
+                            is Challenge.Nfc -> Unit
                         }
                         Alternatives(state.alternatives, actions.onSwitch)
                     }
@@ -432,16 +443,47 @@ private fun QrArea(state: ReveilleUiState.Firing, qr: Challenge.Qr, actions: Rev
         scanner.Viewfinder(
             modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(16.dp)).testTag(ReveilleTags.QR_VIEWFINDER).semantics { contentDescription = description },
             onDecoded = { actions.onQrScanned(qr.tryId, it) },
-            onError = actions.onQrUnavailable,
+            onError = { actions.onQrUnavailable(qr.tryId) },
         )
         // A camera can open and still never show a code it can read (the camera privacy switch, black frames, a code it cannot focus on), and
         // then it reports nothing: the person can always say so, and is asked the fallback instead. It is not a try, and it is out of anything
         // that scrolls, under the viewfinder; Safety silence is apart from it and is never covered or replaced by it.
         OutlinedButton(
-            onClick = actions.onQrUnavailable,
+            onClick = { actions.onQrUnavailable(qr.tryId) },
             modifier = Modifier.padding(top = 8.dp).heightIn(min = 48.dp).testTag(ReveilleTags.QR_CANNOT_SCAN),
         ) {
             Text(stringResource(R.string.handshake_qr_cannot_scan), style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+/**
+ * A tag to touch: the words (the title, what to do, a wrong tag said so, the other ways) scroll in the room that is left, and under them,
+ * out of anything that scrolls, "Cannot touch a tag? Type a phrase instead", which is always in view. The reader is [LocalNfcReader]'s and
+ * draws nothing: it listens only while this is on screen and the activity is resumed. A tag it reads is reported with the try on screen; a
+ * reader that cannot be used makes the same report as the button, and the view model asks the fallback instead. No clock runs here, so
+ * waiting is never a try. Safety silence is apart from all of this and is never covered or replaced by it.
+ */
+@Composable
+private fun NfcArea(state: ReveilleUiState.Firing, nfc: Challenge.Nfc, actions: ReveilleActions) {
+    Column(modifier = Modifier.fillMaxSize().testTag(ReveilleTags.NFC_AREA), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(modifier = Modifier.weight(1f).fillMaxWidth().testTag(ReveilleTags.NFC_WORDS).verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                TitleBlock(state)
+                NfcWords(nfc)
+                Alternatives(state.alternatives, actions.onSwitch)
+            }
+        }
+        // Not keyed by the try: the reader stays on across tries, and its callbacks are always the latest (they carry the try on screen).
+        LocalNfcReader.current.Listen(
+            onTag = { actions.onNfcRead(nfc.tryId, it) },
+            onUnavailable = { actions.onNfcUnavailable(nfc.tryId) },
+        )
+        OutlinedButton(
+            onClick = { actions.onNfcUnavailable(nfc.tryId) },
+            modifier = Modifier.padding(top = 8.dp).heightIn(min = 48.dp).testTag(ReveilleTags.NFC_CANNOT_TOUCH),
+        ) {
+            Text(stringResource(R.string.nfc_cannot_touch), style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
         }
     }
 }

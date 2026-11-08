@@ -169,6 +169,31 @@ internal fun QrWords(challenge: Challenge.Qr) {
     }
 }
 
+/**
+ * What a tag to touch asks: the title, and either how to hold the tag or, after a tag that was not a registered one, that said so with the
+ * tries left. The words are a polite live region, so a screen reader announces a wrong tag as it happens.
+ */
+@Composable
+internal fun NfcWords(challenge: Challenge.Nfc) {
+    Text(
+        stringResource(R.string.nfc_title),
+        style = MaterialTheme.typography.titleLarge,
+        color = MaterialTheme.colorScheme.primary,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    )
+    if (challenge.mistaken) {
+        Mistaken(pluralStringResource(R.plurals.nfc_wrong, challenge.triesLeft, challenge.triesLeft))
+    } else {
+        Text(
+            stringResource(R.string.nfc_instruction),
+            style = MaterialTheme.typography.bodyLarge,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }.testTag(ReveilleTags.NFC_INSTRUCTION),
+        )
+    }
+}
+
 /** Every way is used up: said plainly, with nothing to press but the silence that is always there and the way out that Back opens. */
 @Composable
 internal fun OutOfTriesNote() {

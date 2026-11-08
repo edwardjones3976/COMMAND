@@ -18,12 +18,14 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.command.calendar.CalendarSourcesRoute
 import com.command.consents.ConsentCenterRoute
+import com.command.domain.dials.HandshakeMode
 import com.command.detail.OccurrenceDetailRoute
 import com.command.editor.MissionEditorRoute
 import com.command.followup.FollowUpRoute
 import com.command.handshake.HandshakeEditorRoute
 import com.command.handshake.HandshakeProfilesRoute
 import com.command.handshake.RegisterTokenRoute
+import com.command.handshake.RegisterTokenViewModel
 import com.command.history.HistoryRoute
 import com.command.onboarding.FirstMissionRoute
 import com.command.onboarding.PermissionsRoute
@@ -54,8 +56,25 @@ object Routes {
     const val RULES = "activity_rules"
     const val REST_WINDOWS = "rest_windows"
 
-    /** The codes that a handshake step which scans a code checks against. */
-    const val REGISTER_TOKEN = "register-token"
+    private const val REGISTER_TOKEN_BASE = "register-token"
+
+    /**
+     * The codes that a handshake step which scans a code checks against (mode QR, the default), or the tags that a step which touches a tag
+     * checks against (mode NFC). The mode is read by [com.command.handshake.RegisterTokenViewModel]; anything else is the codes.
+     */
+    const val REGISTER_TOKEN = "$REGISTER_TOKEN_BASE?${RegisterTokenViewModel.ARG_MODE}={${RegisterTokenViewModel.ARG_MODE}}"
+
+    /** The route with no mode, as the profiles list and any older caller have it: the codes. */
+    const val REGISTER_TOKEN_BARE = REGISTER_TOKEN_BASE
+
+    fun registerToken(mode: HandshakeMode): String = "$REGISTER_TOKEN_BASE?${RegisterTokenViewModel.ARG_MODE}=${mode.name}"
+
+    val registerTokenArguments = listOf(
+        navArgument(RegisterTokenViewModel.ARG_MODE) {
+            type = NavType.StringType
+            defaultValue = HandshakeMode.QR.name
+        },
+    )
     const val ARG_ID = "id"
     private const val HANDSHAKE_EDITOR = "handshake"
     private const val DIALS = "dials"
@@ -178,10 +197,10 @@ private fun CommandNavHost(
             HandshakeProfilesRoute(
                 onBack = { navController.popBackStack() },
                 onEdit = { navController.navigate(Routes.handshakeEditor(it)) },
-                onOpenCodes = { navController.navigate(Routes.REGISTER_TOKEN) },
+                onOpenCodes = { navController.navigate(Routes.REGISTER_TOKEN_BARE) },
             )
         }
-        composable(Routes.REGISTER_TOKEN) { RegisterTokenRoute(onBack = { navController.popBackStack() }) }
+        composable(Routes.REGISTER_TOKEN, arguments = Routes.registerTokenArguments) { RegisterTokenRoute(onBack = { navController.popBackStack() }) }
         composable(
             Routes.HANDSHAKE_EDITOR_PATTERN,
             arguments = listOf(navArgument(Routes.ARG_ID) { type = NavType.StringType }),
@@ -189,7 +208,7 @@ private fun CommandNavHost(
             HandshakeEditorRoute(
                 profileId = entry.arguments?.getString(Routes.ARG_ID).orEmpty(),
                 onBack = { navController.popBackStack() },
-                onOpenCodes = { navController.navigate(Routes.REGISTER_TOKEN) },
+                onOpenCodes = { mode -> navController.navigate(Routes.registerToken(mode)) },
             )
         }
         composable(Routes.PROFILES) {

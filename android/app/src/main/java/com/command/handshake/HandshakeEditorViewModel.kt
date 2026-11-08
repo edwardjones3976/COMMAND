@@ -295,7 +295,7 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
 
         /**
          * The ways a new step can start as, in the order they are offered: every way that is built, and those that need something of the
-         * phone (a code to scan) last, so that a new step asks for nothing the phone may not have.
+         * phone (a code to scan, a tag to touch) last, so that a new step asks for nothing the phone may not have.
          */
         val BUILT_WAYS = HandshakeMode.values().filter { it.built }.sortedBy { it.needsDevice }
         const val HOLD_START = ChainState.DEFAULT_HOLD_SECONDS

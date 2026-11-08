@@ -22,6 +22,8 @@ import com.command.domain.dials.Flexibility
 import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.HandshakeMode
 import com.command.domain.dials.Personality
+import com.command.domain.handshake.TagId
+import com.command.domain.handshake.TokenHash
 import com.command.domain.model.ChallengeOutcome
 import com.command.domain.model.CheckInAnswer
 import com.command.domain.model.ConsentKey
@@ -236,15 +238,34 @@ class ExportRoundTripTest {
 
         assertTrue(e.text("README.txt").startsWith("COMMAND data export"))
         assertTrue(
-            "the README says what it holds of the registered codes, and what it never holds",
+            "the README says what it holds of the registered codes and tags, and what it never holds",
             e.text("README.txt").contains(
-                "This file contains the titles of your missions and what you did with each alarm, and the names of the codes you registered, " +
-                    "each with a fingerprint of it, never the code itself. It stays wherever you put it.\n",
+                "This file contains the titles of your missions and what you did with each alarm, and the names of the codes and tags you " +
+                    "registered, each with a fingerprint of it, never the code or the tag id itself. It stays wherever you put it.\n",
             ),
         )
         assertEquals(0, e.summary.historyRows)
         assertEquals("\uFEFFoccurrence_id,mission_id,mission,category,mission_deleted,scheduled_at_utc,scheduled_local,zone,state,outcome\r\n", e.text("history.csv"))
         assertTrue(e.lines("occurrences").isEmpty())
+    }
+
+    @Test
+    fun nfcRowExportsHashOnly() = run {
+        val idHex = "04a1b2c3d4e5f6"
+        val hash = TokenHash.ofTag(TagId(byteArrayOf(0x04, 0xa1.toByte(), 0xb2.toByte(), 0xc3.toByte(), 0xd4.toByte(), 0xe5.toByte(), 0xf6.toByte())))
+        assertTrue(TokenRepository(f.db, f.clock).registerTag("Key ring", hash) is RegisterResult.Saved)
+        val e = export()
+
+        val line = e.lines("handshake_tokens").single()
+        val row = JSONObject(line)
+        assertEquals("NFC", row.getString("mode"))
+        assertEquals("Key ring", row.getString("label"))
+        assertEquals(hash, row.getString("hash"))
+        assertEquals(setOf("id", "mode", "label", "hash", "created_at"), row.keys().asSequence().toSet())
+        // The id never reaches the repository (it is given only the fingerprint), so DataExporter cannot write it whatever it does: what this
+        // scan can catch is a fingerprint that is not one (a hash that carries the id's hex), which would put the id into every export.
+        for ((name, text) in e.files.mapValues { String(it.value, Charsets.UTF_8) }) assertFalse("$name holds the tag id", text.contains(idHex))
+        assertTrue("the scan can find what is in the export", e.files.values.any { String(it, Charsets.UTF_8).contains("Key ring") })
     }
 
     // --- the history -----------------------------------------------------------------------------------------------

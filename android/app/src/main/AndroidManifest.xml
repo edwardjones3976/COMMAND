@@ -18,6 +18,14 @@
     <!-- The CAMERA permission also implies a required autofocus; a fixed-focus camera, or none, must not keep the app from a phone. -->
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
+    <!--
+        M13b: read a registered NFC tag (reader mode, foreground only, inside the ring or the tags screen). Normal permission: granted at
+        install, nothing asked at run time. Not required, so phones without NFC still install. No intent-filter for a discovered tag: a tag
+        never starts the app (see NfcManifestTest).
+    -->
+    <uses-permission android:name="android.permission.NFC" />
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />

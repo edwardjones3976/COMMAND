@@ -4,14 +4,21 @@ import android.Manifest
 import android.app.Application
 import android.content.Intent
 import android.content.pm.PackageManager
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
+import android.nfc.NfcAdapter
 import com.command.data.AppSettings
+import com.command.data.ConsentStore
+import com.command.domain.model.ConsentKey
+import org.robolectric.shadow.api.Shadow
+import org.robolectric.shadows.ShadowNfcAdapter
 import com.command.data.ProfileRepository
 import com.command.domain.dials.HandshakeMode
 import com.command.handshake.HandshakeTags
@@ -48,6 +55,7 @@ class RegisterTokenNavigationTest {
 
     @Inject lateinit var settings: AppSettings
     @Inject lateinit var profiles: ProfileRepository
+    @Inject lateinit var consents: ConsentStore
 
     private var controller: ActivityController<MainActivity>? = null
 
@@ -123,6 +131,66 @@ class RegisterTokenNavigationTest {
         waitFor(HandshakeTags.codes(0))
         compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.QR)).assertIsSelected()
         assertNull("nothing was saved on the way", runBlocking { profiles.get("builtin_steady")!!.own })
+    }
+
+    // --- the tags (M13b): the same screen, with mode=NFC --------------------------------------------------------------
+
+    @Test
+    fun profilesCodesStillQr() {
+        open()
+        tap(ScheduleTags.LINK_SETTINGS)
+        tap(SettingsTags.LINK_HANDSHAKES)
+        tap(HandshakeTags.CODES)
+        waitFor(RegisterTokenTags.LIST)
+        compose.onNodeWithText("Registered codes").assertIsDisplayed()
+        compose.onNodeWithText("Registered tags").assertDoesNotExist()
+        compose.onNodeWithText("A code is any QR code you print or already own", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun editorNfcOpensTags() {
+        val controller = open()
+        tap(ScheduleTags.LINK_SETTINGS)
+        tap(SettingsTags.LINK_HANDSHAKES)
+        tap(HandshakeTags.edit("builtin_steady"))
+        waitFor(HandshakeTags.EDITOR)
+        tap(HandshakeTags.mode(0, HandshakeMode.NFC))
+
+        tap(HandshakeTags.tags(0))
+        waitFor(RegisterTokenTags.LIST)
+        compose.onNodeWithText("Registered tags").assertIsDisplayed()
+        compose.onNodeWithText("Name a tag, then touch it to the phone twice", substring = true).assertIsDisplayed()
+        assertTrue("there is no code to make for a tag", !exists(RegisterTokenTags.MAKE))
+
+        back(controller)
+        waitFor(HandshakeTags.EDITOR)
+        compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.NFC)).assertIsSelected()
+        assertNull("nothing was saved on the way", runBlocking { profiles.get("builtin_steady")!!.own })
+    }
+
+    @Test
+    fun `turning the tag consent on asks Android for nothing`() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(app.packageManager).setSystemFeature(PackageManager.FEATURE_CAMERA_ANY, true)
+        shadowOf(app.packageManager).setSystemFeature(PackageManager.FEATURE_NFC, true)
+        ShadowNfcAdapter.setNfcHardwareExists(true)
+        Shadow.extract<ShadowNfcAdapter>(NfcAdapter.getDefaultAdapter(app)).setEnabled(true)
+        val controller = open()
+        tap(ScheduleTags.LINK_SETTINGS)
+        tap(SettingsTags.LINK_HANDSHAKES)
+        tap(HandshakeTags.edit("builtin_steady"))
+        tap(HandshakeTags.mode(0, HandshakeMode.NFC))
+        tap(HandshakeTags.tags(0))
+        waitFor(RegisterTokenTags.CONSENT)
+        compose.waitForIdle()
+        assertNull("opening the tags asks Android for nothing", shadowOf(controller.get()).lastRequestedPermission)
+
+        compose.onNodeWithTag(RegisterTokenTags.CONSENT).performClick()
+
+        compose.waitUntil(timeoutMillis = 30_000) { runBlocking { consents.isGranted(ConsentKey.NFC) } }
+        compose.waitForIdle()
+        assertNull("the tag consent asks Android for nothing: NFC is granted at install", shadowOf(controller.get()).lastRequestedPermission)
+        assertTrue("and the camera consent is untouched", !runBlocking { consents.isGranted(ConsentKey.CAMERA_QR) })
     }
 
     @Test

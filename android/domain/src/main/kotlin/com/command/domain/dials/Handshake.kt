@@ -16,27 +16,30 @@ enum class HandshakeMode {
 
     /**
      * Whether this challenge is built: its rules are in :domain and the app has a screen that asks for it. Hold, the confirmation sequence,
-     * typing, two-step and QR are; NFC and voice are not yet (each needs a tag reader or a microphone, and its own consent, spec section 4).
-     * A chain that names one that is not built is run with the mode [offered] in its place, and the record says so. This is a static rule:
-     * it never depends on the phone, so what is saved reads the same on every phone.
+     * typing, two-step, QR and NFC (M13b) are; voice is not yet (it needs a microphone and its own consent, spec section 4). A chain that
+     * names one that is not built is run with the mode [offered] in its place, and the record says so. This is a static rule: it never
+     * depends on the phone, so what is saved reads the same on every phone. Whether the phone can do a built mode right now is
+     * [needsDevice] and [com.command.domain.handshake.HandshakeCapability], not this.
      */
     val built: Boolean
         get() = when (this) {
-            HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP, QR -> true
-            NFC, VOICE -> false
+            HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP, QR, NFC -> true
+            VOICE -> false
         }
 
     /**
-     * Whether this challenge needs something of the phone that it may not have right now (a camera, a consent, a permission, a registered
-     * code). A ring asks for such a mode only when [com.command.domain.handshake.HandshakeCapability] says the phone can do it; otherwise the
-     * step runs its fallback and a row says so. QR, for now (NFC and voice join it when they are built).
+     * Whether this challenge needs something of the phone that it may not have right now (a camera or a tag reader, a consent, a permission,
+     * a registered code or tag). A ring asks for such a mode only when [com.command.domain.handshake.HandshakeCapability] says the phone can do
+     * it; otherwise the step runs its fallback and a row says so. QR and NFC. Voice is not built, so it needs nothing of the phone yet: it is
+     * offered as typing.
      */
     val needsDevice: Boolean
-        get() = this == QR
+        get() = this == QR || this == NFC
 
     /**
      * Whether this challenge is not yet signed off on hardware: built or not, it has not been checked on a phone. The screens use it for the
-     * label; it changes nothing the engine does. QR, NFC and voice.
+     * label; it changes nothing the engine does. QR, NFC and voice. NFC is built (M13b) but stays planned until the owner's hardware sign-off
+     * (DC2); this changes only then.
      */
     val planned: Boolean
         get() = when (this) {

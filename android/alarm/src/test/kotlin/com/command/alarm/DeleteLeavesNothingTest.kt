@@ -25,6 +25,7 @@ import com.command.data.NoOpConsentRevocationListener
 import com.command.data.OccurrenceRepository
 import com.command.data.VolumeRestore
 import com.command.data.db.CommandDb
+import com.command.data.db.HandshakeTokenRow
 import com.command.data.db.OccurrenceRow
 import com.command.domain.alarm.AlarmKind
 import com.command.domain.alarm.AlarmRequest
@@ -33,6 +34,7 @@ import com.command.domain.alarm.CheckInPrompt
 import com.command.domain.alarm.RingController
 import com.command.domain.alarm.WindowRoller
 import com.command.domain.dials.CheckInSchedule
+import com.command.domain.dials.HandshakeMode
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.MissReason
@@ -312,6 +314,29 @@ class DeleteLeavesNothingTest {
             for (suffix in listOf("", "-wal", "-shm", "-journal")) assertFalse("$name$suffix is still there", File(context.getDatabasePath(name).path + suffix).exists())
         }
         assertEquals(emptyList<String>(), context.databaseList().filter { it.startsWith("command.db") || it.startsWith("project_command.db") })
+    }
+
+    @Test
+    fun `no registered code or tag fingerprint is left`() {
+        populate()
+        runBlocking {
+            db.handshakeTokens().insert(HandshakeTokenRow("qr-1", HandshakeMode.QR, "Kitchen", "a".repeat(64), t0))
+            db.handshakeTokens().insert(HandshakeTokenRow("nfc-1", HandshakeMode.NFC, "Bathroom", "b".repeat(64), t0))
+            assertEquals(1, db.handshakeTokens().count(HandshakeMode.QR))
+            assertEquals(1, db.handshakeTokens().count(HandshakeMode.NFC))
+        }
+
+        erase()
+
+        val after = CommandDb.open(context)
+        try {
+            runBlocking {
+                assertEquals("a code is still registered", 0, after.handshakeTokens().count(HandshakeMode.QR))
+                assertEquals("a tag is still registered", 0, after.handshakeTokens().count(HandshakeMode.NFC))
+            }
+        } finally {
+            after.close()
+        }
     }
 
     @Test

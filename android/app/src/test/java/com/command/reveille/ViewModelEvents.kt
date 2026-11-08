@@ -1,5 +1,6 @@
 package com.command.reveille
 
+import com.command.domain.handshake.TagRead
 import com.command.domain.handshake.TryId
 
 /*
@@ -32,4 +33,8 @@ internal fun ReveilleViewModel.switchTo(position: Int) = switchTo(ring(), positi
 
 internal fun ReveilleViewModel.qrScanned(at: TryId, payload: String) = qrScanned(ring(), at, payload)
 
-internal fun ReveilleViewModel.qrUnavailable() = qrUnavailable(ring())
+internal fun ReveilleViewModel.qrUnavailable(at: TryId) = qrUnavailable(ring(), at)
+
+internal fun ReveilleViewModel.nfcRead(at: TryId, read: TagRead) = nfcRead(ring(), at, read)
+
+internal fun ReveilleViewModel.nfcUnavailable(at: TryId) = nfcUnavailable(ring(), at)

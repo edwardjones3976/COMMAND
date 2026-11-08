@@ -20,5 +20,7 @@ object ConsentBoundaries {
         // Withdrawing it withdraws nothing else and keeps the registered codes: they are hashes only, the person can delete them, and
         // deleting everything removes them.
         ConsentBoundary(ConsentKey.CAMERA_QR, ConsentOwner.APP),
+        // Reading a touched tag's id during a ring or while registering a tag. Withdrawing it keeps the tag fingerprints, as with CAMERA_QR.
+        ConsentBoundary(ConsentKey.NFC, ConsentOwner.APP),
     )
 }

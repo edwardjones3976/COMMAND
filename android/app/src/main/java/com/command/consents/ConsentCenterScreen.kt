@@ -214,6 +214,7 @@ private fun consentTitle(key: ConsentKey): Int = when (key) {
     ConsentKey.VOLUME_CONTROL -> R.string.consent_volume_title
     ConsentKey.CALENDAR_READ -> R.string.consent_calendar_title
     ConsentKey.CAMERA_QR -> R.string.consent_camera_qr_title
+    ConsentKey.NFC -> R.string.consent_nfc_title
     else -> error("$key has no words yet: a consent is added to the list together with what it says")
 }
 
@@ -225,6 +226,7 @@ private fun consentAllows(key: ConsentKey): Int = when (key) {
     ConsentKey.VOLUME_CONTROL -> R.string.consent_volume_allows
     ConsentKey.CALENDAR_READ -> R.string.consent_calendar_allows
     ConsentKey.CAMERA_QR -> R.string.consent_camera_qr_allows
+    ConsentKey.NFC -> R.string.consent_nfc_allows
     else -> error("$key has no words yet: a consent is added to the list together with what it says")
 }
 
@@ -234,5 +236,6 @@ private fun consentNot(key: ConsentKey): Int? = when (key) {
     ConsentKey.VOLUME_CONTROL -> R.string.consent_volume_not
     ConsentKey.CALENDAR_READ -> R.string.consent_calendar_not
     ConsentKey.CAMERA_QR -> R.string.consent_camera_qr_not
+    ConsentKey.NFC -> R.string.consent_nfc_not
     else -> null
 }

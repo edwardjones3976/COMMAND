@@ -46,10 +46,10 @@ class ChainValidationTest {
         assertEquals(emptyList<ChainIssue>(), issues(*modes.take(ChainLimits.MAX_STEPS).map { step(it) }.toTypedArray()))
         // Five different ways are one step too many.
         assertEquals(listOf(ChainIssue(ChainProblem.TOO_MANY_STEPS)), issues(*modes.map { step(it) }.toTypedArray()))
-        // And a fifth step that is also a way that is there already (NFC, not built, runs as typing): both are told.
+        // And a fifth step that is also a way that is there already (voice, not built, runs as typing): both are told.
         assertEquals(
             listOf(ChainIssue(ChainProblem.TOO_MANY_STEPS), ChainIssue(ChainProblem.SAME_WAY_TWICE, 4)),
-            issues(*(modes.take(4) + HandshakeMode.NFC).map { step(it) }.toTypedArray()),
+            issues(*(modes.take(4) + HandshakeMode.VOICE).map { step(it) }.toTypedArray()),
         )
     }
 
@@ -153,20 +153,40 @@ class ChainValidationTest {
 
     @Test
     fun `a way that is not built is the same way as the one that takes its place, because that is what the ring asks for`() {
-        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.NFC), step(HandshakeMode.TYPING)))
-        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.TYPING), step(HandshakeMode.NFC)))
-        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.NFC), step(HandshakeMode.VOICE)))
-        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 2)), issues(step(HandshakeMode.NFC), step(HandshakeMode.HOLD), step(HandshakeMode.VOICE)))
-        assertEquals("a way that is not built beside a way that is not typing is two different asks", emptyList<ChainIssue>(), issues(step(HandshakeMode.NFC), step(HandshakeMode.HOLD)))
+        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.VOICE), step(HandshakeMode.TYPING)))
+        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.TYPING), step(HandshakeMode.VOICE)))
+        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.VOICE), step(HandshakeMode.VOICE)))
+        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 2)), issues(step(HandshakeMode.VOICE), step(HandshakeMode.HOLD), step(HandshakeMode.TYPING)))
+        assertEquals("a way that is not built beside a way that is not typing is two different asks", emptyList<ChainIssue>(), issues(step(HandshakeMode.VOICE), step(HandshakeMode.HOLD)))
+    }
+
+    @Test
+    fun nfcPlusTypingValid() {
+        // M13b: NFC is built, so it and typing are two ways, as QR and typing are. Nothing saved before can become invalid by this:
+        // NFC beside typing could not be saved until now.
+        assertEquals(emptyList<ChainIssue>(), issues(step(HandshakeMode.NFC), step(HandshakeMode.TYPING)))
+        assertEquals(emptyList<ChainIssue>(), issues(step(HandshakeMode.TYPING), step(HandshakeMode.NFC)))
+        assertEquals(emptyList<ChainIssue>(), issues(step(HandshakeMode.QR), step(HandshakeMode.NFC), step(HandshakeMode.TYPING)))
+        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.NFC), step(HandshakeMode.NFC)))
+    }
+
+    @Test
+    fun nfcPlusVoiceIsTwoWays() {
+        // The design expected NFC beside voice to stay SAME_WAY_TWICE; the rule compares HandshakeMode.offered, and NFC is now offered as
+        // itself while voice is still offered as typing, so the two are two ways (as QR beside voice already was). NFC beside voice beside
+        // typing still asks for typing twice.
+        assertEquals(emptyList<ChainIssue>(), issues(step(HandshakeMode.NFC), step(HandshakeMode.VOICE)))
+        assertEquals(emptyList<ChainIssue>(), issues(step(HandshakeMode.QR), step(HandshakeMode.VOICE)))
+        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 2)), issues(step(HandshakeMode.NFC), step(HandshakeMode.VOICE), step(HandshakeMode.TYPING)))
     }
 
     @Test
     fun `QR is built, so it and typing are two ways, whatever the phone can do, because what is saved never depends on the phone`() {
         assertEquals(emptyList<ChainIssue>(), issues(step(HandshakeMode.QR), step(HandshakeMode.TYPING)))
         assertEquals(emptyList<ChainIssue>(), issues(step(HandshakeMode.TYPING), step(HandshakeMode.QR)))
-        assertEquals("QR beside a way that is not built is two ways too", emptyList<ChainIssue>(), issues(step(HandshakeMode.QR), step(HandshakeMode.NFC)))
+        assertEquals("QR beside a way that is not built is two ways too", emptyList<ChainIssue>(), issues(step(HandshakeMode.QR), step(HandshakeMode.VOICE)))
         assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.QR), step(HandshakeMode.QR)))
-        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 2)), issues(step(HandshakeMode.QR), step(HandshakeMode.TYPING), step(HandshakeMode.NFC)))
+        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 2)), issues(step(HandshakeMode.QR), step(HandshakeMode.TYPING), step(HandshakeMode.VOICE)))
     }
 
     @Test

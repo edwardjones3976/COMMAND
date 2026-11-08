@@ -45,6 +45,8 @@
     <string name="handshake_mode_unverified">%1$s (not yet checked on a phone)</string>
     <string name="handshake_qr_needs">Needs the camera, the camera consent and a registered code; without them this step asks you to type a phrase.</string>
     <string name="handshake_registered_codes">Registered codes</string>
+    <string name="handshake_nfc_needs">Needs the tag consent, NFC turned on, and at least one registered tag. Some phones read tags only when unlocked. Otherwise this step asks for a typed phrase.</string>
+    <string name="handshake_tags_button">Registered tags</string>
     <string name="handshake_mode_used_in_step">Used in step %1$d</string>
     <!-- %1$s is the name of the way the alarm asks for in its place. -->
     <string name="handshake_planned_runs_as">This way is not built yet. For now the alarm asks for this instead: %1$s.</string>

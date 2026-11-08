@@ -105,6 +105,29 @@ class PermissionsTest(unittest.TestCase):
         self.write_receipt(receipt(*ALL, note_text="INTERNET is used to fetch voices."))
         self.assertEqual(1, self.check()[0])
 
+    def write_nfc_manifest(self):
+        # M13b: the app asks for NFC and declares the hardware not required; a uses-feature is not a permission.
+        with open(self.manifest, "w", encoding="utf-8") as f:
+            f.write(MANIFEST.replace(
+                '<application>',
+                '<uses-permission android:name="android.permission.NFC" />\n'
+                '    <uses-feature android:name="android.hardware.nfc" android:required="false" />\n'
+                '    <application>'))
+
+    def test_nfc_in_the_manifest_and_the_receipt_passes(self):
+        self.write_nfc_manifest()
+        self.assertEqual(sorted(ALL + ("android.permission.NFC",)), perms.requested(self.manifest))
+        self.write_receipt(receipt(*ALL, "android.permission.NFC"))
+        self.assertEqual(0, self.check()[0])
+
+    def test_nfc_in_the_manifest_but_missing_from_the_receipt_fails_and_is_named(self):
+        self.write_nfc_manifest()
+        self.write_receipt(receipt(*ALL))
+        code, text = self.check()
+        self.assertEqual(1, code)
+        self.assertIn("android.permission.NFC", text)
+        self.assertNotIn("android.hardware.nfc", text)
+
     def test_a_receipt_without_a_list_fails(self):
         self.write_receipt('<html lang="en"><body></body></html>')
         self.assertEqual(1, self.check()[0])

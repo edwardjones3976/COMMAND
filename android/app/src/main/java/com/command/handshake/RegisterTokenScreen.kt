@@ -2,7 +2,9 @@ package com.command.handshake
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -77,8 +79,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.command.R
 import com.command.data.Token
 import com.command.data.TokenRepository
+import com.command.domain.dials.HandshakeMode
+import com.command.domain.handshake.TagRead
 import com.command.domain.reliability.Fix
 import com.command.reliability.SystemLinks
+import com.command.reveille.LocalNfcReader
 import com.command.reveille.LocalQrScanner
 import com.command.ui.SafeQuestion
 import java.util.concurrent.atomic.AtomicBoolean
@@ -87,8 +92,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 enum class CameraAccess { NONE, NOT_ASKED, REFUSED, GRANTED }
 
 /**
- * Everything the screen of the registered codes can ask for, so it can be tested without a view model. [onRegister] and [onRename] put the
- * last answer away at once, as [RegisterTokenViewModel] does: the screen keeps the typed name, or the rename field, until the next answer.
+ * Everything the screen of the registered codes (or tags) can ask for, so it can be tested without a view model. [onRegister] and [onRename]
+ * put the last answer away at once, as [RegisterTokenViewModel] does: the screen keeps the typed name, or the rename field, until the next
+ * answer. The tag actions are used only on the tags screen: [onTagRead] hands on one touch (as its fingerprint only), [onCancelTag] forgets a
+ * first touch, [onTagReaderOff] says the reader stopped, and [onOpenNfcSettings] opens Android's NFC settings.
  */
 class RegisterTokenActions(
     val onBack: () -> Unit,
@@ -102,6 +109,10 @@ class RegisterTokenActions(
     val onMakeCode: () -> Unit,
     val onCloseMadeCode: () -> Unit,
     val onDismissOutcome: () -> Unit,
+    val onTagRead: (label: String, read: TagRead) -> Unit = { _, _ -> },
+    val onCancelTag: () -> Unit = {},
+    val onTagReaderOff: () -> Unit = {},
+    val onOpenNfcSettings: () -> Unit = {},
 )
 
 object RegisterTokenTags {
@@ -128,6 +139,14 @@ object RegisterTokenTags {
     const val DELETE_DIALOG = "codes_delete_dialog"
     const val DELETE_KEEP = "codes_delete_keep"
     const val DELETE_CONFIRM = "codes_delete_confirm"
+    const val TAG_PANE = "codes_tag_pane"
+    const val TAG_INSTRUCTION = "codes_tag_instruction"
+    const val TAG_AGAIN = "codes_tag_again"
+    const val TAG_CANCEL = "codes_tag_cancel"
+    const val NFC_OFF = "codes_nfc_off"
+    const val NFC_SETTINGS = "codes_nfc_settings"
+    const val NFC_NONE = "codes_nfc_none"
+    const val SECURE_NOTE = "codes_secure_note"
     fun code(id: String) = "codes_code_$id"
     fun rename(id: String) = "codes_rename_$id"
     fun delete(id: String) = "codes_delete_$id"
@@ -137,22 +156,32 @@ object RegisterTokenTags {
 }
 
 /**
- * The registered codes, with the phone's camera as Android has it. Turning the camera consent on records it and then asks Android for the
- * camera; whether Android gave it is read again whenever the screen comes back, since the person may have changed it in the app's settings.
+ * The registered codes, with the phone's camera as Android has it, or the registered tags (the view model's mode), with the phone's NFC.
+ * Turning the camera consent on records it and then asks Android for the camera; whether Android gave it is read again whenever the screen
+ * comes back, since the person may have changed it in the app's settings. The tags ask Android for nothing (NFC is granted at install); the
+ * phone's NFC is read again whenever the screen comes back, since the person may have turned it on in Android's settings, and when the
+ * reader says it stopped, since NFC can be turned off from Quick Settings without the screen ever leaving the front.
  */
 @Composable
 fun RegisterTokenRoute(onBack: () -> Unit, viewModel: RegisterTokenViewModel = hiltViewModel()) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val tags = viewModel.mode == HandshakeMode.NFC
     val hasCamera = remember(context) { context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) }
     var granted by remember { mutableStateOf(cameraGranted(context)) }
     var refused by rememberSaveable { mutableStateOf(false) }
+    var reader by remember { mutableStateOf(if (tags) viewModel.readerAccess() else ReaderAccess.NONE) }
+    var secure by remember { mutableStateOf(tags && viewModel.secureNfcOn()) }
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { given ->
         granted = given
         refused = !given
     }
     LifecycleResumeEffect(context) {
         granted = cameraGranted(context)
+        if (tags) {
+            reader = viewModel.readerAccess()
+            secure = viewModel.secureNfcOn()
+        }
         onPauseOrDispose {}
     }
     RegisterTokenScreen(
@@ -162,7 +191,7 @@ fun RegisterTokenRoute(onBack: () -> Unit, viewModel: RegisterTokenViewModel = h
             onBack = onBack,
             onSetConsent = { on ->
                 viewModel.setConsent(on)
-                if (shouldAskAfterConsent(on, hasCamera, granted)) ask.launch(Manifest.permission.CAMERA)
+                if (!tags && shouldAskAfterConsent(on, hasCamera, granted)) ask.launch(Manifest.permission.CAMERA)
             },
             onAskCamera = { ask.launch(Manifest.permission.CAMERA) },
             onOpenAppSettings = { SystemLinks.intentFor(context, Fix.OPEN_APP_SETTINGS)?.let { SystemLinks.open(context, it) } },
@@ -173,7 +202,18 @@ fun RegisterTokenRoute(onBack: () -> Unit, viewModel: RegisterTokenViewModel = h
             onMakeCode = viewModel::makeCode,
             onCloseMadeCode = viewModel::closeMadeCode,
             onDismissOutcome = viewModel::dismissOutcome,
+            onTagRead = viewModel::tagRead,
+            onCancelTag = viewModel::cancelTag,
+            onTagReaderOff = {
+                viewModel.tagReaderOff()
+                reader = viewModel.readerAccess()
+                secure = viewModel.secureNfcOn()
+            },
+            onOpenNfcSettings = { runCatching { SystemLinks.open(context, Intent(Settings.ACTION_NFC_SETTINGS)) } },
         ),
+        reader = reader,
+        secureNfc = secure,
+        mode = viewModel.mode,
     )
 }
 
@@ -194,10 +234,22 @@ private fun cameraGranted(context: Context) =ContextCompat.checkSelfPermission(c
  * Stateless, so it can be shown in tests without a view model. A delete is asked first, with the answer that keeps the code first. While a
  * code is being scanned the viewfinder takes the screen, and the first code it reads is handed on once, whatever it holds: what it comes to
  * has its own words. The camera is the one [LocalQrScanner] holds.
+ *
+ * For tags (the state's mode is NFC), [camera] is not used: [reader] and [secureNfc] say what the phone's NFC can do. While a tag is being
+ * registered the tag pane takes the screen and listens through [LocalNfcReader]; each touch is its own session, handed on once, and a first
+ * touch that asks for a second starts the next session. Saved state holds only the name, the session counters and switches: never a read.
+ * [mode] is the screen's own (the route's), for its words while the state is still loading; once it is ready, the state's mode is used.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RegisterTokenScreen(state: RegisterTokenUiState, camera: CameraAccess, actions: RegisterTokenActions) {
+fun RegisterTokenScreen(
+    state: RegisterTokenUiState,
+    camera: CameraAccess,
+    actions: RegisterTokenActions,
+    reader: ReaderAccess = ReaderAccess.NONE,
+    secureNfc: Boolean = false,
+    mode: HandshakeMode? = null,
+) {
     var adding by rememberSaveable { mutableStateOf(false) }
     var codeName by rememberSaveable { mutableStateOf("") }
     var scanningAs by rememberSaveable { mutableStateOf<String?>(null) }
@@ -206,18 +258,45 @@ fun RegisterTokenScreen(state: RegisterTokenUiState, camera: CameraAccess, actio
     var deleting by rememberSaveable { mutableStateOf<String?>(null) }
     // A code was read and handed on; the typed name stays until the answer comes, and only a registration clears it.
     var awaitingScan by rememberSaveable { mutableStateOf(false) }
+    // Tags: a touch was handed on and its answer has not come. A save can still be on its way when Cancel or Back ends the pane, and its
+    // registration then clears the typed name all the same.
+    var awaitingTag by rememberSaveable { mutableStateOf(false) }
     // A mark of the made code this screen last brought into view, so that coming back to the screen does not scroll to it again. Only its
     // hash is kept: saved state is written into a Bundle, and the code itself is held only by the view model until Done.
     var shownMade by rememberSaveable { mutableStateOf<Int?>(null) }
     val listState = rememberLazyListState()
     val ready = state as? RegisterTokenUiState.Ready
-    val scanUsable = camera == CameraAccess.GRANTED && ready?.consentGranted == true
-    // The scan is shown only while it can be: a scan whose consent or camera is gone ends, and does not come back by itself.
+    val tags = (ready?.mode ?: mode) == HandshakeMode.NFC
+    val words = registerWords(tags)
+    val deviceUsable = if (tags) reader == ReaderAccess.READY else camera == CameraAccess.GRANTED
+    val scanUsable = deviceUsable && ready?.consentGranted == true
+    // The scan is shown only while it can be: a scan whose consent or camera (or NFC) is gone ends, and does not come back by itself.
     val scanShown = scanningAs != null && ready != null && scanUsable
-    LaunchedEffect(scanUsable) { if (!scanUsable) scanningAs = null }
+    val latestActions by rememberUpdatedState(actions)
+    val endScan = {
+        if (scanningAs != null && tags) latestActions.onCancelTag()
+        scanningAs = null
+    }
+    LaunchedEffect(scanUsable) { if (!scanUsable) endScan() }
     // The newest answer, for a result that arrives between the pane going and the effect above ending the scan.
     val usableNow by rememberUpdatedState(scanUsable)
     val outcome = ready?.outcome
+    // Tags: each answer to a touch is a new outcome (the last one is put away when the pane opens). A first touch asks for a second, in a
+    // session of its own; any other answer ends the pane, and only a registration clears the typed name.
+    LaunchedEffect(outcome) {
+        if (tags && outcome != null && (scanningAs != null || awaitingTag)) {
+            awaitingTag = false
+            if (outcome == CodeOutcome.TouchAgain) {
+                if (scanningAs != null) scanSession++
+            } else {
+                scanningAs = null
+                if (outcome is CodeOutcome.Registered) {
+                    adding = false
+                    codeName = ""
+                }
+            }
+        }
+    }
     LaunchedEffect(outcome, awaitingScan) {
         if (awaitingScan && outcome != null) {
             awaitingScan = false
@@ -236,13 +315,13 @@ fun RegisterTokenScreen(state: RegisterTokenUiState, camera: CameraAccess, actio
         }
     }
     // Back while scanning ends the scan, and stays on this screen.
-    BackHandler(enabled = scanShown) { scanningAs = null }
+    BackHandler(enabled = scanShown) { endScan() }
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.codes_title)) },
+                title = { Text(stringResource(words.title)) },
                 navigationIcon = {
-                    IconButton(onClick = { if (scanShown) scanningAs = null else actions.onBack() }) {
+                    IconButton(onClick = { if (scanShown) endScan() else actions.onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.codes_back))
                     }
                 },
@@ -253,7 +332,29 @@ fun RegisterTokenScreen(state: RegisterTokenUiState, camera: CameraAccess, actio
             RegisterTokenUiState.Loading -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
             is RegisterTokenUiState.Ready -> {
                 val scanning = scanningAs
-                if (scanShown && scanning != null) {
+                if (scanShown && scanning != null && tags) {
+                    val session = scanSession
+                    val stillTouching = { scanningAs != null && scanSession == session && usableNow }
+                    TagPane(
+                        label = scanning,
+                        again = state.outcome == CodeOutcome.TouchAgain,
+                        session = session,
+                        modifier = Modifier.fillMaxSize().padding(padding),
+                        onTag = { read ->
+                            if (stillTouching()) {
+                                awaitingTag = true
+                                actions.onTagRead(scanning, read)
+                            }
+                        },
+                        onUnavailable = {
+                            if (stillTouching()) {
+                                scanningAs = null
+                                actions.onTagReaderOff()
+                            }
+                        },
+                        onCancel = endScan,
+                    )
+                } else if (scanShown && scanning != null) {
                     val session = scanSession
                     // Read at the moment a result arrives, not when the pane was drawn: Cancel and Back end the scan before the pane goes.
                     // (A code that arrives even before the screen has seen a withdrawn consent is refused by the view model.)
@@ -282,6 +383,9 @@ fun RegisterTokenScreen(state: RegisterTokenUiState, camera: CameraAccess, actio
                         CodesList(
                             state = state,
                             camera = camera,
+                            reader = reader,
+                            secureNfc = secureNfc,
+                            words = words,
                             actions = actions,
                             adding = adding,
                             label = codeName,
@@ -289,6 +393,8 @@ fun RegisterTokenScreen(state: RegisterTokenUiState, camera: CameraAccess, actio
                             onLabel = { codeName = it },
                             onScan = {
                                 scanSession++
+                                // A tag's answers are told apart by changing: the last one is put away before the first touch.
+                                if (tags) actions.onDismissOutcome()
                                 scanningAs = codeName.trim()
                             },
                             onCancelAdding = {
@@ -299,12 +405,12 @@ fun RegisterTokenScreen(state: RegisterTokenUiState, camera: CameraAccess, actio
                             listState = listState,
                             modifier = Modifier.weight(1f).fillMaxWidth(),
                         )
-                        state.outcome?.let { Outcome(it, actions.onDismissOutcome) }
+                        state.outcome?.let { Outcome(it, words, actions.onDismissOutcome) }
                     }
                 }
                 val doomed = state.codes.firstOrNull { it.id == deleting }
                 if (doomed != null) {
-                    DeleteQuestion(doomed, onKeep = { deleting = null }, onDelete = { deleting = null; actions.onDelete(doomed.id) })
+                    DeleteQuestion(doomed, words, onKeep = { deleting = null }, onDelete = { deleting = null; actions.onDelete(doomed.id) })
                 }
             }
         }
@@ -316,6 +422,9 @@ fun RegisterTokenScreen(state: RegisterTokenUiState, camera: CameraAccess, actio
 private fun CodesList(
     state: RegisterTokenUiState.Ready,
     camera: CameraAccess,
+    reader: ReaderAccess,
+    secureNfc: Boolean,
+    words: RegisterWords,
     actions: RegisterTokenActions,
     adding: Boolean,
     label: String,
@@ -344,47 +453,80 @@ private fun CodesList(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { Text(stringResource(R.string.codes_intro), style = MaterialTheme.typography.bodyMedium) }
-        item { Heading(R.string.codes_camera_title) }
-        if (camera == CameraAccess.NONE) {
-            item {
-                Text(stringResource(R.string.codes_camera_none), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag(RegisterTokenTags.NO_CAMERA))
-            }
-        } else {
-            item { ConsentRow(state.consentGranted, actions.onSetConsent) }
-            if (state.consentGranted && camera == CameraAccess.NOT_ASKED) {
+        item { Text(stringResource(words.intro), style = MaterialTheme.typography.bodyMedium) }
+        if (words.tags) {
+            item { Text(stringResource(R.string.tags_passive_advice), style = MaterialTheme.typography.bodyMedium) }
+            item { Heading(R.string.tags_reader_title) }
+            if (reader == ReaderAccess.NONE) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(stringResource(R.string.codes_camera_not_asked), style = MaterialTheme.typography.bodyMedium)
-                        Button(onClick = actions.onAskCamera, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(RegisterTokenTags.CAMERA_ASK)) {
-                            Text(stringResource(R.string.codes_camera_ask))
+                    Text(stringResource(R.string.tags_nfc_none), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag(RegisterTokenTags.NFC_NONE))
+                }
+            } else {
+                item { ConsentRow(state.consentGranted, words, actions.onSetConsent) }
+                if (reader == ReaderAccess.OFF) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                stringResource(R.string.tags_nfc_off),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag(RegisterTokenTags.NFC_OFF),
+                            )
+                            OutlinedButton(onClick = actions.onOpenNfcSettings, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(RegisterTokenTags.NFC_SETTINGS)) {
+                                Text(stringResource(R.string.tags_open_settings))
+                            }
                         }
                     }
                 }
             }
-            if (state.consentGranted && camera == CameraAccess.REFUSED) {
+            if (secureNfc) {
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            stringResource(R.string.codes_camera_refused),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.testTag(RegisterTokenTags.CAMERA_REFUSED),
-                        )
-                        OutlinedButton(onClick = actions.onOpenAppSettings, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(RegisterTokenTags.APP_SETTINGS)) {
-                            Text(stringResource(R.string.codes_app_settings))
+                    Text(stringResource(R.string.tags_secure_note), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag(RegisterTokenTags.SECURE_NOTE))
+                }
+            }
+        } else {
+            item { Heading(R.string.codes_camera_title) }
+            if (camera == CameraAccess.NONE) {
+                item {
+                    Text(stringResource(R.string.codes_camera_none), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.testTag(RegisterTokenTags.NO_CAMERA))
+                }
+            } else {
+                item { ConsentRow(state.consentGranted, words, actions.onSetConsent) }
+                if (state.consentGranted && camera == CameraAccess.NOT_ASKED) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(stringResource(R.string.codes_camera_not_asked), style = MaterialTheme.typography.bodyMedium)
+                            Button(onClick = actions.onAskCamera, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(RegisterTokenTags.CAMERA_ASK)) {
+                                Text(stringResource(R.string.codes_camera_ask))
+                            }
+                        }
+                    }
+                }
+                if (state.consentGranted && camera == CameraAccess.REFUSED) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                stringResource(R.string.codes_camera_refused),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag(RegisterTokenTags.CAMERA_REFUSED),
+                            )
+                            OutlinedButton(onClick = actions.onOpenAppSettings, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(RegisterTokenTags.APP_SETTINGS)) {
+                                Text(stringResource(R.string.codes_app_settings))
+                            }
                         }
                     }
                 }
             }
         }
-        item { Heading(R.string.codes_list_title) }
+        item { Heading(words.listTitle) }
         if (state.codes.isEmpty()) {
-            item { Text(stringResource(R.string.codes_none), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag(RegisterTokenTags.NONE)) }
+            item { Text(stringResource(words.none), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag(RegisterTokenTags.NONE)) }
         }
         items(state.codes, key = { it.id }) { code ->
             CodeCard(
                 code = code,
+                words = words,
                 renaming = renaming == code.id,
                 onStartRename = { renaming = code.id },
                 onRename = { name ->
@@ -395,8 +537,12 @@ private fun CodesList(
                 onAskDelete = { onAskDelete(code.id) },
             )
         }
-        if (camera != CameraAccess.NONE) {
-            item { AddCode(state.consentGranted, camera, adding, label, onStartAdding, onLabel, onScan, onCancelAdding) }
+        if (words.tags) {
+            if (reader != ReaderAccess.NONE) {
+                item { AddCode(state.consentGranted, reader == ReaderAccess.READY, words, adding, label, onStartAdding, onLabel, onScan, onCancelAdding) }
+            }
+        } else if (camera != CameraAccess.NONE) {
+            item { AddCode(state.consentGranted, camera == CameraAccess.GRANTED, words, adding, label, onStartAdding, onLabel, onScan, onCancelAdding) }
             item {
                 OutlinedButton(onClick = actions.onMakeCode, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(RegisterTokenTags.MAKE)) {
                     Text(stringResource(R.string.codes_make))
@@ -413,9 +559,9 @@ private fun Heading(text: Int) {
     Text(stringResource(text), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp).semantics { heading() })
 }
 
-/** The camera consent, in the words of the consent center: what it allows, and what it does not. */
+/** The camera (or tag) consent, in the words of the consent center: what it allows, and what it does not. */
 @Composable
-private fun ConsentRow(granted: Boolean, onSet: (Boolean) -> Unit) {
+private fun ConsentRow(granted: Boolean, words: RegisterWords, onSet: (Boolean) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -425,9 +571,9 @@ private fun ConsentRow(granted: Boolean, onSet: (Boolean) -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f).padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(stringResource(R.string.consent_camera_qr_title), style = MaterialTheme.typography.titleMedium)
-            Text(stringResource(R.string.consent_camera_qr_allows), style = MaterialTheme.typography.bodySmall)
-            Text(stringResource(R.string.consent_camera_qr_not), style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(words.consentTitle), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(words.consentAllows), style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(words.consentNot), style = MaterialTheme.typography.bodySmall)
         }
         Switch(checked = granted, onCheckedChange = null)
     }
@@ -437,6 +583,7 @@ private fun ConsentRow(granted: Boolean, onSet: (Boolean) -> Unit) {
 @Composable
 private fun CodeCard(
     code: Token,
+    words: RegisterWords,
     renaming: Boolean,
     onStartRename: () -> Unit,
     onRename: (String) -> Unit,
@@ -453,7 +600,7 @@ private fun CodeCard(
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text(stringResource(R.string.codes_rename_field)) },
+                    label = { Text(stringResource(words.renameField)) },
                     singleLine = true,
                     isError = tooLong,
                     supportingText = if (tooLong) {
@@ -497,13 +644,14 @@ private fun CodeCard(
 }
 
 /**
- * Adding a code: a name first, then the scan. The scan needs the consent and the camera; without the consent the button is off and says
- * why, and without the camera the lines above say what to do.
+ * Adding a code (or a tag): a name first, then the scan (or the touches). It needs the consent and the camera (or NFC on); without the
+ * consent the button is off and says why, and without the camera (or NFC) the lines above say what to do.
  */
 @Composable
 private fun AddCode(
     consent: Boolean,
-    camera: CameraAccess,
+    deviceUsable: Boolean,
+    words: RegisterWords,
     adding: Boolean,
     label: String,
     onStart: () -> Unit,
@@ -511,7 +659,7 @@ private fun AddCode(
     onScan: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    val usable = consent && camera == CameraAccess.GRANTED
+    val usable = consent && deviceUsable
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (adding && usable) {
             val name = label.trim()
@@ -519,7 +667,7 @@ private fun AddCode(
             OutlinedTextField(
                 value = label,
                 onValueChange = onLabel,
-                label = { Text(stringResource(R.string.codes_label_field)) },
+                label = { Text(stringResource(words.labelField)) },
                 singleLine = true,
                 isError = tooLong,
                 supportingText = if (tooLong) {
@@ -533,17 +681,17 @@ private fun AddCode(
                 onClick = onScan,
                 enabled = name.isNotEmpty() && !tooLong,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(RegisterTokenTags.SCAN),
-            ) { Text(stringResource(R.string.codes_scan)) }
+            ) { Text(stringResource(words.start)) }
             TextButton(onClick = onCancel, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(RegisterTokenTags.ADD_CANCEL)) {
                 Text(stringResource(R.string.codes_add_cancel))
             }
         } else {
             Button(onClick = onStart, enabled = usable, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(RegisterTokenTags.ADD)) {
-                Text(stringResource(R.string.codes_add))
+                Text(stringResource(words.add))
             }
             if (!consent) {
                 Text(
-                    stringResource(R.string.codes_need_consent),
+                    stringResource(words.needConsent),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.testTag(RegisterTokenTags.NEED_CONSENT),
@@ -575,6 +723,40 @@ private fun ScanPane(label: String, modifier: Modifier, onDecoded: (String) -> U
     }
 }
 
+/**
+ * Registering a tag: its name, what to do, and a way out below. The reader listens only while this is shown (and the screen is resumed);
+ * one touch is handed on per [session], and the reader stopping ends it. Nothing of the tag is drawn or kept here.
+ */
+@Composable
+private fun TagPane(
+    label: String,
+    again: Boolean,
+    session: Int,
+    modifier: Modifier,
+    onTag: (TagRead) -> Unit,
+    onUnavailable: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val done = remember(session) { AtomicBoolean(false) }
+    Column(modifier.padding(16.dp).testTag(RegisterTokenTags.TAG_PANE), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+        Text(
+            stringResource(if (again) R.string.tags_touch_again else R.string.tags_touch),
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier
+                .semantics { liveRegion = LiveRegionMode.Polite }
+                .testTag(if (again) RegisterTokenTags.TAG_AGAIN else RegisterTokenTags.TAG_INSTRUCTION),
+        )
+        LocalNfcReader.current.Listen(
+            onTag = { read -> if (done.compareAndSet(false, true)) onTag(read) },
+            onUnavailable = onUnavailable,
+        )
+        OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(RegisterTokenTags.TAG_CANCEL)) {
+            Text(stringResource(R.string.codes_add_cancel))
+        }
+    }
+}
+
 /** A new code, large, dark on white whatever the theme, with what to do with it. It is not registered until it is scanned. */
 @Composable
 private fun MadeCode(payload: String, onClose: () -> Unit) {
@@ -601,17 +783,22 @@ private fun MadeCode(payload: String, onClose: () -> Unit) {
 
 /** What the last registration or rename came to. It stands under the list, in view wherever the list is, and a screen reader says it. */
 @Composable
-private fun Outcome(outcome: CodeOutcome, onDismiss: () -> Unit) {
+private fun Outcome(outcome: CodeOutcome, table: RegisterWords, onDismiss: () -> Unit) {
     val words = when (outcome) {
-        is CodeOutcome.Registered -> stringResource(R.string.codes_registered, outcome.label)
+        is CodeOutcome.Registered -> stringResource(table.registered, outcome.label)
         CodeOutcome.Blank -> stringResource(R.string.codes_blank)
         CodeOutcome.BadLabel -> stringResource(R.string.codes_label_limit, TokenRepository.MAX_LABEL)
-        is CodeOutcome.Duplicate -> stringResource(R.string.codes_duplicate, outcome.label)
-        CodeOutcome.Full -> stringResource(R.string.codes_full, TokenRepository.MAX_PER_MODE)
+        is CodeOutcome.Duplicate -> stringResource(table.duplicate, outcome.label)
+        CodeOutcome.Full -> stringResource(table.full, TokenRepository.MAX_PER_MODE)
         CodeOutcome.Renamed -> stringResource(R.string.codes_renamed)
-        CodeOutcome.Gone -> stringResource(R.string.codes_gone)
+        CodeOutcome.Gone -> stringResource(table.gone)
         CodeOutcome.CameraFailed -> stringResource(R.string.codes_camera_failed)
-        CodeOutcome.NoConsent -> stringResource(R.string.codes_no_consent)
+        CodeOutcome.NoConsent -> stringResource(table.noConsent)
+        CodeOutcome.TouchAgain -> stringResource(R.string.tags_touch_again)
+        CodeOutcome.TagChanged -> stringResource(R.string.tags_changed)
+        CodeOutcome.RandomTag -> stringResource(R.string.tags_random)
+        CodeOutcome.NoTagId -> stringResource(R.string.tags_no_id)
+        CodeOutcome.ReaderOff -> stringResource(R.string.tags_reader_off)
     }
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -630,18 +817,96 @@ private fun Outcome(outcome: CodeOutcome, onDismiss: () -> Unit) {
 
 /** The question before a code is deleted; the answer that keeps it is the first, as in the editor's questions. */
 @Composable
-private fun DeleteQuestion(code: Token, onKeep: () -> Unit, onDelete: () -> Unit) {
+private fun DeleteQuestion(code: Token, words: RegisterWords, onKeep: () -> Unit, onDelete: () -> Unit) {
     SafeQuestion(
         tag = RegisterTokenTags.DELETE_DIALOG,
-        title = stringResource(R.string.codes_delete_title),
-        message = stringResource(R.string.codes_delete_body, code.label),
-        keepLabel = R.string.codes_delete_keep,
+        title = stringResource(words.deleteTitle),
+        message = stringResource(words.deleteBody, code.label),
+        keepLabel = words.deleteKeep,
         keepTag = RegisterTokenTags.DELETE_KEEP,
         onKeep = onKeep,
-        throwAwayLabel = R.string.codes_delete_confirm,
+        throwAwayLabel = words.deleteConfirm,
         throwAwayTag = RegisterTokenTags.DELETE_CONFIRM,
         onThrowAway = onDelete,
     )
 }
+
+/** The words (string resources) that differ between the codes and the tags; everything else on the screen is shared. */
+internal class RegisterWords(
+    val tags: Boolean,
+    val title: Int,
+    val intro: Int,
+    val listTitle: Int,
+    val none: Int,
+    val renameField: Int,
+    val add: Int,
+    val labelField: Int,
+    val start: Int,
+    val needConsent: Int,
+    val registered: Int,
+    val duplicate: Int,
+    val full: Int,
+    val gone: Int,
+    val noConsent: Int,
+    val deleteTitle: Int,
+    val deleteBody: Int,
+    val deleteKeep: Int,
+    val deleteConfirm: Int,
+    val consentTitle: Int,
+    val consentAllows: Int,
+    val consentNot: Int,
+)
+
+private val CODE_WORDS = RegisterWords(
+    tags = false,
+    title = R.string.codes_title,
+    intro = R.string.codes_intro,
+    listTitle = R.string.codes_list_title,
+    none = R.string.codes_none,
+    renameField = R.string.codes_rename_field,
+    add = R.string.codes_add,
+    labelField = R.string.codes_label_field,
+    start = R.string.codes_scan,
+    needConsent = R.string.codes_need_consent,
+    registered = R.string.codes_registered,
+    duplicate = R.string.codes_duplicate,
+    full = R.string.codes_full,
+    gone = R.string.codes_gone,
+    noConsent = R.string.codes_no_consent,
+    deleteTitle = R.string.codes_delete_title,
+    deleteBody = R.string.codes_delete_body,
+    deleteKeep = R.string.codes_delete_keep,
+    deleteConfirm = R.string.codes_delete_confirm,
+    consentTitle = R.string.consent_camera_qr_title,
+    consentAllows = R.string.consent_camera_qr_allows,
+    consentNot = R.string.consent_camera_qr_not,
+)
+
+private val TAG_WORDS = RegisterWords(
+    tags = true,
+    title = R.string.tags_title,
+    intro = R.string.tags_intro,
+    listTitle = R.string.tags_list_title,
+    none = R.string.tags_none,
+    renameField = R.string.tags_rename_field,
+    add = R.string.tags_add,
+    labelField = R.string.tags_label_field,
+    start = R.string.tags_start,
+    needConsent = R.string.tags_need_consent,
+    registered = R.string.tags_registered,
+    duplicate = R.string.tags_duplicate,
+    full = R.string.tags_full,
+    gone = R.string.tags_gone,
+    noConsent = R.string.tags_no_consent,
+    deleteTitle = R.string.tags_delete_title,
+    deleteBody = R.string.tags_delete_body,
+    deleteKeep = R.string.tags_delete_keep,
+    deleteConfirm = R.string.tags_delete_confirm,
+    consentTitle = R.string.consent_nfc_title,
+    consentAllows = R.string.consent_nfc_allows,
+    consentNot = R.string.consent_nfc_not,
+)
+
+internal fun registerWords(tags: Boolean): RegisterWords = if (tags) TAG_WORDS else CODE_WORDS
 
 private const val MADE_CODE_PIXELS = 512

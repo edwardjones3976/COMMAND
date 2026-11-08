@@ -38,4 +38,7 @@
     <string name="consent_camera_qr_title">Camera for the QR handshake</string>
     <string name="consent_camera_qr_allows">Scanning a code you registered when an alarm asks for it. Frames are read on the phone and never saved or sent.</string>
     <string name="consent_camera_qr_not">It does not take photos or video.</string>
+    <string name="consent_nfc_title">Touch a tag</string>
+    <string name="consent_nfc_allows">Read the id of a tag you touch to the phone, only while you register a tag or an alarm asks for one, and check it against your registered tags. Only a fingerprint of each id is kept.</string>
+    <string name="consent_nfc_not">Never reads tags in the background, never reads what is written on a tag, and never pays or uses card features. Withdrawing it keeps your registered tags; delete them on the tags screen.</string>
 </resources>

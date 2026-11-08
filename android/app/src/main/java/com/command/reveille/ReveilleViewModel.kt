@@ -25,6 +25,7 @@ import com.command.domain.handshake.HandshakeCapability
 import com.command.domain.handshake.StepPart
 import com.command.domain.handshake.StepProgress
 import com.command.domain.handshake.StepStatus
+import com.command.domain.handshake.TagRead
 import com.command.domain.handshake.TryId
 import com.command.domain.handshake.TypedPhrase
 import com.command.domain.model.ChallengeOutcome
@@ -125,10 +126,12 @@ internal const val QR_WRONG_REPEAT_MS = 3_000L
  * nothing that the screen does not give already is not offered ([alternativesOf]: the same screen, such as the numbers that gave way to
  * typing beside a step of typing, or, where every step is needed, the hold of a two-step beside the press that has to be passed anyway).
  *
- * *The phone.* A way that needs something of the phone (QR: the camera, its consent and permission, a registered code) is asked for only while
- * the phone can do it ([HandshakeCapabilitySource]). The phone is read when a ring is shown, and again whenever the ring screen comes back to
- * the front ([recheckCapability]); a step it cannot do then, or whose camera fails during the ring ([qrUnavailable]), is replaced by its
- * fallback, and the record says so once. A step that was replaced is not taken back when the phone can do it again.
+ * *The phone.* A way that needs something of the phone (QR: the camera, its consent and permission, a registered code; NFC: the tag consent,
+ * a reader that is on and not held by Secure NFC over the keyguard, a registered tag) is asked for only while the phone can do it
+ * ([HandshakeCapabilitySource]). The phone is read when a ring is shown, and again whenever the ring screen comes back to the front
+ * ([recheckCapability]); a step it cannot do then, or whose camera or reader fails during the ring ([qrUnavailable], [nfcUnavailable]), is
+ * replaced by its fallback, and the record says so once. A step that was replaced is not taken back when the phone can do it again. Voice is
+ * still not built: the engine replaces it before it can reach the screen.
  */
 @HiltViewModel
 class ReveilleViewModel @Inject constructor(
@@ -212,6 +215,12 @@ class ReveilleViewModel @Inject constructor(
      */
     private val wrongSeenAtMs = HashMap<String, Long>()
 
+    /**
+     * The tags already counted as wrong, by fingerprint only, each with when it was last touched (on the monotonic clock): the same rule as
+     * [wrongSeenAtMs], with the same [QR_WRONG_REPEAT_MS] (one fumble, one try). Never logged.
+     */
+    private val wrongTagSeenAtMs = mutableMapOf<String, Long>()
+
     /** When the try on screen was begun, for the times of its row. */
     private var began: Long? = null
     private var timer: Job? = null
@@ -243,6 +252,7 @@ class ReveilleViewModel @Inject constructor(
         began = null
         capability = HandshakeCapability.NONE
         wrongSeenAtMs.clear()
+        wrongTagSeenAtMs.clear()
         prompt = ""
         ringLine = null
         lineNotSpoken = false
@@ -448,8 +458,10 @@ class ReveilleViewModel @Inject constructor(
             HandshakeMode.CONFIRM_SEQUENCE -> Challenge.Sequence(tryId, ConfirmSequence.layout(id, step.attempts), tapped, state.triesLeft, mistaken, slow)
             HandshakeMode.TWO_STEP -> Challenge.TwoStep(tryId, firstAction)
             HandshakeMode.QR -> Challenge.Qr(tryId, state.triesLeft, mistaken, slow)
-            // NFC and voice are not built: the engine replaces them before they can reach the screen.
-            HandshakeMode.NFC, HandshakeMode.VOICE -> Challenge.OutOfTries
+            // No clock runs on a tag, so its try never takes too long: there is no "slow" to say.
+            HandshakeMode.NFC -> Challenge.Nfc(tryId, state.triesLeft, mistaken)
+            // Voice is not built: the engine replaces it before it can reach the screen.
+            HandshakeMode.VOICE -> Challenge.OutOfTries
         }
     }
 
@@ -704,13 +716,46 @@ class ReveilleViewModel @Inject constructor(
     }
 
     /**
-     * The camera cannot be used now (it failed to start, or another app has it): the step on screen, if it scans, is asked as its fallback
-     * from now on ([ChainEvent.Unavailable]), and the record says so. It is not a try. A report about a step that is no longer on screen, or
-     * that has been replaced already, changes nothing.
+     * A tag was touched. A registered tag passes the try and any other fixed-id tag fails it. A tag with no id or a random id is not a try.
+     * A wrong tag already counted is ignored until it has been away for [QR_WRONG_REPEAT_MS] (each sighting restarts that wait).
+     * One touch begins and ends the try: no clock runs while the person walks to the tag. Only the fingerprint is seen here, and nothing is logged.
      */
-    fun qrUnavailable(ring: String) = inRing(ring) {
+    fun nfcRead(ring: String, at: TryId, read: TagRead) {
+        val seen = read as? TagRead.Seen ?: return
+        inRing(ring) {
+            val state = chain ?: return@inRing
+            if (state.tryOnScreen != at || state.step?.shown != HandshakeMode.NFC) return@inRing
+            val key = seen.hash
+            val now0 = clock.elapsedRealtimeMs()
+            wrongTagSeenAtMs.values.removeAll { now0 - it >= QR_WRONG_REPEAT_MS }
+            if (key in wrongTagSeenAtMs) {
+                wrongTagSeenAtMs[key] = now0
+                return@inRing
+            }
+            val right = tokens.matchesTag(key)
+            if (right) wrongTagSeenAtMs.clear() else wrongTagSeenAtMs[key] = now0
+            val now = clock.nowMs()
+            advance(if (right) ChainEvent.Passed(at) else ChainEvent.Failed(at), now, now)
+        }
+    }
+
+    /**
+     * The camera cannot be used now (it failed to start, another app has it, or the person said it cannot scan): the step on screen, if it is
+     * the try [at] and it scans, is asked as its fallback from now on ([ChainEvent.Unavailable]), and the record says so. It is not a try. A
+     * report about another way, or about a try no longer on screen, changes nothing.
+     */
+    fun qrUnavailable(ring: String, at: TryId) = deviceUnavailable(ring, at, HandshakeMode.QR)
+
+    /**
+     * The tag reader cannot be used now (NFC was turned off, reader mode could not start, or the person said they cannot touch a tag): as
+     * [qrUnavailable], for a step that reads a tag. It is not a try.
+     */
+    fun nfcUnavailable(ring: String, at: TryId) = deviceUnavailable(ring, at, HandshakeMode.NFC)
+
+    private fun deviceUnavailable(ring: String, at: TryId, mode: HandshakeMode) = inRing(ring) {
         val state = chain ?: return@inRing
         val step = state.step ?: return@inRing
+        if (state.tryOnScreen != at || step.shown != mode) return@inRing
         replaced(ChainRunner.advance(state, ChainEvent.Unavailable(step.position)))
     }
 

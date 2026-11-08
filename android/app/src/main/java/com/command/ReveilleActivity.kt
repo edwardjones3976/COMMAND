@@ -77,7 +77,9 @@ class ReveilleActivity : ComponentActivity() {
         super.onStart()
         getSystemService(AccessibilityManager::class.java)?.addTouchExplorationStateChangeListener(screenReader)
         viewModel.offerAccessibleConfirm = needsAnotherWayThanHolding() // it may have changed while the activity was stopped
-        // So may the camera consent, the camera permission and the registered codes: a step that cannot scan any more asks its fallback.
+        // So may the camera consent, the camera permission and the registered codes: a step that cannot scan any more asks its fallback. And
+        // so may NFC: turned off, Secure NFC with the keyguard locked (the screen locked while the ring was away), the tag consent withdrawn,
+        // or the tags deleted: a step that cannot read a tag any more asks its fallback too.
         viewModel.recheckCapability()
     }
 
@@ -130,7 +132,9 @@ internal fun ringActions(viewModel: ReveilleViewModel, ring: String?, onClose: (
     onTwoStepIndicated = { at -> ring?.let { viewModel.twoStepIndicated(it, at) } },
     onSwitch = { position -> ring?.let { viewModel.switchTo(it, position) } },
     onQrScanned = { at, payload -> ring?.let { viewModel.qrScanned(it, at, payload) } },
-    onQrUnavailable = { ring?.let { viewModel.qrUnavailable(it) } },
+    onQrUnavailable = { at -> ring?.let { viewModel.qrUnavailable(it, at) } },
+    onNfcRead = { at, read -> ring?.let { viewModel.nfcRead(it, at, read) } },
+    onNfcUnavailable = { at -> ring?.let { viewModel.nfcUnavailable(it, at) } },
     onSilence = viewModel::silence,
     onResume = viewModel::resume,
     onStarted = viewModel::started,

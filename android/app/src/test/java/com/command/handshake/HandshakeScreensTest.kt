@@ -67,7 +67,7 @@ class HandshakeScreensTest {
         var saved = 0
         var standard = 0
 
-        fun actions(onOpenCodes: () -> Unit = {}) = HandshakeEditorActions(
+        fun actions(onOpenCodes: (HandshakeMode) -> Unit = {}) = HandshakeEditorActions(
             onBack = { back++ },
             onSetOp = { ops += it },
             onAddStep = { added++ },
@@ -171,14 +171,14 @@ class HandshakeScreensTest {
 
     @Test
     fun `a chain that names a way that is only planned says what the ring asks for in its place`() {
-        val planned = ChainSpec(ChainOp.OR, listOf(StepSpec(HandshakeMode.NFC, 3, 90), StepSpec(HandshakeMode.HOLD, 3, 90, 4)))
+        val planned = ChainSpec(ChainOp.OR, listOf(StepSpec(HandshakeMode.VOICE, 3, 90), StepSpec(HandshakeMode.HOLD, 3, 90, 4)))
         compose.setContent {
             CommandTheme(darkTheme = true) {
                 HandshakeProfilesScreen(HandshakeProfilesUiState.Ready(listOf(profile("p", "Planned", 3, own = planned)), inUse = emptySet()), onBack = {}, onEdit = {})
             }
         }
 
-        compose.onNodeWithText("Any one of: Touch a tag (planned; for now: Type a phrase), Hold the button for 4 seconds").assertIsDisplayed()
+        compose.onNodeWithText("Any one of: Say a phrase (planned; for now: Type a phrase), Hold the button for 4 seconds").assertIsDisplayed()
     }
 
     @Test
@@ -271,10 +271,12 @@ class HandshakeScreensTest {
         compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.CONFIRM_SEQUENCE)).assertIsNotSelected().assertIsEnabled()
         compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.TYPING)).assertIsNotEnabled() // the second step has it
         compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.TWO_STEP)).assertIsEnabled()
-        for (planned in listOf(HandshakeMode.NFC, HandshakeMode.VOICE)) {
-            compose.onNodeWithTag(HandshakeTags.mode(0, planned)).assertIsNotEnabled()
-        }
-        compose.onAllNodesWithTextCount("Touch a tag (planned)", 2)
+        compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.VOICE)).assertIsNotEnabled()
+        compose.onAllNodesWithTextCount("Say a phrase (planned)", 2)
+        // A tag to touch is built (M13b) and can be chosen, and still says that it has not been checked on a phone.
+        compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.NFC)).assertIsEnabled().assertIsNotSelected()
+        compose.onAllNodesWithTextCount("Touch a tag (not yet checked on a phone)", 2)
+        compose.onAllNodesWithTextCount("Touch a tag (planned)", 0)
         // A code to scan is built and can be chosen, and says that it has not been checked on a phone yet.
         compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.QR)).assertIsEnabled().assertIsNotSelected()
         compose.onAllNodesWithTextCount("Scan a code (not yet checked on a phone)", 2)
@@ -293,9 +295,10 @@ class HandshakeScreensTest {
     @Test
     fun `a step that scans a code says what it needs and leads to the registered codes`() {
         var codes = 0
+        val opened = ArrayList<HandshakeMode>()
         compose.setContent {
             CommandTheme(darkTheme = true) {
-                HandshakeEditorScreen(editing(listOf(step(0, HandshakeMode.HOLD, hold = 3), step(1, HandshakeMode.QR))), Calls().actions(onOpenCodes = { codes++ }))
+                HandshakeEditorScreen(editing(listOf(step(0, HandshakeMode.HOLD, hold = 3), step(1, HandshakeMode.QR))), Calls().actions(onOpenCodes = { codes++; opened += it }))
             }
         }
 
@@ -303,6 +306,8 @@ class HandshakeScreensTest {
             .assertTextEquals("Needs the camera, the camera consent and a registered code; without them this step asks you to type a phrase.")
         compose.onNodeWithTag(HandshakeTags.codes(1)).assertTextEquals("Registered codes").assertHeightIsAtLeast(48.dp).performClick()
         assertEquals(1, codes)
+        assertEquals("the codes, not the tags", listOf(HandshakeMode.QR), opened)
+        compose.onNodeWithTag(HandshakeTags.tags(1)).assertDoesNotExistFor()
         compose.onNodeWithTag(HandshakeTags.qrNeeds(0)).assertDoesNotExistFor()
         compose.onNodeWithTag(HandshakeTags.codes(0)).assertDoesNotExistFor()
         compose.onNodeWithText("This way is not built yet. For now the alarm asks for this instead: Type a phrase.").assertDoesNotExistFor()
@@ -658,10 +663,49 @@ class HandshakeScreensTest {
     }
 
     @Test
-    fun `a planned way that is in a chain says that it runs as typing`() {
+    fun nfcBlockShowsNeedsAndTagsButton() {
+        showEditor(editing(listOf(step(0, HandshakeMode.HOLD, hold = 3), step(1, HandshakeMode.NFC))))
+
+        compose.onNodeWithTag(HandshakeTags.nfcNeeds(1)).assertTextEquals(
+            "Needs the tag consent, NFC turned on, and at least one registered tag. Some phones read tags only when unlocked. " +
+                "Otherwise this step asks for a typed phrase.",
+        )
+        compose.onNodeWithTag(HandshakeTags.tags(1)).assertTextEquals("Registered tags").assertHeightIsAtLeast(48.dp)
+        compose.onNodeWithTag(HandshakeTags.nfcNeeds(0)).assertDoesNotExistFor()
+        compose.onNodeWithTag(HandshakeTags.tags(0)).assertDoesNotExistFor()
+        compose.onNodeWithTag(HandshakeTags.codes(1)).assertDoesNotExistFor()
+        compose.onNodeWithText("This way is not built yet. For now the alarm asks for this instead: Type a phrase.").assertDoesNotExistFor()
+    }
+
+    @Test
+    fun tagsButtonOpensNfc() {
+        val opened = ArrayList<HandshakeMode>()
+        compose.setContent {
+            CommandTheme(darkTheme = true) {
+                HandshakeEditorScreen(editing(listOf(step(0, HandshakeMode.NFC))), Calls().actions(onOpenCodes = { opened += it }))
+            }
+        }
+
+        compose.onNodeWithTag(HandshakeTags.tags(0)).performClick()
+
+        assertEquals(listOf(HandshakeMode.NFC), opened)
+    }
+
+    @Test
+    fun chipStillSaysNotYetChecked() {
         showEditor(editing(listOf(step(0, HandshakeMode.NFC))))
+
+        compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.NFC)).assertIsSelected().assertIsEnabled()
+        compose.onAllNodesWithTextCount("Touch a tag (not yet checked on a phone)", 1)
+        compose.onAllNodesWithTextCount("Touch a tag (planned)", 0)
+    }
+
+    @Test
+    fun `a planned way that is in a chain says that it runs as typing`() {
+        showEditor(editing(listOf(step(0, HandshakeMode.VOICE))))
         compose.onNodeWithText("This way is not built yet. For now the alarm asks for this instead: Type a phrase.").assertIsDisplayed()
-        compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.NFC)).assertIsSelected()
+        compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.VOICE)).assertIsSelected()
+        compose.onNodeWithTag(HandshakeTags.tags(0)).assertDoesNotExistFor()
         compose.onNodeWithTag(HandshakeTags.codes(0)).assertDoesNotExistFor()
     }
 
@@ -1069,18 +1113,16 @@ class HandshakeScreensTest {
         showEditor(editing(listOf(step(0, HandshakeMode.HOLD, hold = 3), step(1, HandshakeMode.TYPING))))
 
         for (index in 0..1) {
-            for (mode in listOf(HandshakeMode.NFC, HandshakeMode.VOICE)) {
-                val chip = compose.onNodeWithTag(HandshakeTags.mode(index, mode))
-                chip.assertIsNotEnabled()
-                assertEquals("step ${index + 1}, $mode", null, chip.stateDescription())
-            }
+            val chip = compose.onNodeWithTag(HandshakeTags.mode(index, HandshakeMode.VOICE))
+            chip.assertIsNotEnabled()
+            assertEquals("step ${index + 1}, VOICE", null, chip.stateDescription())
         }
         assertEquals("while the way that is built still says which step has it", "Used in step 2", compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.TYPING)).stateDescription())
     }
 
     @Test
     fun `a planned way that runs as typing takes typing, so no other step can choose it, and the chip says which step has it`() {
-        showEditor(editing(listOf(step(0, HandshakeMode.NFC), step(1, HandshakeMode.HOLD, hold = 3))))
+        showEditor(editing(listOf(step(0, HandshakeMode.VOICE), step(1, HandshakeMode.HOLD, hold = 3))))
 
         compose.onNodeWithTag(HandshakeTags.mode(1, HandshakeMode.TYPING)).assertIsNotEnabled()
         assertEquals("Used in step 1", compose.onNodeWithTag(HandshakeTags.mode(1, HandshakeMode.TYPING)).stateDescription())

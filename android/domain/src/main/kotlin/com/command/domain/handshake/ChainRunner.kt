@@ -175,13 +175,18 @@ data class ChainState(val spec: ChainSpec, val steps: List<StepProgress>, val cu
  * acknowledgement; when nothing has, the two-step begins with a hold of its own ([StepPart.ACKNOWLEDGE]), which has its rows (the mode
  * HOLD), its tries and its assistive confirm like any hold, and only then asks the question.
  *
- * *Modes not built yet* (NFC, voice) are replaced by their fallback when the chain starts, and a row says so.
+ * *Modes not built yet* (voice) are replaced by their fallback when the chain starts, and a row says so.
  *
- * *Modes that need the phone* (QR: a camera, its consent and permission, a registered code) are asked for only while the phone can do them
+ * *Modes that need the phone* (QR: a camera, its consent and permission, a registered code; NFC, a device way like QR since M13b: a tag
+ * reader that is on and usable, its consent, a registered tag) are asked for only while the phone can do them
  * ([HandshakeCapability]). One it cannot do is replaced by its fallback ([ChainEvent.Unavailable]) when the chain starts, when it is
  * restored, and whenever the caller finds that the phone can no longer do it ([reconcile]); a row says so each time. A phone that gains the
  * mode during a ring does not take a replaced step back: the record has said what the step is. No mode falls back to one that needs the
  * phone, so a fallback never needs the capability.
+ *
+ * *Rings begun before M13b.* NFC was not built then, so such a ring wrote a try-0 FALLBACK note for its NFC step and asked for typing. Read
+ * back now, that note fits the rule for an unavailable in [restore] (its step is open, NFC is on screen and needs the phone, try 0), so the
+ * step stays typing for that ring, on any phone, with no new row.
  *
  * *The record.* Every try produces an [Attempt], and a change of mode produces one more (FALLBACK, with the mode that was left). The rows
  * are the whole truth about the tries of a ring: [restore] replays them to the state they came from, so a screen that is recreated, or a

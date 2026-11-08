@@ -9,6 +9,8 @@ import com.command.data.db.SyncOutboxRow
 import com.command.data.db.VoiceRenderRow
 import com.command.domain.dials.Flexibility
 import com.command.domain.dials.HandshakeMode
+import com.command.domain.handshake.TagId
+import com.command.domain.handshake.TokenHash
 import com.command.domain.model.ConsentKey
 import com.command.domain.model.ConsentSource
 import com.command.domain.model.EventSource
@@ -191,6 +193,23 @@ class ConsentCascadeTest {
         assertEquals(listOf(ConsentKey.CAMERA_QR), listener.revoked)
         assertEquals(1, tokens.count(HandshakeMode.QR))
         assertTrue(tokens.matches(HandshakeMode.QR, "command-qr:abc"))
+    }
+
+    @Test
+    fun withdrawNfcKeepsTags() = run {
+        val tokens = TokenRepository(f.db, f.clock)
+        val hash = TokenHash.ofTag(TagId(byteArrayOf(0x04, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66)))
+        tokens.registerTag("Key ring", hash)
+        consents.grant(ConsentKey.NFC)
+        consents.grant(ConsentKey.CAMERA_QR)
+
+        consents.revoke(ConsentKey.NFC)
+
+        assertFalse(consents.isGranted(ConsentKey.NFC))
+        assertTrue("an unrelated grant stays", consents.isGranted(ConsentKey.CAMERA_QR))
+        assertEquals(listOf(ConsentKey.NFC), listener.revoked)
+        assertEquals(1, tokens.count(HandshakeMode.NFC))
+        assertTrue(tokens.matchesTag(hash))
     }
 
     @Test

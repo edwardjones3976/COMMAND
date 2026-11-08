@@ -39,6 +39,12 @@ sealed interface Challenge {
      */
     data class Qr(val tryId: TryId, val triesLeft: Int, val mistaken: Boolean, val slow: Boolean = false) : Challenge
 
+    /**
+     * A registered tag to touch to the phone. [mistaken] says that the last tag touched was not a registered one, and [triesLeft] how many
+     * remain on this way. One touch begins and ends the try and no clock runs on it, so it never takes too long: there is no "slow".
+     */
+    data class Nfc(val tryId: TryId, val triesLeft: Int, val mistaken: Boolean) : Challenge
+
     /** The person says what they will do first: [firstAction] is what they are asked to stand behind. */
     data class TwoStep(val tryId: TryId, val firstAction: String) : Challenge
 

@@ -83,6 +83,14 @@
         <item quantity="other">Time ran out. %d tries left.</item>
     </plurals>
 
+    <string name="nfc_title">Touch a tag</string>
+    <string name="nfc_instruction">Hold one of your tags flat against the back of the phone. If nothing happens, move it slowly.</string>
+    <plurals name="nfc_wrong">
+        <item quantity="one">That is not one of your tags. %d try left</item>
+        <item quantity="other">That is not one of your tags. %d tries left</item>
+    </plurals>
+    <string name="nfc_cannot_touch">Cannot touch a tag? Type a phrase instead</string>
+
     <string name="handshake_two_title">Say what you will do first</string>
     <string name="handshake_two_hold_first">First, hold to show you are up</string>
     <string name="handshake_two_indicate">I am doing: %1$s</string>
