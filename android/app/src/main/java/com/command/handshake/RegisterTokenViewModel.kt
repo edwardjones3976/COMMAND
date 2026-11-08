@@ -43,6 +43,9 @@ sealed interface CodeOutcome {
 
     /** The camera could not be used while a code was scanned. */
     data object CameraFailed : CodeOutcome
+
+    /** A code arrived after the camera consent was turned off (a frame already on its way), so it was not registered. */
+    data object NoConsent : CodeOutcome
 }
 
 sealed interface RegisterTokenUiState {
@@ -108,6 +111,11 @@ class RegisterTokenViewModel @Inject constructor(
     fun register(label: String, payload: String) {
         say(null)
         guardedScope.launch {
+            // The consent is read where the code is stored: a frame can be on its way when the consent is turned off, here or elsewhere.
+            if (!consents.isGranted(ConsentKey.CAMERA_QR)) {
+                say(CodeOutcome.NoConsent)
+                return@launch
+            }
             say(
                 when (val result = tokens.register(HandshakeMode.QR, label, payload)) {
                     is RegisterResult.Saved -> CodeOutcome.Registered(label.trim())

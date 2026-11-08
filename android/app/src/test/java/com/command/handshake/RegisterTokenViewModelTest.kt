@@ -56,6 +56,12 @@ class RegisterTokenViewModelTest {
 
     private fun stored(): List<Token> = runBlocking { tokens.observe(HandshakeMode.QR).first() }
 
+    /** A code is registered only while the camera consent is on, as the person turns it on first on the screen. */
+    private fun consented(): RegisterTokenUiState.Ready {
+        runBlocking { consents.grant(ConsentKey.CAMERA_QR, ConsentSource.USER) }
+        return awaitReady("the consent is on") { it.consentGranted }
+    }
+
     @Test
     fun `with nothing registered the list is empty and the camera consent is off`() {
         val state = ready()
@@ -67,7 +73,7 @@ class RegisterTokenViewModelTest {
 
     @Test
     fun `a code that is scanned is registered under its label, and the list and the words say so`() {
-        ready()
+        consented()
 
         vm.register("  Kitchen  ", "command-qr:kitchen")
 
@@ -78,8 +84,21 @@ class RegisterTokenViewModelTest {
     }
 
     @Test
+    fun `a code that arrives after the camera consent was withdrawn is not registered, and the words say why`() {
+        // A frame can be on its way when the consent is turned off elsewhere; the view model is the last place it can be stopped.
+        consented()
+        runBlocking { consents.revoke(ConsentKey.CAMERA_QR, ConsentSource.USER) }
+        awaitReady("withdrawn") { !it.consentGranted }
+
+        vm.register("Kitchen", "command-qr:kitchen")
+
+        assertEquals(CodeOutcome.NoConsent, awaitReady("the words") { it.outcome != null }.outcome)
+        assertTrue("nothing is stored", stored().isEmpty())
+    }
+
+    @Test
     fun `each answer of a registration has its own outcome`() {
-        ready()
+        consented()
 
         vm.register("Kitchen", "   ")
         assertEquals(CodeOutcome.Blank, awaitReady("blank") { it.outcome != null }.outcome)
@@ -105,7 +124,7 @@ class RegisterTokenViewModelTest {
 
     @Test
     fun `the words of the last answer can be put away, and a new registration replaces them`() {
-        ready()
+        consented()
         vm.register("Kitchen", "  ")
         awaitReady("blank") { it.outcome == CodeOutcome.Blank }
 
@@ -122,7 +141,7 @@ class RegisterTokenViewModelTest {
      */
     @Test
     fun `a registration or a rename puts the last answer away at once, so that the next answer is always a new one`() {
-        ready()
+        consented()
         vm.register("Kitchen", "command-qr:k")
         val id = awaitReady("registered") { it.outcome == CodeOutcome.Registered("Kitchen") && it.codes.size == 1 }.codes.single().id
 

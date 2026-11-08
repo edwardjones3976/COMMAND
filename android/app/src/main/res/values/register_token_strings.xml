@@ -50,5 +50,6 @@
     <string name="codes_renamed">The name is changed.</string>
     <string name="codes_gone">That code has been deleted.</string>
     <string name="codes_camera_failed">The camera could not be used. If another app is using it, close that app and try again.</string>
+    <string name="codes_no_consent">The camera consent is off, so the code was not registered.</string>
     <string name="codes_outcome_dismiss">OK</string>
 </resources>

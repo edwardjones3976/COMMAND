@@ -22,8 +22,9 @@ class CameraManifestTest {
     }
 
     @Test
-    fun `a phone without a camera can still install the app`() {
-        for (feature in listOf("android.hardware.camera", "android.hardware.camera.any")) {
+    fun `a phone without a camera, or with a camera that cannot focus, can still install the app`() {
+        // The CAMERA permission also implies android.hardware.camera.autofocus as required, which camera and camera.any do not override.
+        for (feature in listOf("android.hardware.camera", "android.hardware.camera.any", "android.hardware.camera.autofocus")) {
             val declared = element("uses-feature", feature)
             assertTrue("the manifest declares $feature", declared != null)
             assertTrue("$feature is not required", declared!!.contains("android:required=\"false\""))

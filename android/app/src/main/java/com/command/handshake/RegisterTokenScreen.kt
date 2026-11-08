@@ -17,7 +17,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
@@ -47,8 +49,10 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -197,17 +201,22 @@ fun RegisterTokenScreen(state: RegisterTokenUiState, camera: CameraAccess, actio
     var adding by rememberSaveable { mutableStateOf(false) }
     var codeName by rememberSaveable { mutableStateOf("") }
     var scanningAs by rememberSaveable { mutableStateOf<String?>(null) }
+    // Which scan is on screen: a code or a failure from a scan that has ended (one already queued when Cancel or Back was tapped) is dropped.
+    var scanSession by rememberSaveable { mutableIntStateOf(0) }
     var deleting by rememberSaveable { mutableStateOf<String?>(null) }
     // A code was read and handed on; the typed name stays until the answer comes, and only a registration clears it.
     var awaitingScan by rememberSaveable { mutableStateOf(false) }
-    // The made code this screen last brought into view, so that coming back to the screen does not scroll to it again.
-    var shownMade by rememberSaveable { mutableStateOf<String?>(null) }
+    // A mark of the made code this screen last brought into view, so that coming back to the screen does not scroll to it again. Only its
+    // hash is kept: saved state is written into a Bundle, and the code itself is held only by the view model until Done.
+    var shownMade by rememberSaveable { mutableStateOf<Int?>(null) }
     val listState = rememberLazyListState()
     val ready = state as? RegisterTokenUiState.Ready
     val scanUsable = camera == CameraAccess.GRANTED && ready?.consentGranted == true
     // The scan is shown only while it can be: a scan whose consent or camera is gone ends, and does not come back by itself.
     val scanShown = scanningAs != null && ready != null && scanUsable
     LaunchedEffect(scanUsable) { if (!scanUsable) scanningAs = null }
+    // The newest answer, for a result that arrives between the pane going and the effect above ending the scan.
+    val usableNow by rememberUpdatedState(scanUsable)
     val outcome = ready?.outcome
     LaunchedEffect(outcome, awaitingScan) {
         if (awaitingScan && outcome != null) {
@@ -220,8 +229,8 @@ fun RegisterTokenScreen(state: RegisterTokenUiState, camera: CameraAccess, actio
     }
     val made = ready?.madeCode
     LaunchedEffect(made) {
-        if (made != null && made != shownMade) {
-            shownMade = made
+        if (made != null && made.hashCode() != shownMade) {
+            shownMade = made.hashCode()
             withFrameNanos {} // the made code is laid out as the last item of the list before it is scrolled to
             listState.animateScrollToItem((listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
         }
@@ -245,22 +254,31 @@ fun RegisterTokenScreen(state: RegisterTokenUiState, camera: CameraAccess, actio
             is RegisterTokenUiState.Ready -> {
                 val scanning = scanningAs
                 if (scanShown && scanning != null) {
+                    val session = scanSession
+                    // Read at the moment a result arrives, not when the pane was drawn: Cancel and Back end the scan before the pane goes.
+                    // (A code that arrives even before the screen has seen a withdrawn consent is refused by the view model.)
+                    val stillScanning = { scanningAs != null && scanSession == session && usableNow }
                     ScanPane(
                         label = scanning,
                         modifier = Modifier.fillMaxSize().padding(padding),
                         onDecoded = { payload ->
-                            scanningAs = null
-                            awaitingScan = true
-                            actions.onRegister(scanning, payload)
+                            if (stillScanning()) {
+                                scanningAs = null
+                                awaitingScan = true
+                                actions.onRegister(scanning, payload)
+                            }
                         },
                         onFailed = {
-                            scanningAs = null
-                            actions.onScanFailed()
+                            if (stillScanning()) {
+                                scanningAs = null
+                                actions.onScanFailed()
+                            }
                         },
                         onCancel = { scanningAs = null },
                     )
                 } else {
-                    Column(Modifier.fillMaxSize().padding(padding)) {
+                    // Edge to edge: the list and the answer under it end above the keyboard, without counting the navigation bar twice.
+                    Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
                         CodesList(
                             state = state,
                             camera = camera,
@@ -269,7 +287,10 @@ fun RegisterTokenScreen(state: RegisterTokenUiState, camera: CameraAccess, actio
                             label = codeName,
                             onStartAdding = { adding = true },
                             onLabel = { codeName = it },
-                            onScan = { scanningAs = codeName.trim() },
+                            onScan = {
+                                scanSession++
+                                scanningAs = codeName.trim()
+                            },
                             onCancelAdding = {
                                 adding = false
                                 codeName = ""
@@ -590,6 +611,7 @@ private fun Outcome(outcome: CodeOutcome, onDismiss: () -> Unit) {
         CodeOutcome.Renamed -> stringResource(R.string.codes_renamed)
         CodeOutcome.Gone -> stringResource(R.string.codes_gone)
         CodeOutcome.CameraFailed -> stringResource(R.string.codes_camera_failed)
+        CodeOutcome.NoConsent -> stringResource(R.string.codes_no_consent)
     }
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
         Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {

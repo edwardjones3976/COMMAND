@@ -8,6 +8,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -44,6 +46,7 @@ import com.command.reveille.LocalQrScanner
 import com.command.reveille.QrScanner
 import com.command.ui.theme.CommandTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -322,6 +325,63 @@ class RegisterTokenScreenTest {
     }
 
     @Test
+    fun `a code or a camera failure that arrives after the scan was cancelled is dropped`() {
+        // A decoded frame can already be queued on the main thread when Cancel is tapped; the scanner is only let go at the next frame.
+        val scanner = FakeScanner()
+        val calls = show(ready(), scanner = scanner)
+        startAdding("Kitchen")
+        reach(RegisterTokenTags.SCAN).performClick()
+        val (lateDecoded, lateError) = compose.runOnIdle { scanner.onDecoded to scanner.onError }
+
+        compose.onNodeWithTag(RegisterTokenTags.SCAN_CANCEL).performClick()
+        compose.runOnIdle {
+            lateDecoded("command-qr:kitchen")
+            lateError()
+        }
+        compose.waitForIdle()
+
+        assertTrue("nothing is registered after a cancel: ${calls.registered}", calls.registered.isEmpty())
+        assertEquals(0, calls.scanFailed)
+    }
+
+    @Test
+    fun `a camera failure that arrives after the scan was cancelled is not reported`() {
+        // On its own: a late code shares the pane's once-only latch with a late failure, and would hide whether the failure is checked.
+        val scanner = FakeScanner()
+        val calls = show(ready(), scanner = scanner)
+        startAdding("Kitchen")
+        reach(RegisterTokenTags.SCAN).performClick()
+        val lateError = compose.runOnIdle { scanner.onError }
+
+        compose.onNodeWithTag(RegisterTokenTags.SCAN_CANCEL).performClick()
+        compose.runOnIdle { lateError() }
+        compose.waitForIdle()
+
+        assertEquals(0, calls.scanFailed)
+    }
+
+    @Test
+    fun `a code from a scan that was cancelled does not land in the next scan`() {
+        val scanner = FakeScanner()
+        val calls = show(ready(), scanner = scanner)
+        startAdding("Kitchen")
+        reach(RegisterTokenTags.SCAN).performClick()
+        val lateDecoded = compose.runOnIdle { scanner.onDecoded }
+        compose.onNodeWithTag(RegisterTokenTags.SCAN_CANCEL).performClick()
+        reach(RegisterTokenTags.SCAN).performClick()
+        compose.onNodeWithTag(FAKE_VIEWFINDER).assertIsDisplayed()
+
+        compose.runOnIdle { lateDecoded("command-qr:old") }
+        compose.waitForIdle()
+        assertTrue("the old scan's code is dropped: ${calls.registered}", calls.registered.isEmpty())
+        compose.onNodeWithTag(FAKE_VIEWFINDER).assertIsDisplayed()
+
+        compose.runOnIdle { scanner.onDecoded("command-qr:new") }
+        compose.waitForIdle()
+        assertEquals(listOf("Kitchen" to "command-qr:new"), calls.registered)
+    }
+
+    @Test
     fun `a scan can be cancelled, and nothing is registered`() {
         val calls = show(ready())
         startAdding("Kitchen")
@@ -486,8 +546,9 @@ class RegisterTokenScreenTest {
             CodeOutcome.Renamed to "The name is changed.",
             CodeOutcome.Gone to "That code has been deleted.",
             CodeOutcome.CameraFailed to "The camera could not be used. If another app is using it, close that app and try again.",
+            CodeOutcome.NoConsent to "The camera consent is off, so the code was not registered.",
         )
-        assertEquals("every outcome is here", 8, words.size)
+        assertEquals("every outcome is here", 9, words.size)
         var outcome by mutableStateOf<CodeOutcome?>(null)
         val calls = Calls()
         compose.setContent {
@@ -682,6 +743,24 @@ class RegisterTokenScreenTest {
             androidx.compose.ui.semantics.LiveRegionMode.Polite,
             words.fetchSemanticsNode().config[SemanticsProperties.LiveRegion],
         )
+    }
+
+    @Test
+    fun `a code that was made is never written into the screen's saved state`() {
+        // Android writes saved state into a Bundle that can outlive the screen; the code is only ever held by the view model.
+        val payload = "command-qr:SAVEDstateMUSTnotHOLDit"
+        val registry = SaveableStateRegistry(restoredValues = null, canBeSaved = { true })
+        compose.setContent {
+            CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
+                CommandTheme(darkTheme = true) {
+                    RegisterTokenScreen(ready(codes = listOf(kitchen, hall, desk), made = payload), CameraAccess.GRANTED, Calls().actions())
+                }
+            }
+        }
+        compose.onNodeWithTag(RegisterTokenTags.MADE_IMAGE).assertIsDisplayed()
+
+        val saved = compose.runOnIdle { registry.performSave() }
+        assertFalse("the saved state holds the code: $saved", saved.toString().contains("SAVEDstateMUSTnotHOLDit"))
     }
 
     // --- large type ---------------------------------------------------------------------------------------------------------
