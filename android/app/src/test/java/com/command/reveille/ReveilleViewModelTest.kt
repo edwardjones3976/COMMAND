@@ -3,6 +3,7 @@ package com.command.reveille
 import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import com.command.data.OccurrenceRepository
+import com.command.data.TokenRepository
 import com.command.data.db.CommandDb
 import com.command.data.db.OccurrenceRow
 import com.command.domain.dials.Flexibility
@@ -59,7 +60,7 @@ class ReveilleViewModelTest {
     @Before
     fun setUp() {
         hilt.inject()
-        vm = ReveilleViewModel(repo, clock, phrases)
+        vm = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
     }
 
     /** The hold that is on screen: what a press of it reports itself as being about. */
@@ -324,7 +325,7 @@ class ReveilleViewModelTest {
             repo.apply(o.id, OccurrenceCommand.Acknowledge(), EventSource.USER)
             repo.apply(o.id, OccurrenceCommand.StartGuidance, EventSource.USER)
         }
-        val fresh = ReveilleViewModel(repo, clock, phrases) // a new process, a new view model, the same stored occurrence
+        val fresh = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock)) // a new process, a new view model, the same stored occurrence
         fresh.show(o.id)
         awaitUntil(message = "direction") { fresh.state.value is ReveilleUiState.Direction }
     }

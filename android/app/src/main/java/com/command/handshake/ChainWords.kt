@@ -27,8 +27,9 @@ internal fun modeName(mode: HandshakeMode): String = stringResource(
 )
 
 /**
- * One step in a sentence: a press says for how long, and a way that is only planned says what the ring asks for in its place (the ring does
- * not ask for what is named: [HandshakeMode.offered]).
+ * One step in a sentence: a press says for how long; a way that needs something of the phone says what the ring asks for when the phone
+ * cannot do it ([HandshakeMode.fallback]); and a way that is only planned says what the ring asks for in its place (the ring does not ask
+ * for what is named: [HandshakeMode.offered]).
  */
 @Composable
 internal fun stepWords(step: StepSpec): String = when {
@@ -36,9 +37,24 @@ internal fun stepWords(step: StepSpec): String = when {
         val seconds = step.holdSeconds.takeIf { it > 0 } ?: DEFAULT_HOLD_SECONDS
         pluralStringResource(R.plurals.handshake_step_hold, seconds, seconds)
     }
-    step.mode.available -> modeName(step.mode)
+    step.mode.selectable && step.mode.needsDevice ->
+        stringResource(R.string.handshake_step_or_when_cannot, modeName(step.mode), modeName(step.mode.fallback.offered))
+    step.mode.selectable -> modeName(step.mode)
     else -> stringResource(R.string.handshake_step_runs_as, modeName(step.mode), modeName(step.mode.offered))
 }
+
+/**
+ * Whether the editor offers this way: every way that is built ([HandshakeMode.built]), whether the phone can do it now or not, because what
+ * is saved never depends on the phone. A way that is built but not yet checked on a phone ([HandshakeMode.planned]) is offered with a label
+ * that says so.
+ */
+internal val HandshakeMode.selectable: Boolean get() = built
+
+/**
+ * The way the editor judges a step by, for "the same way twice": the way that will be asked ([HandshakeMode.offered]), as the rules judge it.
+ * A way that is not built takes the way that stands in for it; a code to scan is its own way, so it can go with typing.
+ */
+internal val HandshakeMode.editorWay: HandshakeMode get() = offered
 
 /** A whole chain in a sentence, in the order of its steps. */
 @Composable

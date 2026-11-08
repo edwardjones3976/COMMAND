@@ -17,6 +17,7 @@ import com.command.domain.handshake.ChainEvent
 import com.command.domain.handshake.ChainRunner
 import com.command.domain.handshake.ChainState
 import com.command.domain.handshake.ChainStatus
+import com.command.domain.handshake.HandshakeCapability
 import com.command.domain.handshake.StepPart
 import com.command.domain.handshake.StepStatus
 import com.command.domain.handshake.TryId
@@ -39,10 +40,10 @@ class ChainRunnerTest {
         ChainSpec(op, modes.map { StepSpec(it, retries, timeoutSec = 90, holdSeconds = if (it == HOLD) 2 else 0) })
 
     /** A chain being run: the state, and every row the events have produced so far. Each thing a person does is about the try that is on screen. */
-    private class Run(val spec: ChainSpec) {
-        val start = ChainRunner.start(spec)
+    private class Run(val spec: ChainSpec, capability: HandshakeCapability = HandshakeCapability.ALL) {
+        val start = ChainRunner.start(spec, capability)
         var state: ChainState = start.state
-        val rows = ArrayList<Attempt>()
+        val rows = ArrayList<Attempt>(start.attempts)
 
         fun send(event: ChainEvent): Run {
             val step = ChainRunner.advance(state, event)
@@ -59,34 +60,57 @@ class ChainRunnerTest {
         fun timeOut(times: Int = 1): Run { repeat(times) { send(ChainEvent.TimedOut(here())) }; return this }
         fun assist(): Run = send(ChainEvent.PassedAssistively(here()))
         fun switchTo(position: Int): Run = send(ChainEvent.Switch(position))
+        fun unavailable(position: Int): Run = send(ChainEvent.Unavailable(position))
     }
+
+    /** The state the rows lead to, on a phone that can do everything: what most of the tests compare a live run with. */
+    private fun restore(spec: ChainSpec, rows: List<Attempt>): ChainState = ChainRunner.restore(spec, rows, HandshakeCapability.ALL).state
 
     private fun row(position: Int, mode: HandshakeMode, attemptNo: Int, outcome: ChallengeOutcome) = Attempt(position, mode, attemptNo, outcome)
 
     // --- which modes there are -----------------------------------------------------------------------------------
 
     @Test
-    fun `hold, the sequence, typing and two-step can be asked for and QR, NFC and voice are planned`() {
-        assertEquals(setOf(HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP), HandshakeMode.values().filter { it.available }.toSet())
-        for (mode in HandshakeMode.values()) assertTrue("$mode must lead to a mode that can be asked for", mode.offered.available)
-        for (planned in listOf(QR, NFC, VOICE)) {
-            assertFalse(planned.available)
-            assertEquals(TYPING, planned.offered)
+    fun `hold, the sequence, typing, two-step and QR are built, NFC and voice are not, and QR, NFC and voice are not yet checked on a phone`() {
+        assertEquals(setOf(HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP, QR), HandshakeMode.values().filter { it.built }.toSet())
+        assertEquals("only QR needs something of the phone, for now", setOf(QR), HandshakeMode.values().filter { it.needsDevice }.toSet())
+        assertEquals(setOf(QR, NFC, VOICE), HandshakeMode.values().filter { it.planned }.toSet())
+        for (mode in HandshakeMode.values()) assertTrue("$mode must lead to a mode that is built", mode.offered.built)
+        for (unbuilt in listOf(NFC, VOICE)) {
+            assertFalse(unbuilt.built)
+            assertEquals(TYPING, unbuilt.offered)
         }
-        for (built in listOf(HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP)) assertEquals(built, built.offered)
+        for (built in listOf(HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP, QR)) assertEquals(built, built.offered)
     }
 
     @Test
-    fun `the dial's own chains only ask for modes that can be asked for, and start on their first step`() {
+    fun `no mode falls back to a mode that needs the phone, so a fallback never needs the capability`() {
+        for (mode in HandshakeMode.values()) assertFalse("$mode falls back to ${mode.fallback.offered}", mode.fallback.offered.needsDevice)
+    }
+
+    @Test
+    fun `a capability runs every mode that needs nothing of the phone, and a mode that does only when it is ready`() {
+        for (mode in HandshakeMode.values()) {
+            assertEquals("$mode with nothing ready", !mode.needsDevice, HandshakeCapability.NONE.canRun(mode))
+            assertTrue("$mode with everything ready", HandshakeCapability.ALL.canRun(mode))
+        }
+        assertEquals(HandshakeCapability(setOf(QR)), HandshakeCapability.ALL)
+        assertEquals(HandshakeCapability(emptySet()), HandshakeCapability.NONE)
+    }
+
+    @Test
+    fun `the dial's own chains only ask for modes that are built and need nothing of the phone, and start on their first step`() {
         for (difficulty in 1..5) {
             val chain = DialEffects.defaultChain(difficulty)
-            assertTrue("difficulty $difficulty", chain.steps.all { it.mode.available })
-            val start = ChainRunner.start(chain)
-            assertTrue("nothing to note when nothing was replaced", start.attempts.isEmpty())
-            assertEquals(0, start.state.current)
-            assertEquals(TryId(0, 1), start.state.tryOnScreen)
-            assertEquals(ChainStatus.RUNNING, start.state.status)
-            assertEquals(chain.steps.map { it.mode }, start.state.steps.map { it.mode })
+            assertTrue("difficulty $difficulty", chain.steps.all { it.mode.built && !it.mode.needsDevice })
+            for (capability in listOf(HandshakeCapability.ALL, HandshakeCapability.NONE)) {
+                val start = ChainRunner.start(chain, capability)
+                assertTrue("nothing to note when nothing was replaced", start.attempts.isEmpty())
+                assertEquals(0, start.state.current)
+                assertEquals(TryId(0, 1), start.state.tryOnScreen)
+                assertEquals(ChainStatus.RUNNING, start.state.status)
+                assertEquals(chain.steps.map { it.mode }, start.state.steps.map { it.mode })
+            }
         }
     }
 
@@ -228,13 +252,13 @@ class ChainRunnerTest {
             ChainOp.OR,
             listOf(StepSpec(HOLD, 3, timeoutSec = 90, holdSeconds = 50), StepSpec(TYPING, 3, timeoutSec = 0), StepSpec(TWO_STEP, 3, timeoutSec = 90, holdSeconds = 0)),
         )
-        val state = ChainRunner.start(chain).state
+        val state = ChainRunner.start(chain, HandshakeCapability.ALL).state
         assertEquals(10, state.holdSeconds(0))
         assertEquals("a hold that took the place of another mode has a short default", 3, state.holdSeconds(2))
         assertEquals(10, state.timeoutSeconds(1))
         assertEquals(90, state.timeoutSeconds(0))
         assertEquals(3, state.holdSeconds(7))
-        val negative = ChainRunner.start(ChainSpec(ChainOp.OR, listOf(StepSpec(TYPING, maxRetries = -3, timeoutSec = -5, holdSeconds = -5)))).state
+        val negative = ChainRunner.start(ChainSpec(ChainOp.OR, listOf(StepSpec(TYPING, maxRetries = -3, timeoutSec = -5, holdSeconds = -5))), HandshakeCapability.ALL).state
         assertEquals("a negative number of tries is one", 1, negative.allowance(0))
         assertEquals(1, negative.triesLeft(0))
         assertEquals("a negative time is the shortest there is", 10, negative.timeoutSeconds(0))
@@ -247,9 +271,10 @@ class ChainRunnerTest {
     // --- modes that are planned -----------------------------------------------------------------------------------
 
     @Test
-    fun `a mode that is not built yet is replaced when the chain starts, and the row says so`() {
-        for (planned in listOf(QR, NFC, VOICE)) {
-            val run = Run(spec(ChainOp.OR, planned))
+    fun `a mode that is not built yet, or one the phone cannot do now, is replaced when the chain starts, and the row says so`() {
+        // NFC and voice are not built, whatever the phone can do; QR is built, and is replaced only when the phone cannot do it.
+        for ((planned, capability) in listOf(QR to HandshakeCapability.NONE, NFC to HandshakeCapability.ALL, VOICE to HandshakeCapability.ALL, NFC to HandshakeCapability.NONE)) {
+            val run = Run(spec(ChainOp.OR, planned), capability)
             assertEquals(listOf(row(0, planned, 0, FALLBACK)), run.start.attempts)
             assertEquals(TYPING, run.state.step!!.mode)
             assertFalse("the replacement may still fall back once, if it fails", run.state.step!!.changedMode)
@@ -257,9 +282,201 @@ class ChainRunnerTest {
             assertEquals(CONFIRM_SEQUENCE, run.state.step!!.mode)
             assertEquals(row(0, TYPING, 3, FALLBACK), run.rows.last())
         }
-        val two = ChainRunner.start(spec(ChainOp.OR, QR, HOLD, NFC))
-        assertEquals(listOf(row(0, QR, 0, FALLBACK), row(2, NFC, 0, FALLBACK)), two.attempts)
+        val two = ChainRunner.start(spec(ChainOp.OR, QR, HOLD, NFC), HandshakeCapability.NONE)
+        assertEquals("in the order of the steps", listOf(row(0, QR, 0, FALLBACK), row(2, NFC, 0, FALLBACK)), two.attempts)
         assertEquals(listOf(TYPING, HOLD, TYPING), two.state.steps.map { it.mode })
+    }
+
+    @Test
+    fun `QR is asked for when the phone can do it, and replaced by typing with a note when it cannot`() {
+        val chain = spec(ChainOp.OR, QR, HOLD)
+        val ready = ChainRunner.start(chain, HandshakeCapability.ALL)
+        assertTrue(ready.attempts.isEmpty())
+        assertEquals(QR, ready.state.shown)
+        assertEquals(TryId(0, 1, 0), ready.state.tryOnScreen)
+
+        val not = ChainRunner.start(chain, HandshakeCapability.NONE)
+        assertEquals("a try-0 note of the mode that was asked for", listOf(row(0, QR, 0, FALLBACK)), not.attempts)
+        assertEquals(TYPING, not.state.shown)
+        assertEquals("still the first step", 0, not.state.current)
+        assertEquals("the replacement is a way of its own", TryId(0, 1, 1), not.state.tryOnScreen)
+        assertFalse("and typing may still fall back to the numbers", not.state.step!!.changedMode)
+        assertEquals(3, not.state.triesLeft)
+        assertEquals("the hold is as it was", ready.state.steps[1], not.state.steps[1])
+    }
+
+    @Test
+    fun `a phone that lost QR between start and restore writes the row now, and one that gained it keeps the step as it was offered`() {
+        val chain = spec(ChainOp.OR, QR, HOLD)
+
+        // Lost: QR was asked for, one wrong code, then the camera consent was withdrawn while the screen was away.
+        val live = Run(chain, HandshakeCapability.ALL).fail()
+        val lost = ChainRunner.restore(chain, live.rows, HandshakeCapability.NONE)
+        assertEquals("the row the caller must write", listOf(row(0, QR, 1, FALLBACK)), lost.attempts)
+        assertEquals(TYPING, lost.state.shown)
+        assertEquals(0, lost.state.step!!.attempts)
+        assertNull(lost.state.step!!.lastMiss)
+        val written = live.rows + lost.attempts
+        val again = ChainRunner.restore(chain, written, HandshakeCapability.NONE)
+        assertTrue("once written, it is not asked for again", again.attempts.isEmpty())
+        assertEquals(lost.state, again.state)
+        assertEquals("and a phone that can do QR again does not take the step back", lost.state, restore(chain, written))
+
+        // Gained: QR was replaced at the start, and the phone can do it now. The step stays typing: the record said so.
+        val started = Run(chain, HandshakeCapability.NONE)
+        val gained = ChainRunner.restore(chain, started.rows, HandshakeCapability.ALL)
+        assertTrue(gained.attempts.isEmpty())
+        assertEquals(started.state, gained.state)
+        assertEquals(TYPING, gained.state.steps[0].mode)
+    }
+
+    @Test
+    fun `QR that becomes unavailable after tries falls back to typing with a fresh allowance, and typing can still fall back`() {
+        val run = Run(spec(ChainOp.OR, QR, HOLD), HandshakeCapability.ALL).fail(2)
+        assertEquals(1, run.state.triesLeft)
+        val wayBefore = run.state.step!!.way
+
+        run.unavailable(0)
+
+        assertEquals(listOf(row(0, QR, 1, FAILED), row(0, QR, 2, FAILED), row(0, QR, 2, FALLBACK)), run.rows)
+        val step = run.state.step!!
+        assertEquals(0, run.state.current)
+        assertEquals(TYPING, step.mode)
+        assertEquals("a fresh allowance", 0, step.attempts)
+        assertEquals(3, run.state.triesLeft)
+        assertEquals(wayBefore + 1, step.way)
+        assertNull(step.lastMiss)
+        assertFalse("changed as a start substitution does: typing may still fall back", step.changedMode)
+        assertEquals(run.state, restore(run.spec, run.rows))
+
+        run.fail(3)
+        assertEquals(CONFIRM_SEQUENCE, run.state.shown)
+        assertEquals(row(0, TYPING, 3, FALLBACK), run.rows.last())
+        assertEquals(run.state, restore(run.spec, run.rows))
+    }
+
+    @Test
+    fun `an unavailable QR step that is not on screen is replaced where it stands, and what is on screen stays`() {
+        val run = Run(spec(ChainOp.OR, HOLD, QR), HandshakeCapability.ALL).fail()
+        val onScreen = run.state.tryOnScreen
+
+        run.unavailable(1)
+
+        assertEquals(row(1, QR, 0, FALLBACK), run.rows.last())
+        assertEquals(0, run.state.current)
+        assertEquals("the try on screen is the same try", onScreen, run.state.tryOnScreen)
+        assertEquals(TYPING, run.state.steps[1].mode)
+        assertEquals(listOf(1), run.state.alternatives)
+        run.switchTo(1)
+        assertEquals(TYPING, run.state.shown)
+        assertEquals(TryId(1, 1, 1), run.state.tryOnScreen)
+    }
+
+    @Test
+    fun `unavailable changes nothing for a step that needs nothing of the phone, one already replaced, one passed, one that is not there, or a chain that is over`() {
+        val run = Run(spec(ChainOp.AND, QR, HOLD, TYPING), HandshakeCapability.ALL)
+        for (position in listOf(1, 2, 3, -1)) {
+            val before = run.state
+            run.unavailable(position)
+            assertSame("position $position", before, run.state)
+        }
+        assertTrue(run.rows.isEmpty())
+
+        run.unavailable(0)
+        val replaced = run.state
+        run.unavailable(0)
+        assertSame("typing in QR's place needs nothing of the phone", replaced, run.state)
+
+        val passed = Run(spec(ChainOp.AND, QR, HOLD), HandshakeCapability.ALL).pass()
+        assertEquals(StepStatus.PASSED, passed.state.steps[0].status)
+        val afterPass = passed.state
+        passed.unavailable(0)
+        assertSame("a step that passed is not asked again", afterPass, passed.state)
+
+        // A stuck step: QR used up, typing used up, nothing left.
+        val stuck = Run(spec(ChainOp.OR, QR, HOLD, retries = 2), HandshakeCapability.ALL).fail(4)
+        assertEquals(StepStatus.STUCK, stuck.state.steps[0].status)
+        val afterStuck = stuck.state
+        stuck.unavailable(0)
+        assertSame(afterStuck, stuck.state)
+
+        val over = Run(spec(ChainOp.OR, QR, HOLD), HandshakeCapability.ALL).switchTo(1).pass()
+        assertEquals(ChainStatus.SATISFIED, over.state.status)
+        val done = over.state
+        over.unavailable(0)
+        assertSame("a chain that is over takes no more events", done, over.state)
+        assertEquals(1, over.rows.size)
+    }
+
+    @Test
+    fun `unavailable is never a try and never uses an allowance`() {
+        val run = Run(spec(ChainOp.OR, QR, HOLD, retries = 2), HandshakeCapability.ALL)
+        run.unavailable(0)
+        assertTrue("its row is a note, not a try", run.rows.none { it.outcome == FAILED || it.outcome == TIMEOUT || it.outcome == SUCCESS })
+        assertEquals(listOf(row(0, QR, 0, FALLBACK)), run.rows)
+        assertEquals(2, run.state.triesLeft)
+        assertEquals(StepStatus.OPEN, run.state.steps[0].status)
+        // And it is not the change of mode that a used-up allowance makes: typing still has its own fallback after it.
+        run.fail(2)
+        assertEquals(CONFIRM_SEQUENCE, run.state.shown)
+        run.fail(2)
+        assertEquals(StepStatus.STUCK, run.state.steps[0].status)
+    }
+
+    @Test
+    fun `the try-0 notes of a start are consumed by a restore, and a note that does not fit the step is not`() {
+        val chain = spec(ChainOp.OR, QR, HOLD)
+        val started = ChainRunner.start(chain, HandshakeCapability.NONE)
+        val restored = ChainRunner.restore(chain, started.attempts, HandshakeCapability.NONE)
+        assertTrue("the note was written at the start, so nothing is to be written again", restored.attempts.isEmpty())
+        assertEquals(started.state, restored.state)
+        assertEquals(started.state, restore(chain, started.attempts))
+
+        // A note whose number is not the step's tries, or one about another mode, is not an unavailable.
+        val qr = ChainRunner.start(chain, HandshakeCapability.ALL).state
+        assertEquals(QR, restore(chain, listOf(row(0, QR, 1, FALLBACK))).shown)
+        val tried = restore(chain, listOf(row(0, QR, 1, FAILED), row(0, QR, 0, FALLBACK)))
+        assertEquals(QR, tried.shown)
+        assertEquals(1, tried.step!!.attempts)
+        assertEquals(qr, restore(chain, listOf(row(0, TYPING, 0, FALLBACK), row(1, HOLD, 0, FALLBACK), row(7, QR, 0, FALLBACK))))
+
+        // A used-up allowance writes its note with the last try's number, after the step has changed way: it is not an unavailable.
+        val used = Run(chain, HandshakeCapability.ALL).fail(3)
+        assertEquals(row(0, QR, 3, FALLBACK), used.rows.last())
+        assertEquals(used.state, restore(chain, used.rows))
+        assertTrue(used.state.step!!.changedMode)
+    }
+
+    @Test
+    fun `the notes of NFC and voice, which are not built, are still ignored by a restore`() {
+        for (unbuilt in listOf(NFC, VOICE)) {
+            val chain = spec(ChainOp.OR, unbuilt, HOLD)
+            for (capability in listOf(HandshakeCapability.ALL, HandshakeCapability.NONE)) {
+                val started = ChainRunner.start(chain, capability)
+                assertEquals(listOf(row(0, unbuilt, 0, FALLBACK)), started.attempts)
+                val restored = ChainRunner.restore(chain, started.attempts, capability)
+                assertTrue(restored.attempts.isEmpty())
+                assertEquals("$unbuilt runs as typing on its first way", started.state, restored.state)
+                assertEquals(0, restored.state.steps[0].way)
+            }
+        }
+    }
+
+    @Test
+    fun `reconcile applies the capability to every open step in order, and changes nothing when the phone can do them`() {
+        val chain = spec(ChainOp.AND, QR, HOLD, TYPING)
+        val live = Run(chain, HandshakeCapability.ALL)
+        val same = ChainRunner.reconcile(live.state, HandshakeCapability.ALL)
+        assertSame(live.state, same.state)
+        assertTrue(same.attempts.isEmpty())
+
+        val lost = ChainRunner.reconcile(live.state, HandshakeCapability.NONE)
+        assertEquals(listOf(row(0, QR, 0, FALLBACK)), lost.attempts)
+        assertEquals(TYPING, lost.state.steps[0].mode)
+        assertEquals(0, lost.state.current)
+        val twice = ChainRunner.reconcile(lost.state, HandshakeCapability.NONE)
+        assertSame(lost.state, twice.state)
+        assertTrue(twice.attempts.isEmpty())
     }
 
     // --- the operators ------------------------------------------------------------------------------------------
@@ -576,17 +793,17 @@ class ChainRunnerTest {
         assertEquals(FAILED, run.state.step!!.lastMiss)
         run.timeOut()
         assertEquals("a try that took too long is not a wrong one", TIMEOUT, run.state.step!!.lastMiss)
-        assertEquals(run.state, ChainRunner.restore(run.spec, run.rows))
+        assertEquals(run.state, restore(run.spec, run.rows))
 
         run.fail() // the third try: typing is used up, and the numbers take its place
         assertEquals(CONFIRM_SEQUENCE, run.state.shown)
         assertNull("a new way starts clean", run.state.step!!.lastMiss)
-        assertEquals(run.state, ChainRunner.restore(run.spec, run.rows))
+        assertEquals(run.state, restore(run.spec, run.rows))
 
         val press = Run(spec(ChainOp.OR, HOLD, retries = 2)).fail(2) // the press is used up and the three taps take its place
         assertTrue(press.state.step!!.assistive)
         assertNull("the confirm starts clean too", press.state.step!!.lastMiss)
-        assertEquals(press.state, ChainRunner.restore(press.spec, press.rows))
+        assertEquals(press.state, restore(press.spec, press.rows))
 
         val hold = Run(spec(ChainOp.OR, HOLD, retries = 2)).fail().pass()
         assertNull("a step that passed has nothing wrong to remember on screen", hold.state.step)
@@ -609,23 +826,23 @@ class ChainRunnerTest {
         // Two copies of the hold's row do not answer the question that follows it.
         val chain = spec(ChainOp.OR, TWO_STEP, retries = 2)
         val twice = listOf(row(0, HOLD, 1, SUCCESS), row(0, HOLD, 1, SUCCESS))
-        val restored = ChainRunner.restore(chain, twice)
+        val restored = restore(chain, twice)
         assertEquals(ChainStatus.RUNNING, restored.status)
         assertEquals(StepPart.MAIN, restored.step!!.part)
         assertFalse(restored.firstActionIndicated)
-        assertEquals(ChainRunner.restore(chain, twice.take(1)), restored)
+        assertEquals(restore(chain, twice.take(1)), restored)
 
         // A row for typing does not count on a step that asks for a hold, whatever its numbers.
         val hold = spec(ChainOp.OR, HOLD)
-        assertEquals(ChainRunner.start(hold).state, ChainRunner.restore(hold, listOf(row(0, TYPING, 1, FAILED), row(0, TYPING, 1, SUCCESS))))
+        assertEquals(ChainRunner.start(hold, HandshakeCapability.ALL).state, restore(hold, listOf(row(0, TYPING, 1, FAILED), row(0, TYPING, 1, SUCCESS))))
 
         // After a change of mode, a row of the mode that was left cannot count on the new one.
         val live = Run(spec(ChainOp.OR, TYPING, retries = 2)).fail(2)
-        assertEquals(live.state, ChainRunner.restore(live.spec, live.rows + row(0, TYPING, 1, SUCCESS)))
+        assertEquals(live.state, restore(live.spec, live.rows + row(0, TYPING, 1, SUCCESS)))
 
         // And a row that was refused does not leave its mark on the state: it is as if it had not been written.
         val mixed = listOf(row(0, HOLD, 1, FAILED), row(0, TYPING, 2, FAILED), row(0, HOLD, 2, FAILED))
-        assertEquals(ChainRunner.restore(hold, listOf(mixed[0], mixed[2])), ChainRunner.restore(hold, mixed))
+        assertEquals(restore(hold, listOf(mixed[0], mixed[2])), restore(hold, mixed))
     }
 
     // --- the record is the truth -----------------------------------------------------------------------------------
@@ -642,66 +859,99 @@ class ChainRunnerTest {
             spec(ChainOp.OR, TWO_STEP, retries = 2),
             spec(ChainOp.AND, TWO_STEP, TYPING, retries = 2),
             spec(ChainOp.OR, TYPING, TWO_STEP, retries = 1),
+            spec(ChainOp.OR, QR, TYPING, retries = 2),
+            spec(ChainOp.AND, HOLD, QR, retries = 2),
+            spec(ChainOp.SEQUENCE, TWO_STEP, QR, retries = 3),
+            spec(ChainOp.OR, QR, HOLD, TWO_STEP, retries = 1),
         )
         var seed = 12345L
         fun next(bound: Int): Int {
             seed = seed * 6364136223846793005L + 1442695040888963407L
             return ((seed ushr 33) % bound).toInt()
         }
+        fun capabilityOf(ready: Boolean) = if (ready) HandshakeCapability.ALL else HandshakeCapability.NONE
         var finishedSatisfied = 0
         var finishedExhausted = 0
         var ignored = 0
-        repeat(900) { round ->
+        var unavailableApplied = 0
+        var lostInRing = 0
+        repeat(1200) { round ->
             val chain = specs[round % specs.size]
-            val start = ChainRunner.start(chain)
+            // The phone can do QR or not at the start, and that may change during the ring, either way.
+            var ready = next(2) == 0
+            val start = ChainRunner.start(chain, capabilityOf(ready))
             var state = start.state
             val history = ArrayList<Attempt>(start.attempts)
             var events = 0
             val seen = HashMap<Int, HashSet<TryId>>()
             val lastSeen = HashMap<Int, TryId>()
-            state.tryOnScreen?.let { first ->
-                seen.getOrPut(first.position) { HashSet() }.add(first)
-                lastSeen[first.position] = first
+            fun look(now: TryId?) {
+                if (now == null) return
+                // The tries of every way are numbered from one, so what makes a try this one and no other is its identity: it is never
+                // used again for the same step, turning away and back being the same try and not a new one.
+                if (lastSeen[now.position] != now) {
+                    assertTrue("round $round: $now was on screen before", seen.getOrPut(now.position) { HashSet() }.add(now))
+                    lastSeen[now.position] = now
+                }
             }
+            look(state.tryOnScreen)
             // Turning to another step leaves no row until the person does something there, so the step that was on screen is not part of
-            // the record until then; everything else is.
+            // the record until then; everything else is. A step that could not run (an unavailable) leaves a row but is not a try, so it
+            // does not bring a turn into the record either.
             var turnedWithoutAct = false
             while (state.status == ChainStatus.RUNNING && events++ < 80) {
                 val here = state.tryOnScreen!!
-                // One event in ten is about some other try: a duplicate, a late timer, a screen that was recreated.
-                val at = if (next(10) == 0) TryId(next(chain.steps.size), 1 + next(4), next(3)) else here
-                val event = when (next(20)) {
-                    in 0..8 -> ChainEvent.Failed(at)
-                    in 9..11 -> ChainEvent.TimedOut(at)
-                    in 12..14 -> ChainEvent.Switch(next(chain.steps.size))
-                    in 15..16 -> ChainEvent.PassedAssistively(at)
-                    else -> ChainEvent.Passed(at)
-                }
-                val step = ChainRunner.advance(state, event)
-                if (event !is ChainEvent.Switch && at != here && step.state !== state) {
-                    throw AssertionError("an event about $at changed the state while $here was on screen: $event")
-                }
-                if (event !is ChainEvent.Switch && at != here) ignored++
-                step.state.tryOnScreen?.let { now ->
-                    // The tries of every way are numbered from one, so what makes a try this one and no other is its identity: it is never
-                    // used again for the same step, turning away and back being the same try and not a new one.
-                    if (lastSeen[now.position] != now) {
-                        assertTrue("round $round: $now was on screen before", seen.getOrPut(now.position) { HashSet() }.add(now))
-                        lastSeen[now.position] = now
+                val draw = next(25)
+                val step = if (draw >= 23) {
+                    // The capability changes: the consent withdrawn or given, the camera taken by another app, a code registered.
+                    ready = !ready
+                    val reconciled = ChainRunner.reconcile(state, capabilityOf(ready))
+                    if (reconciled.attempts.isNotEmpty()) lostInRing++
+                    if (ready) assertSame("a phone that gains QR leaves every step as it is", state, reconciled.state)
+                    reconciled
+                } else {
+                    // One event in ten is about some other try: a duplicate, a late timer, a screen that was recreated.
+                    val at = if (next(10) == 0) TryId(next(chain.steps.size), 1 + next(4), next(3)) else here
+                    val event = when (draw) {
+                        in 0..8 -> ChainEvent.Failed(at)
+                        in 9..11 -> ChainEvent.TimedOut(at)
+                        in 12..14 -> ChainEvent.Switch(next(chain.steps.size))
+                        in 15..16 -> ChainEvent.PassedAssistively(at)
+                        in 17..19 -> ChainEvent.Passed(at)
+                        // The camera failing mid-ring, about any step, open or not, QR or not.
+                        else -> ChainEvent.Unavailable(next(chain.steps.size))
                     }
+                    val advanced = ChainRunner.advance(state, event)
+                    val aboutATry = event !is ChainEvent.Switch && event !is ChainEvent.Unavailable
+                    if (aboutATry && at != here && advanced.state !== state) {
+                        throw AssertionError("an event about $at changed the state while $here was on screen: $event")
+                    }
+                    if (aboutATry && at != here) ignored++
+                    if (event is ChainEvent.Unavailable) {
+                        assertEquals("an unavailable never moves the step on screen", state.current, advanced.state.current)
+                        assertTrue("and never counts a try", advanced.attempts.all { it.outcome == FALLBACK })
+                        if (advanced.attempts.isNotEmpty()) unavailableApplied++
+                    }
+                    if (advanced.state.current != state.current && advanced.attempts.isEmpty()) turnedWithoutAct = true
+                    if (aboutATry && advanced.attempts.isNotEmpty()) turnedWithoutAct = false
+                    advanced
                 }
-                if (step.state.current != state.current && step.attempts.isEmpty()) turnedWithoutAct = true
-                if (step.attempts.isNotEmpty()) turnedWithoutAct = false
+                look(step.state.tryOnScreen)
                 state = step.state
                 for (row in step.attempts) {
                     assertTrue("a row names a step of the chain", row.position in chain.steps.indices)
-                    assertTrue("and a try of it, counted from one", row.attemptNo >= 1)
+                    if (row.outcome == FALLBACK) {
+                        assertTrue("a note names the try it followed, or none", row.attemptNo >= 0)
+                    } else {
+                        assertTrue("and a try of it, counted from one", row.attemptNo >= 1)
+                    }
                 }
                 history += step.attempts
-                val restored = ChainRunner.restore(chain, history)
-                assertEquals("round $round after $events events", state.steps, restored.steps)
-                assertEquals("round $round after $events events", state.status, restored.status)
-                if (!turnedWithoutAct) assertEquals("round $round after $events events", state, restored)
+                val restored = ChainRunner.restore(chain, history, capabilityOf(ready))
+                assertTrue("round $round after $events events: the live ring wrote everything already", restored.attempts.isEmpty())
+                assertEquals("round $round after $events events", state.steps, restored.state.steps)
+                assertEquals("round $round after $events events", state.status, restored.state.status)
+                if (!turnedWithoutAct) assertEquals("round $round after $events events", state, restored.state)
             }
             when (state.status) {
                 ChainStatus.SATISFIED -> finishedSatisfied++
@@ -711,12 +961,13 @@ class ChainRunnerTest {
         }
         assertTrue("the run should reach both endings ($finishedSatisfied, $finishedExhausted)", finishedSatisfied > 20 && finishedExhausted > 20)
         assertTrue("and meet events about other tries ($ignored)", ignored > 100)
+        assertTrue("and replace steps that could not run, by an event ($unavailableApplied) and by a lost capability ($lostInRing)", unavailableApplied > 20 && lostInRing > 20)
     }
 
     @Test
     fun `rows that no event produced, that do not fit the chain, or that repeat a try, are skipped wherever they stand`() {
         val chain = DialEffects.defaultChain(4)
-        val fresh = ChainRunner.start(chain).state
+        val fresh = ChainRunner.start(chain, HandshakeCapability.ALL).state
         val noise = listOf(
             row(0, CONFIRM_SEQUENCE, 1, ChallengeOutcome.SAFETY_SILENCE),
             row(0, CONFIRM_SEQUENCE, 1, ChallengeOutcome.CANCELLED),
@@ -724,22 +975,22 @@ class ChainRunnerTest {
             row(9, TYPING, 1, FAILED),
             row(-1, TYPING, 1, SUCCESS),
         )
-        assertEquals(fresh, ChainRunner.restore(chain, noise))
-        assertEquals(fresh, ChainRunner.restore(chain, emptyList()))
+        assertEquals(fresh, restore(chain, noise))
+        assertEquals(fresh, restore(chain, emptyList()))
 
         // Noise between real rows, and a row that repeats a try that was counted, change nothing.
         val real = listOf(row(0, CONFIRM_SEQUENCE, 1, FAILED), row(0, CONFIRM_SEQUENCE, 2, SUCCESS), row(1, TYPING, 1, FAILED))
-        val clean = ChainRunner.restore(chain, real)
+        val clean = restore(chain, real)
         val muddled = listOf(noise[0], real[0], real[0], noise[3], real[1], noise[1], real[1], noise[4], real[2], real[2], noise[2])
-        assertEquals(clean, ChainRunner.restore(chain, muddled))
+        assertEquals(clean, restore(chain, muddled))
         assertEquals("one wrong try on the sequence, and one on typing", 1, clean.steps[1].attempts)
 
         // A row for the other open step of an AND chain is read as the person having turned to it; one for a step that cannot be turned to is not.
-        val turned = ChainRunner.restore(chain, listOf(row(1, TYPING, 1, FAILED)))
+        val turned = restore(chain, listOf(row(1, TYPING, 1, FAILED)))
         assertEquals(1, turned.current)
         assertEquals(1, turned.steps[1].attempts)
         val sequence = DialEffects.defaultChain(5)
-        assertEquals(ChainRunner.start(sequence).state, ChainRunner.restore(sequence, listOf(row(1, TWO_STEP, 1, SUCCESS))))
+        assertEquals(ChainRunner.start(sequence, HandshakeCapability.ALL).state, restore(sequence, listOf(row(1, TWO_STEP, 1, SUCCESS))))
     }
 
     @Test
@@ -750,22 +1001,22 @@ class ChainRunnerTest {
         val live = Run(chain).switchTo(1).fail().switchTo(2)
         assertEquals("the person is on the press", 2, live.state.current)
         assertEquals(listOf(row(1, TYPING, 1, FAILED)), live.rows)
-        val restored = ChainRunner.restore(chain, live.rows)
+        val restored = restore(chain, live.rows)
         assertEquals("but they come back on typing, where the last try was", 1, restored.current)
         assertEquals(TryId(1, 2), restored.tryOnScreen)
         assertEquals(live.state.steps, restored.steps)
 
         // A turn and no try at all: the first open step.
         val turned = Run(chain).switchTo(1).switchTo(2)
-        assertEquals(0, ChainRunner.restore(chain, turned.rows).current)
+        assertEquals(0, restore(chain, turned.rows).current)
 
         // The last try left its step passed, in a chain where every step is needed: the first open step, not the step that passed.
         val all = spec(ChainOp.AND, CONFIRM_SEQUENCE, TYPING, HOLD)
         val passed = Run(all).switchTo(1).pass()
         assertEquals("the person is on a step that is still open", 0, passed.state.current)
-        assertEquals(0, ChainRunner.restore(all, passed.rows).current)
+        assertEquals(0, restore(all, passed.rows).current)
         val later = Run(all).switchTo(2).pass()
-        assertEquals(0, ChainRunner.restore(all, later.rows).current)
+        assertEquals(0, restore(all, later.rows).current)
     }
 
     @Test
@@ -792,7 +1043,7 @@ class ChainRunnerTest {
         val live = Run(spec(ChainOp.OR, TWO_STEP, retries = 2)).fail().assist()
         assertEquals(listOf(row(0, HOLD, 1, FAILED), row(0, HOLD, 2, ACCESSIBLE_ALT)), live.rows)
 
-        val restored = ChainRunner.restore(live.spec, live.rows)
+        val restored = restore(live.spec, live.rows)
 
         assertEquals(live.state, restored)
         assertEquals(StepPart.MAIN, restored.step!!.part)

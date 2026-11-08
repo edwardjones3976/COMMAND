@@ -1,13 +1,24 @@
 package com.command
 
 import com.command.data.OccurrenceRepository
+import com.command.data.ProfileRepository
+import com.command.data.RegisterResult
+import com.command.data.SaveChainResult
+import com.command.data.TokenRepository
 import com.command.data.db.CommandDb
 import com.command.data.db.OccurrenceRow
+import com.command.domain.dials.ChainOp
+import com.command.domain.dials.ChainSpec
+import com.command.domain.dials.HandshakeMode
+import com.command.domain.dials.StepSpec
+import com.command.domain.handshake.HandshakeCapability
+import com.command.domain.model.ChallengeOutcome
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
 import com.command.domain.occurrence.OccurrenceCommand
 import com.command.domain.occurrence.OccurrenceState
 import com.command.reveille.Challenge
+import com.command.reveille.FixedCapability
 import com.command.reveille.FixedPhrases
 import com.command.reveille.ReveilleUiState
 import com.command.reveille.ReveilleViewModel
@@ -44,6 +55,8 @@ class RingActionsTest {
     @Inject lateinit var repo: OccurrenceRepository
     @Inject lateinit var db: CommandDb
     @Inject lateinit var clock: FakeClock
+    @Inject lateinit var profiles: ProfileRepository
+    @Inject lateinit var tokens: TokenRepository
 
     private val phrases = FixedPhrases(listOf(PHRASE))
     private lateinit var vm: ReveilleViewModel
@@ -51,7 +64,7 @@ class RingActionsTest {
     @Before
     fun setUp() {
         hilt.inject()
-        vm = ReveilleViewModel(repo, clock, phrases)
+        vm = ReveilleViewModel(repo, clock, phrases, FixedCapability(), tokens)
     }
 
     private fun ringing(): OccurrenceRow = runBlocking {
@@ -127,7 +140,68 @@ class RingActionsTest {
         assertTrue(rows(o).isEmpty())
     }
 
+    /** Two rings that ask for a code, on a phone that can scan one, and a view model for that phone with a code registered. */
+    private fun scanning(): Pair<OccurrenceRow, OccurrenceRow> = runBlocking {
+        check(profiles.saveChain("builtin_steady", ChainSpec(ChainOp.SEQUENCE, listOf(StepSpec(HandshakeMode.QR, 3, 90, 0)))) == SaveChainResult.Saved)
+        check(tokens.register(HandshakeMode.QR, "Kitchen", CODE) is RegisterResult.Saved)
+        vm = ReveilleViewModel(repo, clock, phrases, FixedCapability(HandshakeCapability.ALL), tokens)
+        suspend fun one(): OccurrenceRow {
+            val mission = testMission()
+            db.missions().insert(mission)
+            val o = repo.createOccurrence(mission.id, FakeAlarmModule.T0 + 60_000, "UTC").occurrence
+            repo.apply(o.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+            repo.apply(o.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+            return repo.get(o.id)!!
+        }
+        one() to one()
+    }
+
+    private fun showScanning(o: OccurrenceRow) {
+        vm.show(o.id)
+        awaitUntil(message = "the code is asked for") { (vm.state.value as? ReveilleUiState.Firing)?.challenge is Challenge.Qr }
+    }
+
+    @Test
+    fun `a code read, or a camera that fails, on the screen of another ring is not about the ring on screen, and on its own screen it is`() {
+        val (a, b) = scanning()
+        showScanning(a)
+        val oldScreen = ringActions(vm, a.id) {}
+        val tryId = ((vm.state.value as ReveilleUiState.Firing).challenge as Challenge.Qr).tryId
+        showScanning(b)
+        val newScreen = ringActions(vm, b.id) {}
+
+        oldScreen.onQrScanned(tryId, CODE)
+        oldScreen.onQrUnavailable()
+        settle()
+        assertEquals(OccurrenceState.FIRING, stateOf(b))
+        assertTrue("nothing was written for the ring on screen", rows(b).isEmpty())
+        assertTrue("it still asks for the code", (vm.state.value as ReveilleUiState.Firing).challenge is Challenge.Qr)
+
+        newScreen.onQrUnavailable()
+        awaitUntil(message = "its own screen's camera failure is heard") { (vm.state.value as? ReveilleUiState.Firing)?.challenge is Challenge.Typing }
+        assertEquals(listOf(HandshakeMode.QR to ChallengeOutcome.FALLBACK), rows(b).map { it.mode to it.outcome })
+        assertEquals("the other ring was never touched", OccurrenceState.FIRING, stateOf(a))
+        assertTrue(rows(a).isEmpty())
+    }
+
+    @Test
+    fun `a code read on the ring's own screen is heard, and with no ring on the screen it does nothing`() {
+        val (a, _) = scanning()
+        showScanning(a)
+        val tryId = ((vm.state.value as ReveilleUiState.Firing).challenge as Challenge.Qr).tryId
+
+        ringActions(vm, null) {}.onQrScanned(tryId, CODE)
+        ringActions(vm, null) {}.onQrUnavailable()
+        settle()
+        assertTrue(rows(a).isEmpty())
+
+        ringActions(vm, a.id) {}.onQrScanned(tryId, CODE)
+        awaitUntil(message = "the code is heard") { vm.state.value is ReveilleUiState.Direction }
+        assertEquals(OccurrenceState.GUIDED_START, stateOf(a))
+    }
+
     private companion object {
         const val PHRASE = "Starting now"
+        const val CODE = "command-qr:0123456789abcdefghijkl"
     }
 }

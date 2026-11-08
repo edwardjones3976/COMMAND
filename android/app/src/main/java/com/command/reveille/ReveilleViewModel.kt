@@ -7,6 +7,7 @@ import com.command.data.ChallengeRecord
 import com.command.data.MissionBrief
 import com.command.data.OccurrenceRepository
 import com.command.data.REPEATED_ACK_NO_START_AFTER
+import com.command.data.TokenRepository
 import com.command.data.db.OccurrenceRow
 import com.command.domain.coaching.CoachingPhase
 import com.command.domain.dials.ChainOp
@@ -14,11 +15,13 @@ import com.command.domain.dials.FrictionEvidence
 import com.command.domain.dials.HandshakeMode
 import com.command.domain.dials.LockPolicy
 import com.command.domain.dials.SkipReasonCode
+import com.command.domain.handshake.ChainAdvance
 import com.command.domain.handshake.ChainEvent
 import com.command.domain.handshake.ChainRunner
 import com.command.domain.handshake.ChainState
 import com.command.domain.handshake.ChainStatus
 import com.command.domain.handshake.ConfirmSequence
+import com.command.domain.handshake.HandshakeCapability
 import com.command.domain.handshake.StepPart
 import com.command.domain.handshake.StepProgress
 import com.command.domain.handshake.StepStatus
@@ -31,6 +34,7 @@ import com.command.domain.occurrence.OccurrenceState
 import com.command.domain.occurrence.SkipReason
 import com.command.domain.occurrence.StarterWindow
 import com.command.domain.time.Clock
+import com.command.handshake.HandshakeCapabilitySource
 import com.command.ui.guardedScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -96,6 +100,9 @@ enum class FrictionAction { SKIP, DELAY }
 
 data class FrictionPrompt(val required: LockPolicy, val action: FrictionAction = FrictionAction.SKIP, val retry: (FrictionEvidence) -> Unit)
 
+/** How long the same wrong code, held in front of the lens, is not read again: one code shown for a while is one try, not thirty a second. */
+internal const val QR_WRONG_REPEAT_MS = 3_000L
+
 /**
  * Drives the lock-screen flow for one occurrence. The screen is a projection of the stored occurrence: every tap becomes a
  * command to [OccurrenceRepository], so a relaunch after the process died lands on the right step.
@@ -117,12 +124,19 @@ data class FrictionPrompt(val required: LockPolicy, val action: FrictionAction =
  * event of the handshake it is about a ring, so it is checked against the ring on screen, in the lock. A step that would give the person
  * nothing that the screen does not give already is not offered ([alternativesOf]: the same screen, such as the numbers that gave way to
  * typing beside a step of typing, or, where every step is needed, the hold of a two-step beside the press that has to be passed anyway).
+ *
+ * *The phone.* A way that needs something of the phone (QR: the camera, its consent and permission, a registered code) is asked for only while
+ * the phone can do it ([HandshakeCapabilitySource]). The phone is read when a ring is shown, and again whenever the ring screen comes back to
+ * the front ([recheckCapability]); a step it cannot do then, or whose camera fails during the ring ([qrUnavailable]), is replaced by its
+ * fallback, and the record says so once. A step that was replaced is not taken back when the phone can do it again.
  */
 @HiltViewModel
 class ReveilleViewModel @Inject constructor(
     private val repository: OccurrenceRepository,
     private val clock: Clock,
     private val phrases: PhraseSource,
+    private val capabilitySource: HandshakeCapabilitySource,
+    private val tokens: TokenRepository,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow<ReveilleUiState>(ReveilleUiState.Loading)
@@ -189,6 +203,15 @@ class ReveilleViewModel @Inject constructor(
     /** A hold was let go too early, for the hint under it. */
     private var earlyRelease = false
 
+    /** What this phone could do when it was last read, for the ring on screen. */
+    private var capability = HandshakeCapability.NONE
+
+    /**
+     * The codes already counted as wrong, each with when it was last seen (on the monotonic clock): such a code is not counted again until it
+     * has been out of view for [QR_WRONG_REPEAT_MS]. Nothing is kept longer than that, and nothing here is ever logged.
+     */
+    private val wrongSeenAtMs = HashMap<String, Long>()
+
     /** When the try on screen was begun, for the times of its row. */
     private var began: Long? = null
     private var timer: Job? = null
@@ -218,6 +241,8 @@ class ReveilleViewModel @Inject constructor(
         slow = false
         earlyRelease = false
         began = null
+        capability = HandshakeCapability.NONE
+        wrongSeenAtMs.clear()
         prompt = ""
         ringLine = null
         lineNotSpoken = false
@@ -346,13 +371,21 @@ class ReveilleViewModel @Inject constructor(
             prompt = repository.lineFor(row, CoachingPhase.HANDSHAKE_PROMPT, withMissionWords = false).text
             ringLine = repository.lineFor(row, CoachingPhase.REVEILLE).text
             val tries = repository.attemptsOf(row.id)
-            val started = ChainRunner.start(wanted.chain)
+            capability = capabilitySource.current()
+            val started = ChainRunner.start(wanted.chain, capability)
             if (tries.isEmpty() && started.attempts.isNotEmpty()) {
-                // A mode that cannot be asked for yet was replaced by its fallback: the record says so, once.
+                // A mode that cannot be asked for (not built, or not on this phone now) was replaced by its fallback: the record says so, once.
                 val now = clock.nowMs()
                 repository.recordChallenges(row.id, started.attempts.map { ChallengeRecord(it.position, it.mode, it.attemptNo, it.outcome, now, now) })
             }
-            val restored = ChainRunner.restore(wanted.chain, tries)
+            // The notes just written are part of the record: a restore from nothing would note the same replacements again.
+            val replayed = ChainRunner.restore(wanted.chain, if (tries.isEmpty()) started.attempts else tries, capability)
+            if (replayed.attempts.isNotEmpty()) {
+                // A step this phone cannot do now was replaced while the record was read back: the record says so, once.
+                val now = clock.nowMs()
+                repository.recordChallenges(row.id, replayed.attempts.map { ChallengeRecord(it.position, it.mode, it.attemptNo, it.outcome, now, now) })
+            }
+            val restored = replayed.state
             chain = restored
             // The words under the challenge come from how the last try on the way that is on screen ended: a wrong one (or one that took
             // too long) is said again, and a new way starts clean. They come from the state the rows lead to, and not from the last row,
@@ -414,8 +447,9 @@ class ReveilleViewModel @Inject constructor(
             HandshakeMode.TYPING -> Challenge.Typing(tryId, phrase, state.triesLeft, mistaken, slow)
             HandshakeMode.CONFIRM_SEQUENCE -> Challenge.Sequence(tryId, ConfirmSequence.layout(id, step.attempts), tapped, state.triesLeft, mistaken, slow)
             HandshakeMode.TWO_STEP -> Challenge.TwoStep(tryId, firstAction)
-            // QR, NFC and voice are replaced by the engine before they can reach the screen.
-            HandshakeMode.QR, HandshakeMode.NFC, HandshakeMode.VOICE -> Challenge.OutOfTries
+            HandshakeMode.QR -> Challenge.Qr(tryId, state.triesLeft, mistaken, slow)
+            // NFC and voice are not built: the engine replaces them before they can reach the screen.
+            HandshakeMode.NFC, HandshakeMode.VOICE -> Challenge.OutOfTries
         }
     }
 
@@ -529,6 +563,27 @@ class ReveilleViewModel @Inject constructor(
     }
 
     /**
+     * Takes a change that the phone made ([ChainEvent.Unavailable], [ChainRunner.reconcile]) and writes its rows. It is never a try: the try on
+     * screen keeps its clock and what has been typed or tapped, unless it is the step that was replaced, which starts its new way clean.
+     */
+    private suspend fun replaced(stepped: ChainAdvance) {
+        val id = occurrenceId ?: return
+        val before = chain ?: return
+        if (stepped.attempts.isEmpty()) return
+        val now = clock.nowMs()
+        chain = stepped.state
+        if (stepped.state.tryOnScreen != before.tryOnScreen) {
+            timer?.cancel()
+            timer = null
+            began = null
+            tapped = 0
+            wordsFrom(stepped.state)
+        }
+        repository.recordChallenges(id, stepped.attempts.map { ChallengeRecord(it.position, it.mode, it.attemptNo, it.outcome, now, now) })
+        publish()
+    }
+
+    /**
      * Starts the clock on the try on screen, once: it is begun, and if it is not finished in the step's time it counts as a try.
      *
      * A time-out is an event like any other and is handled in the order it came (the lock is fair). One that is already waiting for its turn
@@ -621,6 +676,53 @@ class ReveilleViewModel @Inject constructor(
 
     /** "I am doing: ..." The person has said what they will do first. It acknowledges; it does not start. */
     fun twoStepIndicated(ring: String, at: TryId) = send(ring, ChainEvent.Passed(at))
+
+    /**
+     * The camera read a code. A registered one passes the try and any other fails it; a blank one is not a code and is not a try. A code
+     * already counted as wrong is ignored until it has been out of view for [QR_WRONG_REPEAT_MS] (each sighting starts that wait again), so
+     * that a code held in front of the lens uses one try and not one for every frame, and two wrong codes in view together use one try each.
+     * A QR try is begun by its first scan, which also ends it: no clock runs while the person walks to the code, because doing nothing
+     * is never a try.
+     */
+    fun qrScanned(ring: String, at: TryId, payload: String) {
+        if (payload.isBlank()) return
+        inRing(ring) {
+            val state = chain ?: return@inRing
+            if (state.tryOnScreen != at || state.step?.shown != HandshakeMode.QR) return@inRing
+            val code = payload.trim()
+            val read = clock.elapsedRealtimeMs()
+            wrongSeenAtMs.values.removeAll { read - it >= QR_WRONG_REPEAT_MS }
+            if (code in wrongSeenAtMs) {
+                wrongSeenAtMs[code] = read
+                return@inRing
+            }
+            val right = tokens.matches(HandshakeMode.QR, code)
+            if (right) wrongSeenAtMs.clear() else wrongSeenAtMs[code] = read
+            val now = clock.nowMs()
+            advance(if (right) ChainEvent.Passed(at) else ChainEvent.Failed(at), now, now)
+        }
+    }
+
+    /**
+     * The camera cannot be used now (it failed to start, or another app has it): the step on screen, if it scans, is asked as its fallback
+     * from now on ([ChainEvent.Unavailable]), and the record says so. It is not a try. A report about a step that is no longer on screen, or
+     * that has been replaced already, changes nothing.
+     */
+    fun qrUnavailable(ring: String) = inRing(ring) {
+        val state = chain ?: return@inRing
+        val step = state.step ?: return@inRing
+        replaced(ChainRunner.advance(state, ChainEvent.Unavailable(step.position)))
+    }
+
+    /**
+     * Reads the phone again (the ring screen has come back to the front: the consent, the permission or the codes may have changed meanwhile),
+     * and replaces every open step it can no longer do. A phone that can do more than before changes nothing.
+     */
+    fun recheckCapability() = inRing {
+        val state = chain ?: return@inRing
+        capability = capabilitySource.current()
+        replaced(ChainRunner.reconcile(state, capability))
+    }
 
     // --- everything else is one tap ---------------------------------------------------------------------------
 

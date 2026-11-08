@@ -8,6 +8,7 @@ import com.command.data.db.DirectiveCacheRow
 import com.command.data.db.SyncOutboxRow
 import com.command.data.db.VoiceRenderRow
 import com.command.domain.dials.Flexibility
+import com.command.domain.dials.HandshakeMode
 import com.command.domain.model.ConsentKey
 import com.command.domain.model.ConsentSource
 import com.command.domain.model.EventSource
@@ -174,6 +175,22 @@ class ConsentCascadeTest {
         failing.revoke(ConsentKey.CALENDAR_READ)
         assertEquals(OccurrenceState.SKIPPED, f.repo.get(a.id)!!.state)
         assertEquals(OccurrenceState.SKIPPED, f.repo.get(b.id)!!.state)
+    }
+
+    @Test
+    fun `withdrawing the camera consent withdraws only itself and keeps the registered codes, which are hashes the person can delete`() = run {
+        val tokens = TokenRepository(f.db, f.clock)
+        tokens.register(HandshakeMode.QR, "Fridge", "command-qr:abc")
+        consents.grant(ConsentKey.CAMERA_QR)
+        consents.grant(ConsentKey.CALENDAR_READ)
+
+        consents.revoke(ConsentKey.CAMERA_QR)
+
+        assertFalse(consents.isGranted(ConsentKey.CAMERA_QR))
+        assertTrue("an unrelated grant stays", consents.isGranted(ConsentKey.CALENDAR_READ))
+        assertEquals(listOf(ConsentKey.CAMERA_QR), listener.revoked)
+        assertEquals(1, tokens.count(HandshakeMode.QR))
+        assertTrue(tokens.matches(HandshakeMode.QR, "command-qr:abc"))
     }
 
     @Test

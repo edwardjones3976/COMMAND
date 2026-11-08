@@ -154,6 +154,21 @@ internal fun TwoStepChallenge(challenge: Challenge.TwoStep, onIndicated: () -> U
     }
 }
 
+/** What a code to scan asks, and a code that was not a registered one (or a try that took too long) said so, with the tries left. */
+@Composable
+internal fun QrWords(challenge: Challenge.Qr) {
+    Text(
+        stringResource(R.string.handshake_qr_title),
+        style = MaterialTheme.typography.titleLarge,
+        color = MaterialTheme.colorScheme.primary,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }.testTag(ReveilleTags.QR_INSTRUCTION),
+    )
+    if (challenge.mistaken) {
+        Mistaken(pluralStringResource(if (challenge.slow) R.plurals.handshake_qr_slow else R.plurals.handshake_qr_wrong, challenge.triesLeft, challenge.triesLeft))
+    }
+}
+
 /** Every way is used up: said plainly, with nothing to press but the silence that is always there and the way out that Back opens. */
 @Composable
 internal fun OutOfTriesNote() {

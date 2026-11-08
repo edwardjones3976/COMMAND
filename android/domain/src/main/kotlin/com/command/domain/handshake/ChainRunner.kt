@@ -79,6 +79,14 @@ sealed interface ChainEvent {
 
     /** They picked another of the steps that are still open ([ChainState.alternatives]). */
     data class Switch(val position: Int) : ChainEvent
+
+    /**
+     * The way of the open step at [position] cannot run on this phone now: no camera, the consent or the permission withdrawn, no code
+     * registered, or the camera failing mid-ring. It is about a step, not a try: it applies to any open step whose way needs something of
+     * the phone ([HandshakeMode.needsDevice]), on screen or not, and to nothing else. The step runs its fallback with a fresh allowance and a
+     * row says so; it is never a try and never uses an allowance.
+     */
+    data class Unavailable(val position: Int) : ChainEvent
 }
 
 /** The new state, and the tries to write down because of the event, in order. */
@@ -167,7 +175,13 @@ data class ChainState(val spec: ChainSpec, val steps: List<StepProgress>, val cu
  * acknowledgement; when nothing has, the two-step begins with a hold of its own ([StepPart.ACKNOWLEDGE]), which has its rows (the mode
  * HOLD), its tries and its assistive confirm like any hold, and only then asks the question.
  *
- * *Modes not built yet* (QR, NFC, voice) are replaced by their fallback when the chain starts, and a row says so.
+ * *Modes not built yet* (NFC, voice) are replaced by their fallback when the chain starts, and a row says so.
+ *
+ * *Modes that need the phone* (QR: a camera, its consent and permission, a registered code) are asked for only while the phone can do them
+ * ([HandshakeCapability]). One it cannot do is replaced by its fallback ([ChainEvent.Unavailable]) when the chain starts, when it is
+ * restored, and whenever the caller finds that the phone can no longer do it ([reconcile]); a row says so each time. A phone that gains the
+ * mode during a ring does not take a replaced step back: the record has said what the step is. No mode falls back to one that needs the
+ * phone, so a fallback never needs the capability.
  *
  * *The record.* Every try produces an [Attempt], and a change of mode produces one more (FALLBACK, with the mode that was left). The rows
  * are the whole truth about the tries of a ring: [restore] replays them to the state they came from, so a screen that is recreated, or a
@@ -175,15 +189,39 @@ data class ChainState(val spec: ChainSpec, val steps: List<StepProgress>, val cu
  * the rows lead to is the step of the last try if that left it open, otherwise the first open step: a turn that no try followed is forgotten.
  */
 object ChainRunner {
-    /** The chain at its first step, and the rows to write when it begins (one for each mode that could not be asked for and was replaced). */
-    fun start(spec: ChainSpec): ChainAdvance {
+    /**
+     * The chain at its first step, and the rows to write when it begins: one for each mode that is not built and was replaced, and one for
+     * each mode that [capability] cannot run and was replaced ([ChainEvent.Unavailable]). Both are try-0 FALLBACK rows of the mode that was
+     * asked for, in the order of the steps.
+     */
+    fun start(spec: ChainSpec, capability: HandshakeCapability): ChainAdvance {
         val notes = ArrayList<Attempt>()
         val steps = spec.steps.mapIndexed { position, step ->
             val offered = step.mode.offered
             if (offered != step.mode) notes += Attempt(position, step.mode, 0, ChallengeOutcome.FALLBACK)
             StepProgress(position = position, mode = offered)
         }
-        return ChainAdvance(ChainState(spec, steps, current = 0, status = ChainStatus.RUNNING), notes)
+        val reconciled = reconcile(ChainState(spec, steps, current = 0, status = ChainStatus.RUNNING), capability)
+        return ChainAdvance(reconciled.state, (notes + reconciled.attempts).sortedBy { it.position })
+    }
+
+    /**
+     * The chain with every open step whose way [capability] cannot run replaced by its fallback, in the order of the steps, and the rows to
+     * write for that. Nothing changes (the same state, no rows) when the phone can do every open step, or when the chain is over. A step
+     * already replaced is not taken back when the phone can do its mode again. The caller uses it when the capability may have changed during a
+     * ring, and writes the rows it returns.
+     */
+    fun reconcile(state: ChainState, capability: HandshakeCapability): ChainAdvance {
+        var now = state
+        val rows = ArrayList<Attempt>()
+        for (position in state.steps.indices) {
+            val step = now.steps[position]
+            if (step.status != StepStatus.OPEN || capability.canRun(step.shown)) continue
+            val replaced = advance(now, ChainEvent.Unavailable(position))
+            now = replaced.state
+            rows += replaced.attempts
+        }
+        return ChainAdvance(now, rows)
     }
 
     fun advance(state: ChainState, event: ChainEvent): ChainAdvance {
@@ -198,7 +236,24 @@ object ChainRunner {
                 if (event.at == state.tryOnScreen && step.shown == HandshakeMode.HOLD) pass(state, step, assistive = true) else unchanged
             is ChainEvent.Failed -> if (event.at == state.tryOnScreen) miss(state, step, ChallengeOutcome.FAILED) else unchanged
             is ChainEvent.TimedOut -> if (event.at == state.tryOnScreen) miss(state, step, ChallengeOutcome.TIMEOUT) else unchanged
+            is ChainEvent.Unavailable -> unavailable(state, event.position) ?: unchanged
         }
+    }
+
+    /**
+     * The open step at [position] cannot run its way on this phone: it is replaced by the fallback, as a start replaces a mode, with a fresh
+     * allowance and a way of its own, and the change of mode it may still make after that is left to it (typing can still fall back to the
+     * numbers). The row is the FALLBACK of the mode that was left, numbered with the tries made on it. The step on screen stays the step on
+     * screen. Null when there is nothing to replace: a step that is not there, not open, or whose way needs nothing of the phone.
+     */
+    private fun unavailable(state: ChainState, position: Int): ChainAdvance? {
+        val step = state.steps.getOrNull(position) ?: return null
+        if (step.status != StepStatus.OPEN || !step.shown.needsDevice) return null
+        val next = step.shown.fallback.offered
+        if (next == step.shown) return null
+        val row = Attempt(position, step.shown, step.attempts, ChallengeOutcome.FALLBACK)
+        val replaced = step.copy(mode = next, assistive = false, attempts = 0, way = step.way + 1, lastMiss = null)
+        return ChainAdvance(state.copy(steps = state.steps.replacing(replaced)), listOf(row))
     }
 
     /**
@@ -213,12 +268,27 @@ object ChainRunner {
      * first try of the way that follows when that has the same step, mode and number (a press let go early, repeated after its assistive
      * confirm began). Keeping that from happening belongs to whoever writes the rows: the rows of an event in one transaction, one event at
      * a time, and nothing written for an event that is not about the try on screen.
+     *
+     * *The phone.* The replay begins as a phone that can do everything would ([HandshakeCapability.ALL]), and a FALLBACK row is read as an
+     * [ChainEvent.Unavailable] when it is one: its step is open, its mode is the one on screen for that step and needs the phone, and its
+     * number is the tries made on it. (The note of a used-up allowance is written after the step has changed way, so its mode is not on screen
+     * any more; the note of a mode that is not built names a mode the step never showed.) So a step that was replaced stays replaced on any
+     * phone. Then the chain is reconciled with [capability]: an open step this phone cannot do now is replaced, and those rows, which nothing
+     * has written yet, are returned for the caller to write. The state never depends on the phone that reads it back once those rows are
+     * written.
      */
-    fun restore(spec: ChainSpec, history: List<Attempt>): ChainState {
-        var state = start(spec).state
+    fun restore(spec: ChainSpec, history: List<Attempt>, capability: HandshakeCapability): ChainAdvance {
+        var state = start(spec, HandshakeCapability.ALL).state
         for (row in history) {
             if (state.status != ChainStatus.RUNNING) break
-            if (row.outcome == ChallengeOutcome.FALLBACK || row.outcome == ChallengeOutcome.CANCELLED || row.outcome == ChallengeOutcome.SAFETY_SILENCE) continue
+            if (row.outcome == ChallengeOutcome.FALLBACK) {
+                val target = state.steps.getOrNull(row.position)
+                if (target != null && target.status == StepStatus.OPEN && row.mode == target.shown && row.mode.needsDevice && row.attemptNo == target.attempts) {
+                    state = advance(state, ChainEvent.Unavailable(row.position)).state
+                }
+                continue
+            }
+            if (row.outcome == ChallengeOutcome.CANCELLED || row.outcome == ChallengeOutcome.SAFETY_SILENCE) continue
             // The try the row is about: the next try of the way that is on screen for its step. Anything else is not a try of this chain.
             val target = state.steps.getOrNull(row.position) ?: continue
             if (target.status != StepStatus.OPEN || row.attemptNo != target.attempts + 1 || row.mode != target.shown) continue
@@ -237,7 +307,7 @@ object ChainRunner {
             }
             state = advance(state, event).state
         }
-        return state
+        return reconcile(state, capability)
     }
 
     private fun pass(state: ChainState, step: StepProgress, assistive: Boolean): ChainAdvance {

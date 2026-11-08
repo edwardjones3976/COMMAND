@@ -6,6 +6,7 @@ import com.command.data.db.CommandDb
 import com.command.data.db.OccurrenceRow
 import com.command.data.db.ProfileRow
 import com.command.data.OccurrenceRepository
+import com.command.data.TokenRepository
 import com.command.domain.dials.HandshakeMode
 import com.command.domain.dials.Personality
 import com.command.domain.dials.PresetOrigin
@@ -63,7 +64,7 @@ class HandshakeViewModelTest {
     @Before
     fun setUp() {
         hilt.inject()
-        vm = ReveilleViewModel(repo, clock, phrases)
+        vm = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
     }
 
     // --- helpers ------------------------------------------------------------------------------------------------
@@ -626,7 +627,7 @@ class HandshakeViewModelTest {
         )
         for ((way, end) in ways) {
             val o = ringing("builtin_command")
-            val model = ReveilleViewModel(repo, clock, phrases)
+            val model = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
             val gate = CompletableDeferred<Unit>()
             val asked = ArrayList<Int>()
             model.attemptTimer = { seconds ->
@@ -651,7 +652,7 @@ class HandshakeViewModelTest {
     @Test
     fun `Safety silence stops the clock of a begun try at the tap, before the database has answered`() {
         val o = ringing("builtin_command")
-        val model = ReveilleViewModel(repo, clock, phrases)
+        val model = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
         val gate = CompletableDeferred<Unit>()
         val asked = ArrayList<Int>()
         model.attemptTimer = { seconds ->
@@ -692,7 +693,7 @@ class HandshakeViewModelTest {
     @Test
     fun `a try's clock is stopped when the try ends, and does not wait to run out`() {
         val o = ringing("builtin_command")
-        val model = ReveilleViewModel(repo, clock, phrases)
+        val model = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
         val gate = CompletableDeferred<Unit>()
         val asked = ArrayList<Int>()
         val stopped = java.util.concurrent.atomic.AtomicInteger(0)
@@ -883,7 +884,7 @@ class HandshakeViewModelTest {
         failTyping(2)
         awaitChallenge("third try") { it is Challenge.Typing && it.tryId.tryNo == 3 }
 
-        val fresh = ReveilleViewModel(repo, clock, phrases) // a new process, a new view model, the same stored occurrence
+        val fresh = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock)) // a new process, a new view model, the same stored occurrence
         fresh.show(o.id)
         awaitUntil(message = "restored") { ((fresh.state.value as? ReveilleUiState.Firing)?.challenge as? Challenge.Typing)?.tryId?.tryNo == 3 }
 
@@ -901,7 +902,7 @@ class HandshakeViewModelTest {
         for (n in 1..4) vm.sequenceTapped(at, n)
         awaitChallenge("typing") { it is Challenge.Typing }
 
-        val fresh = ReveilleViewModel(repo, clock, phrases)
+        val fresh = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
         fresh.show(o.id)
         awaitUntil(message = "restored") { ((fresh.state.value as? ReveilleUiState.Firing)?.challenge as? Challenge.Typing)?.tryId == TryId(1, 1) }
 
@@ -921,7 +922,7 @@ class HandshakeViewModelTest {
             settle()
         }
 
-        val fresh = ReveilleViewModel(repo, clock, phrases)
+        val fresh = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
         fresh.show(o.id)
         awaitUntil(message = "restored") { ((fresh.state.value as? ReveilleUiState.Firing)?.challenge as? Challenge.Hold)?.tryId?.tryNo == 3 }
 
@@ -933,7 +934,7 @@ class HandshakeViewModelTest {
         // After a wrong phrase, after a try that ran out, after a change of way, after the press is used up, at the end of the road and at
         // the question of a two-step: the screen that comes back is the screen that was there (the words under the challenge included).
         fun comesBackAs(live: ReveilleUiState, o: OccurrenceRow, what: String) {
-            val fresh = ReveilleViewModel(repo, clock, phrases)
+            val fresh = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
             fresh.show(o.id)
             awaitUntil(message = "$what: restored") { fresh.state.value::class == live::class }
             assertEquals("$what: the restored screen is the one that was there", live, fresh.state.value)
@@ -941,7 +942,7 @@ class HandshakeViewModelTest {
         fun newRing(profile: String): OccurrenceRow {
             val o = ringing(profile)
             ringingOccurrence = o
-            vm = ReveilleViewModel(repo, clock, phrases)
+            vm = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
             show(o)
             return o
         }
@@ -1030,7 +1031,7 @@ class HandshakeViewModelTest {
         runBlocking { db.profiles().upsert(db.profiles().get("builtin_command")!!.copy(handshakeDifficulty = 1, personality = Personality.MINIMALIST)) }
 
         val later = FixedPhrases(listOf(PHRASE))
-        val fresh = ReveilleViewModel(repo, clock, later) // a new process, after the edit
+        val fresh = ReveilleViewModel(repo, clock, later, FixedCapability(), TokenRepository(db, clock)) // a new process, after the edit
         fresh.show(o.id)
         awaitUntil(message = "restored") { ((fresh.state.value as? ReveilleUiState.Firing)?.challenge as? Challenge.Typing)?.tryId?.tryNo == 3 }
 

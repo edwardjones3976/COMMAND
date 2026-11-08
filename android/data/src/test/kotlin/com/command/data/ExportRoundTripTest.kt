@@ -235,6 +235,13 @@ class ExportRoundTripTest {
         val e = export()
 
         assertTrue(e.text("README.txt").startsWith("COMMAND data export"))
+        assertTrue(
+            "the README says what it holds of the registered codes, and what it never holds",
+            e.text("README.txt").contains(
+                "This file contains the titles of your missions and what you did with each alarm, and the names of the codes you registered, " +
+                    "each with a fingerprint of it, never the code itself. It stays wherever you put it.\n",
+            ),
+        )
         assertEquals(0, e.summary.historyRows)
         assertEquals("\uFEFFoccurrence_id,mission_id,mission,category,mission_deleted,scheduled_at_utc,scheduled_local,zone,state,outcome\r\n", e.text("history.csv"))
         assertTrue(e.lines("occurrences").isEmpty())

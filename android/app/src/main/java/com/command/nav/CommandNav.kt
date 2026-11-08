@@ -23,6 +23,7 @@ import com.command.editor.MissionEditorRoute
 import com.command.followup.FollowUpRoute
 import com.command.handshake.HandshakeEditorRoute
 import com.command.handshake.HandshakeProfilesRoute
+import com.command.handshake.RegisterTokenRoute
 import com.command.history.HistoryRoute
 import com.command.onboarding.FirstMissionRoute
 import com.command.onboarding.PermissionsRoute
@@ -52,6 +53,9 @@ object Routes {
     const val PROFILES = "profiles"
     const val RULES = "activity_rules"
     const val REST_WINDOWS = "rest_windows"
+
+    /** The codes that a handshake step which scans a code checks against. */
+    const val REGISTER_TOKEN = "register-token"
     const val ARG_ID = "id"
     private const val HANDSHAKE_EDITOR = "handshake"
     private const val DIALS = "dials"
@@ -171,13 +175,22 @@ private fun CommandNavHost(
             CalendarSourcesRoute(onBack = { navController.popBackStack() })
         }
         composable(Routes.HANDSHAKES) {
-            HandshakeProfilesRoute(onBack = { navController.popBackStack() }, onEdit = { navController.navigate(Routes.handshakeEditor(it)) })
+            HandshakeProfilesRoute(
+                onBack = { navController.popBackStack() },
+                onEdit = { navController.navigate(Routes.handshakeEditor(it)) },
+                onOpenCodes = { navController.navigate(Routes.REGISTER_TOKEN) },
+            )
         }
+        composable(Routes.REGISTER_TOKEN) { RegisterTokenRoute(onBack = { navController.popBackStack() }) }
         composable(
             Routes.HANDSHAKE_EDITOR_PATTERN,
             arguments = listOf(navArgument(Routes.ARG_ID) { type = NavType.StringType }),
         ) { entry ->
-            HandshakeEditorRoute(profileId = entry.arguments?.getString(Routes.ARG_ID).orEmpty(), onBack = { navController.popBackStack() })
+            HandshakeEditorRoute(
+                profileId = entry.arguments?.getString(Routes.ARG_ID).orEmpty(),
+                onBack = { navController.popBackStack() },
+                onOpenCodes = { navController.navigate(Routes.REGISTER_TOKEN) },
+            )
         }
         composable(Routes.PROFILES) {
             ProfilesRoute(

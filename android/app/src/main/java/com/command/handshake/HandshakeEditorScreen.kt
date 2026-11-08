@@ -88,10 +88,12 @@ class HandshakeEditorActions(
     val onChangeHold: (key: Int, by: Int) -> Unit,
     val onSave: () -> Unit,
     val onUseStandard: () -> Unit,
+    /** Opens the registered codes, from a step that scans a code. */
+    val onOpenCodes: () -> Unit = {},
 )
 
 @Composable
-fun HandshakeEditorRoute(profileId: String, onBack: () -> Unit, viewModel: HandshakeEditorViewModel = hiltViewModel()) {
+fun HandshakeEditorRoute(profileId: String, onBack: () -> Unit, onOpenCodes: () -> Unit = {}, viewModel: HandshakeEditorViewModel = hiltViewModel()) {
     LaunchedEffect(profileId) { viewModel.open(profileId) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     HandshakeEditorScreen(
@@ -108,6 +110,7 @@ fun HandshakeEditorRoute(profileId: String, onBack: () -> Unit, viewModel: Hands
             onChangeHold = viewModel::changeHold,
             onSave = viewModel::save,
             onUseStandard = viewModel::useStandard,
+            onOpenCodes = onOpenCodes,
         ),
     )
 }
@@ -370,16 +373,23 @@ private fun StepCard(index: Int, state: HandshakeEditorUiState.Editing, step: St
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (mode in HandshakeMode.values()) {
-                    // Judged as the rules judge it: by the way that will be asked, so a planned way that runs as typing takes typing. A way that is only
-                    // planned is dimmed because it is not built, and no step asks for it: it does not say that one does.
-                    val takenBy = if (mode.available) state.steps.indexOfFirst { it.key != step.key && it.mode.offered == mode.offered } else -1
+                    // Judged as the rules judge it: by the way that will be asked, so a way that is not built and runs as typing takes typing. A way
+                    // that is not built is dimmed because of that, and no step asks for it: it does not say that one does. A way that is built but not
+                    // yet checked on a phone can be chosen, and its label says so.
+                    val takenBy = if (mode.selectable) state.steps.indexOfFirst { it.key != step.key && it.mode.editorWay == mode.editorWay } else -1
                     val usedIn = if (takenBy >= 0) stringResource(R.string.handshake_mode_used_in_step, takenBy + 1) else null
                     FilterChip(
                         selected = step.mode == mode,
                         onClick = { actions.onSetMode(step.key, mode) },
-                        enabled = mode.available && takenBy < 0,
+                        enabled = mode.selectable && takenBy < 0,
                         label = {
-                            Text(if (mode.available) modeName(mode) else stringResource(R.string.handshake_mode_planned, modeName(mode)))
+                            Text(
+                                when {
+                                    !mode.selectable -> stringResource(R.string.handshake_mode_planned, modeName(mode))
+                                    mode.planned -> stringResource(R.string.handshake_mode_unverified, modeName(mode))
+                                    else -> modeName(mode)
+                                },
+                            )
                         },
                         modifier = Modifier
                             .heightIn(min = 48.dp)
@@ -455,8 +465,20 @@ private fun StepCard(index: Int, state: HandshakeEditorUiState.Editing, step: St
                     moreTag = HandshakeTags.holdMore(index),
                 )
             }
-            if (!step.mode.available) {
+            if (!step.mode.selectable) {
                 Text(stringResource(R.string.handshake_planned_runs_as, modeName(step.mode.offered)), style = MaterialTheme.typography.bodySmall)
+            }
+            if (step.mode == HandshakeMode.QR) {
+                // What the ring needs of the phone to ask for a code, and what it asks for without it; and the way to the codes it checks against.
+                Text(
+                    stringResource(R.string.handshake_qr_needs),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.testTag(HandshakeTags.qrNeeds(index)),
+                )
+                OutlinedButton(
+                    onClick = actions.onOpenCodes,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag(HandshakeTags.codes(index)),
+                ) { Text(stringResource(R.string.handshake_registered_codes)) }
             }
             for (issue in here) IssueLine(issue)
         }

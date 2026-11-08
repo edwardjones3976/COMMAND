@@ -42,9 +42,10 @@
     <p>Android 7.0 (API 24) and later; built against API 36.1 with targetSdk 36. Measured on emulators only: Android 16 (API 36, local <code>command_api36</code> for DC1 and nightly CI) and Android 17 (API 37, <code>google_apis</code> x86_64 r08, locally for this receipt and nightly CI). Robolectric covers API 24 to 36. targetSdk stays 36: see the Android 17 result below.</p>
 
     <h2>Permissions</h2>
-    <p>From the merged release manifest (<code>android/app/build/intermediates/merged_manifest/release/</code>, every module and library merged in). CI fails if this list and that manifest differ in either direction (<code>scripts/receipt-permissions.py check</code>, in the <code>assemble</code> job).</p>
+    <p>From the merged release manifest (<code>android/app/build/intermediates/merged_manifest/release/</code>, every module and library merged in). CI fails if this list and that manifest differ in either direction (<code>scripts/receipt-permissions.py check</code>, in the <code>assemble</code> job). So this list follows the current main manifest, which CI enforces, and not only the tree and digests above: CAMERA was added after them (M13a, amendment 40).</p>
     <ul id="permissions">
       <li><code>android.permission.READ_CALENDAR</code>: the optional calendar import, asked for on its own screen, read only.</li>
+      <li><code>android.permission.CAMERA</code>: only for the QR handshake, after the camera consent; frames are decoded on the phone and never stored. Declared by the app itself (amendment 40); CameraX merges in no permission of its own, only a disabled, unexported configuration service. The camera is not required, so a phone without one can install the app.</li>
       <li><code>android.permission.SCHEDULE_EXACT_ALARM</code> (up to API 32) and <code>android.permission.USE_EXACT_ALARM</code>: exact alarm clocks. The app asks the platform before every arm and falls back to an inexact alarm, and says so, when refused.</li>
       <li><code>android.permission.POST_NOTIFICATIONS</code>: the ring and check-in notifications.</li>
       <li><code>android.permission.USE_FULL_SCREEN_INTENT</code>: the ring screen over the lock screen.</li>

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>COMMAND third-party notices</title>
+  <link rel="stylesheet" href="status.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header>
+    <p class="muted">Project COMMAND · third-party notices · 2026-11-07 (M13a, amendment 40)</p>
+    <h1 id="main">Third-party notices</h1>
+  </header>
+  <main>
+    <p>COMMAND's own code is not licensed to anyone (see <code>LICENSE</code>). The app ships with the libraries below, each under its own licence. The versions are the ones in <code>android/gradle/libs.versions.toml</code>. A licence is named here only where it is known; where it is not restated, the terms are the ones the library publishes with itself.</p>
+
+    <h2>Added for the QR handshake (M13a)</h2>
+    <table>
+      <thead><tr><th scope="col">Library</th><th scope="col">Version</th><th scope="col">Licence</th><th scope="col">Project</th></tr></thead>
+      <tbody>
+        <tr><td>CameraX (<code>androidx.camera:camera-core</code>, <code>camera-camera2</code>, <code>camera-lifecycle</code>, <code>camera-view</code>)</td><td>1.5.0</td><td>Apache License 2.0</td><td><code>https://developer.android.com/jetpack/androidx/releases/camera</code></td></tr>
+        <tr><td>ZXing core (<code>com.google.zxing:core</code>), only the decoder and encoder; no <code>zxing-android-embedded</code></td><td>3.5.3</td><td>Apache License 2.0</td><td><code>https://github.com/zxing/zxing</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>Already shipped</h2>
+    <table>
+      <thead><tr><th scope="col">Library</th><th scope="col">Licence</th><th scope="col">Project</th></tr></thead>
+      <tbody>
+        <tr><td>AndroidX: Core, Activity, Lifecycle, Navigation, Room, WorkManager, Hilt for AndroidX, and Jetpack Compose (UI, Material 3, icons)</td><td>Apache License 2.0</td><td><code>https://developer.android.com/jetpack/androidx</code></td></tr>
+        <tr><td>Kotlin standard library, kotlinx.coroutines and kotlinx.serialization</td><td>Apache License 2.0</td><td><code>https://github.com/JetBrains/kotlin</code>, <code>https://github.com/Kotlin/kotlinx.coroutines</code>, <code>https://github.com/Kotlin/kotlinx.serialization</code></td></tr>
+        <tr><td>Dagger and Hilt</td><td>Apache License 2.0</td><td><code>https://github.com/google/dagger</code></td></tr>
+        <tr><td>Core library desugaring (<code>com.android.tools:desugar_jdk_libs</code>)</td><td>GNU GPL v2 with the Classpath Exception</td><td><code>https://github.com/google/desugar_jdk_libs</code></td></tr>
+        <tr><td>Firebase App Check with reCAPTCHA (<code>com.google.firebase:firebase-appcheck-recaptcha</code>) and Firebase AI Logic (<code>com.google.firebase:firebase-ai</code>, in <code>:voice</code>), both from the Firebase BoM, and the libraries they bring</td><td>Not restated here</td><td><code>https://firebase.google.com/docs/app-check</code></td></tr>
+      </tbody>
+    </table>
+    <p>Test-only libraries (JUnit, Robolectric, the AndroidX test libraries) are not in the app and are not listed.</p>
+  </main>
+</body>
+</html>

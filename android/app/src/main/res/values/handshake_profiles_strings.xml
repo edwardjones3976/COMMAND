@@ -41,6 +41,10 @@
     <string name="handshake_mode_nfc">Touch a tag</string>
     <string name="handshake_mode_voice">Say a phrase</string>
     <string name="handshake_mode_planned">%1$s (planned)</string>
+    <!-- A way that is built and can be chosen, but has not yet been checked on a real phone. -->
+    <string name="handshake_mode_unverified">%1$s (not yet checked on a phone)</string>
+    <string name="handshake_qr_needs">Needs the camera, the camera consent and a registered code; without them this step asks you to type a phrase.</string>
+    <string name="handshake_registered_codes">Registered codes</string>
     <string name="handshake_mode_used_in_step">Used in step %1$d</string>
     <!-- %1$s is the name of the way the alarm asks for in its place. -->
     <string name="handshake_planned_runs_as">This way is not built yet. For now the alarm asks for this instead: %1$s.</string>
@@ -56,6 +60,8 @@
     <string name="handshake_list_separator">", "</string>
     <!-- A way that is only planned, named in a list: the ring asks for the way that takes its place. -->
     <string name="handshake_step_runs_as">%1$s (planned; for now: %2$s)</string>
+    <!-- A way that needs something of the phone, named in a list: %2$s is what the ring asks for when the phone cannot do it. -->
+    <string name="handshake_step_or_when_cannot">%1$s (or %2$s when the phone cannot)</string>
 
     <plurals name="handshake_tries_label">
         <item quantity="one">%d try to get it right</item>

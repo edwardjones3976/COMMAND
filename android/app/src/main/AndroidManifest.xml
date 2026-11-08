@@ -8,6 +8,14 @@
     -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
 
+    <!--
+        The camera is only for the QR handshake, after the camera consent; frames are decoded on the phone and never stored. A phone without
+        a camera can still install the app: its QR steps run as their fallback (see CameraManifestTest).
+    -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />

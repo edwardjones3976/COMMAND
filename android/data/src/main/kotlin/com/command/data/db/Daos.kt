@@ -6,6 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Update
+import com.command.domain.dials.HandshakeMode
 import com.command.domain.dials.Personality
 import com.command.domain.dials.Flexibility
 import com.command.domain.model.CheckInAnswer
@@ -264,6 +265,32 @@ interface ChallengeDao {
 
     @Query("SELECT * FROM challenges WHERE occurrence_id = :occurrenceId ORDER BY id")
     suspend fun forOccurrence(occurrenceId: String): List<ChallengeRow>
+}
+
+/** The registered QR and NFC targets. Only their hashes are kept; [TokenRepository][com.command.data.TokenRepository] is the one writer. */
+@Dao
+interface HandshakeTokenDao {
+    @Insert
+    suspend fun insert(row: HandshakeTokenRow)
+
+    @Query("SELECT * FROM handshake_tokens WHERE mode = :mode ORDER BY created_at, rowid")
+    fun observe(mode: HandshakeMode): Flow<List<HandshakeTokenRow>>
+
+    @Query("SELECT * FROM handshake_tokens WHERE mode = :mode ORDER BY created_at, rowid")
+    suspend fun forMode(mode: HandshakeMode): List<HandshakeTokenRow>
+
+    @Query("SELECT COUNT(*) FROM handshake_tokens WHERE mode = :mode")
+    suspend fun count(mode: HandshakeMode): Int
+
+    /** The label of the code of [mode] with [hash], or null if there is none. */
+    @Query("SELECT label FROM handshake_tokens WHERE mode = :mode AND hash = :hash ORDER BY created_at, rowid LIMIT 1")
+    suspend fun labelOf(mode: HandshakeMode, hash: String): String?
+
+    @Query("UPDATE handshake_tokens SET label = :label WHERE id = :id")
+    suspend fun rename(id: String, label: String): Int
+
+    @Query("DELETE FROM handshake_tokens WHERE id = :id")
+    suspend fun delete(id: String): Int
 }
 
 @Dao

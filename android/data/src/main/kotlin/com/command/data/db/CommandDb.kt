@@ -31,6 +31,7 @@ abstract class CommandDb : RoomDatabase() {
     abstract fun events(): EventDao
     abstract fun checkIns(): CheckInDao
     abstract fun challenges(): ChallengeDao
+    abstract fun handshakeTokens(): HandshakeTokenDao
     abstract fun consents(): ConsentDao
     abstract fun settings(): SettingDao
     abstract fun profiles(): ProfileDao

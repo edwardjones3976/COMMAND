@@ -21,7 +21,8 @@ enum class ChainProblem {
 
     /**
      * The same way twice in one chain asks for the same thing twice, and gives nothing to turn to. It is the way that will be asked that
-     * counts: a planned way (QR, NFC, voice) runs as typing, so it and typing are the same way.
+     * counts: a way that is not built (NFC, voice) runs as typing, so it and typing are the same way. QR is built, so QR and typing are two
+     * ways, whatever the phone can do: the rule is static ([HandshakeMode.offered]), so what is saved never depends on the phone.
      */
     SAME_WAY_TWICE,
 }
