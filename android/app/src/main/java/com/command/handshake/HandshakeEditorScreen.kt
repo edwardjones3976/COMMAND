@@ -88,12 +88,12 @@ class HandshakeEditorActions(
     val onChangeHold: (key: Int, by: Int) -> Unit,
     val onSave: () -> Unit,
     val onUseStandard: () -> Unit,
-    /** Opens the registered codes, from a step that scans a code. */
-    val onOpenCodes: () -> Unit = {},
+    /** Opens the registered codes ([HandshakeMode.QR]) or tags ([HandshakeMode.NFC]), from a step that scans a code or touches a tag. */
+    val onOpenCodes: (HandshakeMode) -> Unit = {},
 )
 
 @Composable
-fun HandshakeEditorRoute(profileId: String, onBack: () -> Unit, onOpenCodes: () -> Unit = {}, viewModel: HandshakeEditorViewModel = hiltViewModel()) {
+fun HandshakeEditorRoute(profileId: String, onBack: () -> Unit, onOpenCodes: (HandshakeMode) -> Unit = {}, viewModel: HandshakeEditorViewModel = hiltViewModel()) {
     LaunchedEffect(profileId) { viewModel.open(profileId) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     HandshakeEditorScreen(
@@ -476,9 +476,21 @@ private fun StepCard(index: Int, state: HandshakeEditorUiState.Editing, step: St
                     modifier = Modifier.testTag(HandshakeTags.qrNeeds(index)),
                 )
                 OutlinedButton(
-                    onClick = actions.onOpenCodes,
+                    onClick = { actions.onOpenCodes(HandshakeMode.QR) },
                     modifier = Modifier.heightIn(min = 48.dp).testTag(HandshakeTags.codes(index)),
                 ) { Text(stringResource(R.string.handshake_registered_codes)) }
+            }
+            if (step.mode == HandshakeMode.NFC) {
+                // What the ring needs to ask for a tag, said once for every phone (the editor does not read the phone's NFC), and the way to the tags.
+                Text(
+                    stringResource(R.string.handshake_nfc_needs),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.testTag(HandshakeTags.nfcNeeds(index)),
+                )
+                TextButton(
+                    onClick = { actions.onOpenCodes(HandshakeMode.NFC) },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag(HandshakeTags.tags(index)),
+                ) { Text(stringResource(R.string.handshake_tags_button)) }
             }
             for (issue in here) IssueLine(issue)
         }

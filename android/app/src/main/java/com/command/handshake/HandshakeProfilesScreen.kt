@@ -113,6 +113,9 @@ object HandshakeTags {
     fun remove(index: Int) = "handshake_step_${index}_remove"
     fun qrNeeds(index: Int) = "handshake_step_${index}_qr_needs"
     fun codes(index: Int) = "handshake_step_${index}_codes"
+    fun nfcNeeds(index: Int) = "handshake_step_${index}_nfc_needs"
+    /** The way from a step that touches a tag to the registered tags. One per step, as [codes] is, since a draft can hold more than one. */
+    fun tags(index: Int) = "handshake_step_${index}_tags"
     const val CODES = "handshake_codes"
 }
 

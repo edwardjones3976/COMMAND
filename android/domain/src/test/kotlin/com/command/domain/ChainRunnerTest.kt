@@ -71,16 +71,14 @@ class ChainRunnerTest {
     // --- which modes there are -----------------------------------------------------------------------------------
 
     @Test
-    fun `hold, the sequence, typing, two-step and QR are built, NFC and voice are not, and QR, NFC and voice are not yet checked on a phone`() {
-        assertEquals(setOf(HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP, QR), HandshakeMode.values().filter { it.built }.toSet())
-        assertEquals("only QR needs something of the phone, for now", setOf(QR), HandshakeMode.values().filter { it.needsDevice }.toSet())
+    fun `hold, the sequence, typing, two-step, QR and NFC are built, voice is not, and QR, NFC and voice are not yet checked on a phone`() {
+        assertEquals(setOf(HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP, QR, NFC), HandshakeMode.values().filter { it.built }.toSet())
+        assertEquals("QR and NFC need something of the phone", setOf(QR, NFC), HandshakeMode.values().filter { it.needsDevice }.toSet())
         assertEquals(setOf(QR, NFC, VOICE), HandshakeMode.values().filter { it.planned }.toSet())
         for (mode in HandshakeMode.values()) assertTrue("$mode must lead to a mode that is built", mode.offered.built)
-        for (unbuilt in listOf(NFC, VOICE)) {
-            assertFalse(unbuilt.built)
-            assertEquals(TYPING, unbuilt.offered)
-        }
-        for (built in listOf(HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP, QR)) assertEquals(built, built.offered)
+        assertFalse(VOICE.built)
+        assertEquals(TYPING, VOICE.offered)
+        for (built in listOf(HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP, QR, NFC)) assertEquals(built, built.offered)
     }
 
     @Test
@@ -94,7 +92,7 @@ class ChainRunnerTest {
             assertEquals("$mode with nothing ready", !mode.needsDevice, HandshakeCapability.NONE.canRun(mode))
             assertTrue("$mode with everything ready", HandshakeCapability.ALL.canRun(mode))
         }
-        assertEquals(HandshakeCapability(setOf(QR)), HandshakeCapability.ALL)
+        assertEquals(HandshakeCapability(setOf(QR, NFC)), HandshakeCapability.ALL)
         assertEquals(HandshakeCapability(emptySet()), HandshakeCapability.NONE)
     }
 
@@ -272,8 +270,8 @@ class ChainRunnerTest {
 
     @Test
     fun `a mode that is not built yet, or one the phone cannot do now, is replaced when the chain starts, and the row says so`() {
-        // NFC and voice are not built, whatever the phone can do; QR is built, and is replaced only when the phone cannot do it.
-        for ((planned, capability) in listOf(QR to HandshakeCapability.NONE, NFC to HandshakeCapability.ALL, VOICE to HandshakeCapability.ALL, NFC to HandshakeCapability.NONE)) {
+        // Voice is not built, whatever the phone can do; QR and NFC are built, and are replaced only when the phone cannot do them.
+        for ((planned, capability) in listOf(QR to HandshakeCapability.NONE, VOICE to HandshakeCapability.ALL, VOICE to HandshakeCapability.NONE, NFC to HandshakeCapability.NONE)) {
             val run = Run(spec(ChainOp.OR, planned), capability)
             assertEquals(listOf(row(0, planned, 0, FALLBACK)), run.start.attempts)
             assertEquals(TYPING, run.state.step!!.mode)
@@ -448,8 +446,8 @@ class ChainRunnerTest {
     }
 
     @Test
-    fun `the notes of NFC and voice, which are not built, are still ignored by a restore`() {
-        for (unbuilt in listOf(NFC, VOICE)) {
+    fun `the notes of voice, which is not built, are still ignored by a restore`() {
+        for (unbuilt in listOf(VOICE)) {
             val chain = spec(ChainOp.OR, unbuilt, HOLD)
             for (capability in listOf(HandshakeCapability.ALL, HandshakeCapability.NONE)) {
                 val started = ChainRunner.start(chain, capability)
@@ -477,6 +475,90 @@ class ChainRunnerTest {
         val twice = ChainRunner.reconcile(lost.state, HandshakeCapability.NONE)
         assertSame(lost.state, twice.state)
         assertTrue(twice.attempts.isEmpty())
+    }
+
+    // --- NFC, built in M13b ---------------------------------------------------------------------------------------
+
+    @Test
+    fun nfcWithoutCapabilityStartsTypingWithOneFallback() {
+        val chain = spec(ChainOp.OR, NFC, HOLD)
+        for (capability in listOf(HandshakeCapability.NONE, HandshakeCapability(setOf(QR)))) {
+            val start = ChainRunner.start(chain, capability)
+            assertEquals("$capability", listOf(row(0, NFC, 0, FALLBACK)), start.attempts)
+            assertEquals(TYPING, start.state.shown)
+            assertEquals(3, start.state.triesLeft)
+        }
+    }
+
+    @Test
+    fun nfcWithCapabilityStartsAsNfc() {
+        val chain = spec(ChainOp.OR, NFC, HOLD)
+        for (capability in listOf(HandshakeCapability.ALL, HandshakeCapability(setOf(NFC)))) {
+            val start = ChainRunner.start(chain, capability)
+            assertTrue("$capability", start.attempts.isEmpty())
+            assertEquals(NFC, start.state.shown)
+            assertEquals(TryId(0, 1, 0), start.state.tryOnScreen)
+        }
+    }
+
+    @Test
+    fun nfcUnavailableReplacesOpenStepNotATry() {
+        val run = Run(spec(ChainOp.OR, NFC, HOLD, retries = 3), HandshakeCapability.ALL).fail()
+        run.unavailable(0)
+        assertEquals(listOf(row(0, NFC, 1, FAILED), row(0, NFC, 1, FALLBACK)), run.rows)
+        assertEquals(TYPING, run.state.shown)
+        assertEquals("a fresh allowance for the new way, and the note used none", 3, run.state.triesLeft)
+        assertEquals(StepStatus.OPEN, run.state.steps[0].status)
+        assertEquals(run.state, restore(run.spec, run.rows))
+        // A second report about a step that has already fallen to typing changes nothing.
+        val before = run.state
+        run.unavailable(0)
+        assertSame(before, run.state)
+    }
+
+    @Test
+    fun restorePreM13bNfcFallbackStaysTyping() {
+        // Before M13b, NFC was not built: a ring that began then wrote a try-0 FALLBACK note for its NFC step and asked for typing. After
+        // the upgrade that note fits the rule for an unavailable (open step, NFC on screen, needs the phone, try 0), so the step stays
+        // typing on any phone, and the typing tries made before the upgrade are replayed on it.
+        val chain = spec(ChainOp.OR, NFC, HOLD)
+        val written = listOf(row(0, NFC, 0, FALLBACK), row(0, TYPING, 1, FAILED))
+        for (capability in listOf(HandshakeCapability.ALL, HandshakeCapability.NONE)) {
+            val restored = ChainRunner.restore(chain, written, capability)
+            assertTrue("$capability: nothing more to write", restored.attempts.isEmpty())
+            assertEquals(TYPING, restored.state.shown)
+            assertEquals(1, restored.state.step!!.attempts)
+            assertEquals(2, restored.state.triesLeft)
+        }
+        val noted = ChainRunner.restore(chain, written.take(1), HandshakeCapability.ALL).state
+        assertEquals("the same as a ring that began without NFC", ChainRunner.start(chain, HandshakeCapability.NONE).state, noted)
+    }
+
+    @Test
+    fun restoreAfterProcessDeathWithNfcLostReplaces() {
+        val chain = spec(ChainOp.OR, NFC, HOLD)
+        val live = Run(chain, HandshakeCapability.ALL).fail()
+        assertEquals(NFC, live.state.shown)
+
+        val restored = ChainRunner.restore(chain, live.rows, HandshakeCapability.NONE)
+        assertEquals("one note, numbered with the tries made on NFC", listOf(row(0, NFC, 1, FALLBACK)), restored.attempts)
+        assertEquals(TYPING, restored.state.shown)
+
+        val again = ChainRunner.restore(chain, live.rows + restored.attempts, HandshakeCapability.ALL)
+        assertTrue("once written, the note is not written again", again.attempts.isEmpty())
+        assertEquals(restored.state, again.state)
+    }
+
+    @Test
+    fun reconcileNeverRestoresNfcAfterFallback() {
+        val run = Run(spec(ChainOp.OR, NFC, HOLD), HandshakeCapability.ALL)
+        val lost = ChainRunner.reconcile(run.state, HandshakeCapability.NONE)
+        assertEquals(listOf(row(0, NFC, 0, FALLBACK)), lost.attempts)
+        assertEquals(TYPING, lost.state.shown)
+
+        val back = ChainRunner.reconcile(lost.state, HandshakeCapability.ALL)
+        assertSame("a phone that gains NFC again does not take the step back", lost.state, back.state)
+        assertTrue(back.attempts.isEmpty())
     }
 
     // --- the operators ------------------------------------------------------------------------------------------
@@ -853,7 +935,9 @@ class ChainRunnerTest {
             spec(ChainOp.OR, TYPING, CONFIRM_SEQUENCE, HOLD),
             spec(ChainOp.AND, HOLD, TYPING, TWO_STEP, retries = 2),
             spec(ChainOp.SEQUENCE, CONFIRM_SEQUENCE, TYPING, retries = 1),
-            spec(ChainOp.OR, QR, NFC, retries = 2),
+            spec(ChainOp.OR, QR, VOICE, retries = 2),
+            spec(ChainOp.OR, NFC, QR, retries = 2),
+            spec(ChainOp.AND, HOLD, NFC, retries = 2),
             spec(ChainOp.AND, VOICE, TWO_STEP),
             spec(ChainOp.SEQUENCE, TWO_STEP, HOLD, retries = 4),
             spec(ChainOp.OR, TWO_STEP, retries = 2),

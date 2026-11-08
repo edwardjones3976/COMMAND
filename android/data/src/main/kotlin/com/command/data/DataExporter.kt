@@ -107,8 +107,8 @@ class DataExporter @Inject constructor(
         append("                      The file is UTF-8 with a byte-order mark, so that a spreadsheet reads the accents. A title that starts with = + - or @ has a '\n")
         append("                      in front of it there, so that a spreadsheet shows it as text.\n\n")
         append("Left out: the caches (").append(SKIPPED.joinToString(", ")).append("), which can be rebuilt and hold nothing you wrote.\n")
-        append("This file contains the titles of your missions and what you did with each alarm, and the names of the codes you registered, ")
-        append("each with a fingerprint of it, never the code itself. It stays wherever you put it.\n")
+        append("This file contains the titles of your missions and what you did with each alarm, and the names of the codes and tags you ")
+        append("registered, each with a fingerprint of it, never the code or the tag id itself. It stays wherever you put it.\n")
     }
 
     /** Every table of the database, so that one added later is exported without anyone remembering to list it. */

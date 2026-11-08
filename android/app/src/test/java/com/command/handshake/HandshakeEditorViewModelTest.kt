@@ -162,8 +162,6 @@ class HandshakeEditorViewModelTest {
 
         vm.setMode(first, HandshakeMode.CONFIRM_SEQUENCE) // the second step has it
         assertEquals(HandshakeMode.HOLD, editing().steps[0].mode)
-        vm.setMode(first, HandshakeMode.NFC) // planned
-        assertEquals(HandshakeMode.HOLD, editing().steps[0].mode)
         vm.setMode(first, HandshakeMode.VOICE) // planned
         assertEquals(HandshakeMode.HOLD, editing().steps[0].mode)
         vm.setMode(first, HandshakeMode.TYPING)
@@ -830,19 +828,19 @@ class HandshakeEditorViewModelTest {
 
     @Test
     fun `adding steps to a chain with a planned way never repeats the way it runs as`() {
-        openWithPlanned(HandshakeMode.NFC) // runs as typing
+        openWithPlanned(HandshakeMode.VOICE) // runs as typing
 
         vm.addStep()
         vm.addStep()
         vm.addStep()
 
-        assertEquals("typing is not added, because the first step runs as typing", listOf(HandshakeMode.NFC, HandshakeMode.HOLD, HandshakeMode.CONFIRM_SEQUENCE, HandshakeMode.TWO_STEP), modes())
+        assertEquals("typing is not added, because the first step runs as typing", listOf(HandshakeMode.VOICE, HandshakeMode.HOLD, HandshakeMode.CONFIRM_SEQUENCE, HandshakeMode.TWO_STEP), modes())
         assertTrue("and the draft has no problem that the person did nothing to cause", editing().issues.isEmpty())
     }
 
     @Test
     fun `and a way cannot be chosen for a step when another step runs as that way`() {
-        openWithPlanned(HandshakeMode.NFC, HandshakeMode.HOLD)
+        openWithPlanned(HandshakeMode.VOICE, HandshakeMode.HOLD)
         val hold = editing().steps[1]
 
         vm.setMode(hold.key, HandshakeMode.TYPING) // the first step runs as typing
@@ -853,7 +851,7 @@ class HandshakeEditorViewModelTest {
 
     @Test
     fun `the planned step itself can be changed to the way it runs as`() {
-        openWithPlanned(HandshakeMode.NFC, HandshakeMode.HOLD)
+        openWithPlanned(HandshakeMode.VOICE, HandshakeMode.HOLD)
 
         vm.setMode(editing().steps[0].key, HandshakeMode.TYPING)
 
@@ -913,6 +911,44 @@ class HandshakeEditorViewModelTest {
 
         assertEquals("the two-step comes before a code to scan", listOf(HandshakeMode.TYPING, HandshakeMode.HOLD, HandshakeMode.CONFIRM_SEQUENCE, HandshakeMode.TWO_STEP), modes())
         assertTrue(editing().issues.isEmpty())
+    }
+
+    // --- a tag to touch is built (M13b): it can be chosen, and it is offered last, with the code to scan ------------------
+
+    @Test
+    fun nfcSelectableSortedLast() {
+        open("builtin_steady")
+        val key = editing().steps.single().key
+
+        vm.setMode(key, HandshakeMode.NFC)
+
+        assertEquals("a tag to touch can be chosen", listOf(HandshakeMode.NFC), modes())
+        assertEquals(0, editing().steps.single().holdSeconds)
+        assertTrue(editing().issues.isEmpty())
+        assertTrue("and it is a change that can be saved", editing().canSave)
+
+        // New steps start as the ways that need nothing of the phone, in their own order; the code to scan would come after them.
+        vm.addStep()
+        vm.addStep()
+        vm.addStep()
+        assertEquals(listOf(HandshakeMode.NFC, HandshakeMode.HOLD, HandshakeMode.CONFIRM_SEQUENCE, HandshakeMode.TYPING), modes())
+        assertTrue(editing().issues.isEmpty())
+    }
+
+    @Test
+    fun `a tag to touch and typing in one chain are two ways, so both can be saved`() {
+        open("builtin_steady")
+        vm.addStep()
+        val (first, second) = editing().steps.map { it.key }
+
+        vm.setMode(first, HandshakeMode.NFC)
+        vm.setMode(second, HandshakeMode.TYPING)
+
+        assertEquals(listOf(HandshakeMode.NFC, HandshakeMode.TYPING), modes())
+        assertTrue(editing().issues.isEmpty())
+        vm.save()
+        awaitUntil(message = "the save is done") { editing().saved }
+        assertEquals(listOf(HandshakeMode.NFC, HandshakeMode.TYPING), stored("builtin_steady").own!!.steps.map { it.mode })
     }
 
     @Suppress("unused")

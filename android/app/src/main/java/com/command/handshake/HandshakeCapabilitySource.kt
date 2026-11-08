@@ -21,19 +21,35 @@ interface HandshakeCapabilitySource {
 }
 
 /**
- * The phone as it is: QR is ready when the person has given the camera consent, Android has given the camera permission, the phone has a
- * camera, and at least one code is registered. Each of them can change while the app is closed, so each is read every time.
+ * The phone as it is. Each condition can change while the app is closed (or while the ring screen is away), so each is read every time.
+ * - QR is ready when the person has given the camera consent, Android has given the camera permission, the phone has a camera, and at least
+ *   one code is registered.
+ * - NFC is ready when the person has given the tag consent, the phone's reader can read a tag now ([NfcStatus]: it has NFC, NFC is on, and it
+ *   is not Secure NFC with the keyguard locked), and at least one tag is registered.
+ * The two are independent: either, both or neither.
  */
 class AndroidHandshakeCapabilitySource @Inject constructor(
     @ApplicationContext private val context: Context,
     private val consents: ConsentStore,
     private val tokens: TokenRepository,
+    private val nfc: NfcStatus,
 ) : HandshakeCapabilitySource {
     override suspend fun current(): HandshakeCapability {
-        val qr = consents.isGranted(ConsentKey.CAMERA_QR) &&
+        val ready = buildSet {
+            if (qrReady()) add(HandshakeMode.QR)
+            if (nfcReady()) add(HandshakeMode.NFC)
+        }
+        return if (ready.isEmpty()) HandshakeCapability.NONE else HandshakeCapability(ready)
+    }
+
+    private suspend fun qrReady(): Boolean =
+        consents.isGranted(ConsentKey.CAMERA_QR) &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED &&
             context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) &&
             tokens.count(HandshakeMode.QR) > 0
-        return if (qr) HandshakeCapability(setOf(HandshakeMode.QR)) else HandshakeCapability.NONE
-    }
+
+    private suspend fun nfcReady(): Boolean =
+        consents.isGranted(ConsentKey.NFC) &&
+            nfc.availability() == NfcAvailability.READY &&
+            tokens.count(HandshakeMode.NFC) > 0
 }

@@ -105,11 +105,21 @@ class ReliabilityTest {
     @Test
     fun `the camera consent for the QR handshake is listed after the calendar, is the app's own, and withdraws nothing else`() {
         assertEquals(
-            listOf(ConsentKey.NOTIFICATIONS, ConsentKey.EXACT_ALARM, ConsentKey.FULL_SCREEN, ConsentKey.VOLUME_CONTROL, ConsentKey.CALENDAR_READ, ConsentKey.CAMERA_QR),
+            listOf(
+                ConsentKey.NOTIFICATIONS, ConsentKey.EXACT_ALARM, ConsentKey.FULL_SCREEN, ConsentKey.VOLUME_CONTROL, ConsentKey.CALENDAR_READ,
+                ConsentKey.CAMERA_QR, ConsentKey.NFC,
+            ),
             ConsentBoundaries.all.map { it.key },
         )
         assertEquals(ConsentOwner.APP, ConsentBoundaries.all.single { it.key == ConsentKey.CAMERA_QR }.owner)
         assertEquals(emptyList<ConsentKey>(), ConsentCascade.dependents(ConsentKey.CAMERA_QR))
+    }
+
+    @Test
+    fun `the tag consent for the NFC handshake comes right after the camera, is the app's own, and withdraws nothing else`() {
+        assertEquals(ConsentKey.NFC, ConsentBoundaries.all.last().key)
+        assertEquals(ConsentOwner.APP, ConsentBoundaries.all.single { it.key == ConsentKey.NFC }.owner)
+        assertEquals(emptyList<ConsentKey>(), ConsentCascade.dependents(ConsentKey.NFC))
     }
 
     // --- how recent alarms are read --------------------------------------------------------------------------

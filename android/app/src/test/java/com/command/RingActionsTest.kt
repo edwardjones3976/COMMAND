@@ -12,6 +12,7 @@ import com.command.domain.dials.ChainSpec
 import com.command.domain.dials.HandshakeMode
 import com.command.domain.dials.StepSpec
 import com.command.domain.handshake.HandshakeCapability
+import com.command.domain.handshake.TagRead
 import com.command.domain.model.ChallengeOutcome
 import com.command.domain.model.EventSource
 import com.command.domain.occurrence.ArmMode
@@ -171,13 +172,13 @@ class RingActionsTest {
         val newScreen = ringActions(vm, b.id) {}
 
         oldScreen.onQrScanned(tryId, CODE)
-        oldScreen.onQrUnavailable()
+        oldScreen.onQrUnavailable(tryId)
         settle()
         assertEquals(OccurrenceState.FIRING, stateOf(b))
         assertTrue("nothing was written for the ring on screen", rows(b).isEmpty())
         assertTrue("it still asks for the code", (vm.state.value as ReveilleUiState.Firing).challenge is Challenge.Qr)
 
-        newScreen.onQrUnavailable()
+        newScreen.onQrUnavailable(tryId)
         awaitUntil(message = "its own screen's camera failure is heard") { (vm.state.value as? ReveilleUiState.Firing)?.challenge is Challenge.Typing }
         assertEquals(listOf(HandshakeMode.QR to ChallengeOutcome.FALLBACK), rows(b).map { it.mode to it.outcome })
         assertEquals("the other ring was never touched", OccurrenceState.FIRING, stateOf(a))
@@ -191,7 +192,7 @@ class RingActionsTest {
         val tryId = ((vm.state.value as ReveilleUiState.Firing).challenge as Challenge.Qr).tryId
 
         ringActions(vm, null) {}.onQrScanned(tryId, CODE)
-        ringActions(vm, null) {}.onQrUnavailable()
+        ringActions(vm, null) {}.onQrUnavailable(tryId)
         settle()
         assertTrue(rows(a).isEmpty())
 
@@ -200,8 +201,66 @@ class RingActionsTest {
         assertEquals(OccurrenceState.GUIDED_START, stateOf(a))
     }
 
+    /** Two rings that ask for a tag, on a phone that can read one, and a view model for that phone with a tag registered. */
+    private fun touching(): Pair<OccurrenceRow, OccurrenceRow> = runBlocking {
+        check(profiles.saveChain("builtin_steady", ChainSpec(ChainOp.SEQUENCE, listOf(StepSpec(HandshakeMode.NFC, 3, 90, 0)))) == SaveChainResult.Saved)
+        check(tokens.registerTag("Bathroom", TAG.hash) is RegisterResult.Saved)
+        vm = ReveilleViewModel(repo, clock, phrases, FixedCapability(HandshakeCapability.ALL), tokens)
+        suspend fun one(): OccurrenceRow {
+            val mission = testMission()
+            db.missions().insert(mission)
+            val o = repo.createOccurrence(mission.id, FakeAlarmModule.T0 + 60_000, "UTC").occurrence
+            repo.apply(o.id, OccurrenceCommand.Arm(ArmMode.EXACT), EventSource.SYSTEM)
+            repo.apply(o.id, OccurrenceCommand.Fire, EventSource.SERVICE)
+            return repo.get(o.id)!!
+        }
+        one() to one()
+    }
+
+    private fun showTouching(o: OccurrenceRow) {
+        vm.show(o.id)
+        awaitUntil(message = "the tag is asked for") { (vm.state.value as? ReveilleUiState.Firing)?.challenge is Challenge.Nfc }
+    }
+
+    @Test
+    fun `a tag read, or a reader that stops, on the screen of another ring or of no ring does nothing, and on its own screen it is heard`() {
+        val (a, b) = touching()
+        showTouching(a)
+        val oldScreen = ringActions(vm, a.id) {}
+        val tryId = ((vm.state.value as ReveilleUiState.Firing).challenge as Challenge.Nfc).tryId
+        showTouching(b)
+        val newScreen = ringActions(vm, b.id) {}
+
+        oldScreen.onNfcRead(tryId, TAG)
+        oldScreen.onNfcUnavailable(tryId)
+        ringActions(vm, null) {}.onNfcRead(tryId, TAG)
+        ringActions(vm, null) {}.onNfcUnavailable(tryId)
+        settle()
+        assertEquals(OccurrenceState.FIRING, stateOf(b))
+        assertTrue("nothing was written for the ring on screen", rows(b).isEmpty())
+        assertTrue("it still asks for the tag", (vm.state.value as ReveilleUiState.Firing).challenge is Challenge.Nfc)
+
+        newScreen.onNfcUnavailable(tryId)
+        awaitUntil(message = "its own screen's cannot-touch is heard") { (vm.state.value as? ReveilleUiState.Firing)?.challenge is Challenge.Typing }
+        assertEquals(listOf(HandshakeMode.NFC to ChallengeOutcome.FALLBACK), rows(b).map { it.mode to it.outcome })
+        assertEquals("the other ring was never touched", OccurrenceState.FIRING, stateOf(a))
+        assertTrue(rows(a).isEmpty())
+    }
+
+    @Test
+    fun `a registered tag read on the ring's own screen acknowledges it`() {
+        val (a, _) = touching()
+        showTouching(a)
+        val tryId = ((vm.state.value as ReveilleUiState.Firing).challenge as Challenge.Nfc).tryId
+
+        ringActions(vm, a.id) {}.onNfcRead(tryId, TAG)
+        awaitUntil(message = "the tag is heard") { vm.state.value is ReveilleUiState.Direction }
+        assertEquals(OccurrenceState.GUIDED_START, stateOf(a))
+    }
+
     private companion object {
         const val PHRASE = "Starting now"
         const val CODE = "command-qr:0123456789abcdefghijkl"
+        val TAG = TagRead.of(byteArrayOf(0x04, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66)) as TagRead.Seen
     }
 }

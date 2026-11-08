@@ -1,7 +1,9 @@
 package com.command.data
 
 import androidx.test.core.app.ApplicationProvider
+import com.command.data.db.HandshakeTokenRow
 import com.command.domain.dials.HandshakeMode
+import com.command.domain.handshake.TagId
 import com.command.domain.handshake.TokenHash
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -101,9 +103,10 @@ class TokenRepositoryTest {
     }
 
     @Test
-    fun `duplicates are by way, so the same payload for another way is not one`() = run {
+    fun `duplicates are by way, so the same hash for another way is not one`() = run {
         saved("Fridge", "same")
-        saved("Fridge tag", "same", HandshakeMode.NFC)
+        val sameHash = TokenHash.of("same")
+        assertTrue(repo.registerTag("Fridge tag", sameHash) is RegisterResult.Saved)
         assertEquals(1, repo.count(HandshakeMode.QR))
         assertEquals(1, repo.count(HandshakeMode.NFC))
         assertEquals(listOf("Fridge tag"), listed(HandshakeMode.NFC).map { it.label })
@@ -114,8 +117,103 @@ class TokenRepositoryTest {
         repeat(20) { saved("Code $it", "payload-$it") }
         assertEquals(RegisterResult.Full, repo.register(HandshakeMode.QR, "One more", "payload-20"))
         assertEquals(20, repo.count(HandshakeMode.QR))
-        saved("Tag", "payload-20", HandshakeMode.NFC)
+        assertTrue(repo.registerTag("Tag", tagHash(20)) is RegisterResult.Saved)
         assertEquals(1, repo.count(HandshakeMode.NFC))
+    }
+
+    // --- tags (M13b): saved and matched by the fingerprint made on the reader thread --------------------------------
+
+    private fun tagHash(n: Int) = TokenHash.ofTag(TagId(byteArrayOf(0x04, 0x10, 0x20, 0x30, 0x40, 0x50, n.toByte())))
+    private fun tagRows() = runBlocking { f.db.handshakeTokens().forMode(HandshakeMode.NFC) }
+
+    @Test
+    fun registerTagStoresHashOnly() = run {
+        val hash = tagHash(1)
+        val result = repo.registerTag("  Key ring ", hash)
+        val id = (result as RegisterResult.Saved).id
+
+        val row = tagRows().single()
+        assertEquals(id, row.id)
+        assertEquals(HandshakeMode.NFC, row.mode)
+        assertEquals("Key ring", row.label)
+        assertEquals(hash, row.hash)
+        assertEquals(f.t0, row.createdAt)
+        assertTrue("no QR row", rows().isEmpty())
+        // No column holds the id: the row has only these fields, and none of them is the id's hex.
+        assertEquals(
+            listOf("createdAt", "hash", "id", "label", "mode"),
+            row.javaClass.declaredFields.map { it.name }.filter { !it.startsWith("$") && it != "Companion" }.sorted(),
+        )
+        for (value in listOf(row.id, row.label, row.hash)) assertFalse(value, value.contains("04102030405001"))
+        assertFalse(result.toString().contains(hash))
+        assertTrue(repo.matchesTag(hash))
+    }
+
+    @Test
+    fun tagAndQrCountedSeparately() = run {
+        repeat(20) { saved("Code $it", "payload-$it") }
+        repeat(20) { assertTrue(repo.registerTag("Tag $it", tagHash(it)) is RegisterResult.Saved) }
+        assertEquals(RegisterResult.Full, repo.registerTag("One more", tagHash(20)))
+        assertEquals(RegisterResult.Full, repo.register(HandshakeMode.QR, "One more", "payload-20"))
+        assertEquals(20, repo.count(HandshakeMode.QR))
+        assertEquals(20, repo.count(HandshakeMode.NFC))
+    }
+
+    @Test
+    fun duplicateTagByHash() = run {
+        repo.registerTag("Fridge", tagHash(1))
+        assertEquals(RegisterResult.Duplicate("Fridge"), repo.registerTag("Fridge again", tagHash(1)))
+        repeat(19) { repo.registerTag("Tag $it", tagHash(100 + it)) }
+        assertEquals(20, repo.count(HandshakeMode.NFC))
+        assertEquals("a duplicate is told before a full way", RegisterResult.Duplicate("Fridge"), repo.registerTag("Again", tagHash(1)))
+        assertEquals(RegisterResult.BadLabel, repo.registerTag("  ", tagHash(2)))
+        assertEquals(RegisterResult.BadLabel, repo.registerTag("x".repeat(TokenRepository.MAX_LABEL + 1), tagHash(2)))
+    }
+
+    @Test
+    fun malformedTagHashIsBlank() = run {
+        for (bad in listOf("", "  ", "abc", tagHash(1).uppercase(), tagHash(1) + "0", " " + tagHash(1), "04a1b2c3d4e5f6")) {
+            assertEquals("'$bad'", RegisterResult.BlankPayload, repo.registerTag("Tag", bad))
+        }
+        assertTrue(tagRows().isEmpty())
+    }
+
+    @Test
+    fun matchesTagFalseForMalformed() = run {
+        repo.registerTag("Tag", tagHash(1))
+        assertTrue(repo.matchesTag(tagHash(1)))
+        assertFalse(repo.matchesTag(tagHash(2)))
+        for (bad in listOf("", "abc", tagHash(1).uppercase(), tagHash(1) + " ")) assertFalse("'$bad'", repo.matchesTag(bad))
+    }
+
+    @Test
+    fun stringApiWithNfcModeIsBlankAndNeverMatches() = run {
+        repo.registerTag("Tag", tagHash(1))
+        for (mode in HandshakeMode.values().filter { it != HandshakeMode.QR }) {
+            assertEquals("$mode", RegisterResult.BlankPayload, repo.register(mode, "Tag", "command-qr:abc"))
+            assertFalse("$mode", repo.matches(mode, "command-qr:abc"))
+            assertFalse("$mode: the string API never reaches the tag rows", repo.matches(mode, tagHash(1)))
+        }
+        assertEquals(1, repo.count(HandshakeMode.NFC))
+        assertTrue(rows().isEmpty())
+
+        // Rows of every other way whose hash is exactly the code's own fingerprint (no screen can make these): only the mode guard keeps
+        // the string API from finding them.
+        for (mode in HandshakeMode.values().filter { it != HandshakeMode.QR }) {
+            f.db.handshakeTokens().insert(HandshakeTokenRow("planted-$mode", mode, "Planted", TokenHash.of("command-qr:abc"), 1L))
+            assertFalse("$mode: the string API is codes only, whatever the rows hold", repo.matches(mode, "command-qr:abc"))
+        }
+    }
+
+    @Test
+    fun qrHashOfSameTextDoesNotMatchTag() = run {
+        // A code whose text is a tag's hex is a different fingerprint, and the two ways never see each other's rows.
+        saved("Code", "04102030405001")
+        assertFalse(repo.matchesTag(TokenHash.of("04102030405001")))
+        assertFalse(repo.matchesTag(tagHash(1)))
+        repo.registerTag("Tag", tagHash(1))
+        assertFalse(repo.matches(HandshakeMode.QR, tagHash(1)))
+        assertTrue(repo.matchesTag(tagHash(1)))
     }
 
     @Test

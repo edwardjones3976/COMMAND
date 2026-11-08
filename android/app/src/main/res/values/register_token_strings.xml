@@ -52,4 +52,37 @@
     <string name="codes_camera_failed">The camera could not be used. If another app is using it, close that app and try again.</string>
     <string name="codes_no_consent">The camera consent is off, so the code was not registered.</string>
     <string name="codes_outcome_dismiss">OK</string>
+
+    <!-- The same screen for the tags of the NFC handshake (M13b): register-token?mode=NFC. -->
+    <string name="tags_title">Registered tags</string>
+    <string name="tags_intro">Name a tag, then touch it to the phone twice. Only a fingerprint of its id is kept.</string>
+    <string name="tags_passive_advice">Use a sticker or key-ring tag. Phones and bank cards change their id each time and cannot be used.</string>
+    <string name="tags_need_consent">Turn on the tag consent above to register a tag.</string>
+    <string name="tags_touch">Hold the tag to the back of the phone.</string>
+    <string name="tags_touch_again">Got it. Take the tag away, then touch it once more to check.</string>
+    <string name="tags_changed">That was a different id. Touch the same tag twice.</string>
+    <string name="tags_random">This tag changes its id every time, so it cannot be used. Use a sticker or key-ring tag.</string>
+    <string name="tags_no_id">This tag gave no id, so it cannot be used.</string>
+    <string name="tags_reader_off">The phone stopped reading tags. Check that NFC is on and try again.</string>
+    <string name="tags_nfc_off">NFC is off.</string>
+    <string name="tags_open_settings">Open NFC settings</string>
+    <string name="tags_nfc_none">This phone cannot read tags.</string>
+    <string name="tags_secure_note">This phone reads tags only when it is unlocked. When an alarm rings over the lock screen, it will ask you to type a phrase instead.</string>
+    <string name="tags_reader_title">NFC</string>
+    <string name="tags_list_title">Your tags</string>
+    <string name="tags_none">No tags are registered yet.</string>
+    <string name="tags_rename_field">Name of the tag</string>
+    <string name="tags_add">Add a tag</string>
+    <string name="tags_label_field">Name for the tag, such as Kitchen</string>
+    <string name="tags_start">Read the tag</string>
+    <string name="tags_registered">Registered “%1$s”. A step that asks for a tag accepts it now.</string>
+    <string name="tags_duplicate">That tag is already registered, as “%1$s”.</string>
+    <!-- The number is TokenRepository.MAX_PER_MODE, which is 20: never 1. -->
+    <string name="tags_full" tools:ignore="PluralsCandidate">%1$d tags are registered, the most there can be. Delete one to add another.</string>
+    <string name="tags_gone">That tag has been deleted.</string>
+    <string name="tags_no_consent">The tag consent is off, so the tag was not registered.</string>
+    <string name="tags_delete_title">Delete this tag?</string>
+    <string name="tags_delete_body">“%1$s” is deleted from COMMAND, and a step that asks for a tag no longer accepts it. The tag itself does not change. This cannot be undone.</string>
+    <string name="tags_delete_keep">Keep the tag</string>
+    <string name="tags_delete_confirm">Delete the tag</string>
 </resources>

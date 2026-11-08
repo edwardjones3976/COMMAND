@@ -285,7 +285,7 @@ class QrHandshakeViewModelTest {
 
         vm.qrScanned(TryId(0, 2), CODE)
         vm.qrScanned(other.id, qr().tryId, CODE)
-        vm.qrUnavailable(other.id)
+        vm.qrUnavailable(other.id, qr().tryId)
         settle()
 
         assertTrue(rows(o).isEmpty())
@@ -303,14 +303,15 @@ class QrHandshakeViewModelTest {
         vm.qrScanned(qr().tryId, "wrong")
         awaitChallenge("a second try") { it is Challenge.Qr && it.tryId.tryNo == 2 }
 
-        vm.qrUnavailable()
+        val failed = qr().tryId
+        vm.qrUnavailable(failed)
         awaitChallenge("typing") { it is Challenge.Typing }
         val typing = firing().challenge as Challenge.Typing
         assertEquals(3, typing.triesLeft)
         assertFalse("a new way starts clean", typing.mistaken)
         assertEquals(listOf(ChallengeOutcome.FAILED, ChallengeOutcome.FALLBACK), rows(o).map { it.outcome })
 
-        vm.qrUnavailable() // the camera's second report of the same failure
+        vm.qrUnavailable(failed) // the camera's second report of the same failure
         settle()
         assertEquals(2, rows(o).size)
     }
@@ -320,7 +321,8 @@ class QrHandshakeViewModelTest {
         val o = ringingWith()
         show(o)
 
-        vm.qrUnavailable() // the "Cannot scan? Type a phrase instead" control
+        val tapped = qr().tryId
+        vm.qrUnavailable(tapped) // the "Cannot scan? Type a phrase instead" control
         awaitChallenge("typing") { it is Challenge.Typing }
         val typing = firing().challenge as Challenge.Typing
         assertEquals("no try was used", 3, typing.triesLeft)
@@ -331,7 +333,7 @@ class QrHandshakeViewModelTest {
         assertEquals("not a try", 0, row.attemptNo)
         assertEquals(OccurrenceState.FIRING, stateOf(o))
 
-        vm.qrUnavailable() // a second tap
+        vm.qrUnavailable(tapped) // a second tap
         settle()
         assertEquals(1, rows(o).size)
         assertEquals(typing, firing().challenge)
@@ -342,7 +344,7 @@ class QrHandshakeViewModelTest {
         val o = ringingWith(ChainSpec(ChainOp.OR, listOf(step(HandshakeMode.TYPING), step(HandshakeMode.QR))))
         show(o)
 
-        vm.qrUnavailable()
+        vm.qrUnavailable((firing().challenge as Challenge.Typing).tryId)
         settle()
 
         assertTrue(rows(o).isEmpty())

@@ -1,9 +1,14 @@
 package com.command.handshake
 
+import android.os.Looper
+import androidx.lifecycle.SavedStateHandle
 import com.command.data.ConsentStore
 import com.command.data.Token
 import com.command.data.TokenRepository
 import com.command.domain.dials.HandshakeMode
+import com.command.domain.handshake.TagId
+import com.command.domain.handshake.TagRead
+import com.command.domain.handshake.TokenHash
 import com.command.domain.model.ConsentKey
 import com.command.domain.model.ConsentSource
 import com.command.reveille.QrDecoder
@@ -22,6 +27,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import javax.inject.Inject
 
@@ -41,8 +47,11 @@ class RegisterTokenViewModelTest {
     @Before
     fun setUp() {
         hilt.inject()
-        vm = RegisterTokenViewModel(tokens, consents)
+        vm = RegisterTokenViewModel(tokens, consents, FakeNfcStatus(), SavedStateHandle())
     }
+
+    private fun nfcViewModel(nfc: NfcStatus = FakeNfcStatus(), saved: SavedStateHandle = SavedStateHandle(mapOf("mode" to "NFC"))) =
+        RegisterTokenViewModel(tokens, consents, nfc, saved).also { vm = it }
 
     private fun ready(): RegisterTokenUiState.Ready {
         awaitUntil(message = "the codes are shown") { vm.state.value is RegisterTokenUiState.Ready }
@@ -246,6 +255,247 @@ class RegisterTokenViewModelTest {
         vm.closeMadeCode()
         awaitReady("put away") { it.madeCode == null }
         assertTrue(stored().isEmpty())
+    }
+
+    // --- tags (M13b): the same screen with mode=NFC, registered by two matching touches --------------------------------------
+
+    private fun tag(hex: String) = TagRead.Seen(TokenHash.ofTag(TagId(hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray())))
+
+    private fun storedTags(): List<Token> = runBlocking { tokens.observe(HandshakeMode.NFC).first() }
+
+    private fun tagConsented(): RegisterTokenUiState.Ready {
+        runBlocking { consents.grant(ConsentKey.NFC, ConsentSource.USER) }
+        return awaitReady("the tag consent is on") { it.consentGranted }
+    }
+
+    @Test
+    fun modeFromSavedStateDefaultQr() {
+        assertEquals("no mode is the codes", HandshakeMode.QR, ready().mode)
+        assertEquals(HandshakeMode.QR, vm.mode)
+        assertEquals(HandshakeMode.QR, RegisterTokenViewModel(tokens, consents, FakeNfcStatus(), SavedStateHandle(mapOf("mode" to "QR"))).mode)
+        assertEquals(HandshakeMode.NFC, nfcViewModel().mode)
+        assertEquals(HandshakeMode.NFC, ready().mode)
+    }
+
+    @Test
+    fun unknownModeFallsBackToQr() {
+        for (odd in listOf("VOICE", "TYPING", "nfc", "", "{mode}", "x".repeat(300))) {
+            assertEquals(odd, HandshakeMode.QR, RegisterTokenViewModel(tokens, consents, FakeNfcStatus(), SavedStateHandle(mapOf("mode" to odd))).mode)
+        }
+        assertEquals("not a string", HandshakeMode.QR, RegisterTokenViewModel(tokens, consents, FakeNfcStatus(), SavedStateHandle(mapOf("mode" to 7))).mode)
+    }
+
+    @Test
+    fun nfcUsesNfcConsent() {
+        nfcViewModel()
+        runBlocking { tokens.register(HandshakeMode.QR, "Code", "command-qr:c") }
+        runBlocking { consents.grant(ConsentKey.CAMERA_QR, ConsentSource.USER) }
+        assertFalse("the camera consent is not the tag consent", ready().consentGranted)
+        assertTrue("and the codes are not listed as tags", ready().codes.isEmpty())
+
+        vm.setConsent(true)
+        awaitReady("granted") { it.consentGranted }
+        assertTrue(runBlocking { consents.isGranted(ConsentKey.NFC) })
+        assertEquals(ConsentSource.USER, runBlocking { consents.history(ConsentKey.NFC) }.last().source)
+
+        vm.setConsent(false)
+        awaitReady("withdrawn") { !it.consentGranted }
+        assertFalse(runBlocking { consents.isGranted(ConsentKey.NFC) })
+        assertTrue("the camera consent is untouched", runBlocking { consents.isGranted(ConsentKey.CAMERA_QR) })
+    }
+
+    @Test
+    fun firstTouchTouchAgain() {
+        nfcViewModel()
+        tagConsented()
+
+        vm.tagRead("Kitchen", tag("04a1b2c3d4e5f6"))
+
+        assertEquals(CodeOutcome.TouchAgain, awaitReady("touch again") { it.outcome != null }.outcome)
+        assertTrue("nothing is stored after one touch", storedTags().isEmpty())
+    }
+
+    @Test
+    fun twoMatchingTouchesSave() {
+        nfcViewModel()
+        tagConsented()
+        val read = tag("04a1b2c3d4e5f6")
+
+        vm.tagRead("  Kitchen ", read)
+        awaitReady("touch again") { it.outcome == CodeOutcome.TouchAgain }
+        vm.tagRead("  Kitchen ", tag("04a1b2c3d4e5f6"))
+
+        assertEquals(CodeOutcome.Registered("Kitchen"), awaitReady("registered") { it.outcome is CodeOutcome.Registered }.outcome)
+        assertEquals(listOf("Kitchen"), awaitReady("listed") { it.codes.isNotEmpty() }.codes.map { it.label })
+        assertTrue(runBlocking { tokens.matchesTag(read.hash) })
+        assertTrue("it is not a code", stored().isEmpty())
+
+        // The first touch went with the save: one more touch starts again.
+        vm.tagRead("Hall", tag("04a1b2c3d4e5f6"))
+        assertEquals(CodeOutcome.TouchAgain, awaitReady("touch again") { it.outcome == CodeOutcome.TouchAgain }.outcome)
+    }
+
+    @Test
+    fun mismatchedSecondTouchTagChanged() {
+        nfcViewModel()
+        tagConsented()
+
+        vm.tagRead("Kitchen", tag("04a1b2c3d4e5f6"))
+        awaitReady("touch again") { it.outcome == CodeOutcome.TouchAgain }
+        vm.tagRead("Kitchen", tag("04ffffffffffff"))
+
+        assertEquals(CodeOutcome.TagChanged, awaitReady("changed") { it.outcome == CodeOutcome.TagChanged }.outcome)
+        assertTrue(storedTags().isEmpty())
+        // The first touch is forgotten: the next touch is a first touch again, even of the first tag.
+        vm.tagRead("Kitchen", tag("04a1b2c3d4e5f6"))
+        awaitReady("touch again") { it.outcome == CodeOutcome.TouchAgain }
+        assertTrue(storedTags().isEmpty())
+    }
+
+    @Test
+    fun changingReadRandomTag() {
+        nfcViewModel()
+        tagConsented()
+        vm.tagRead("Kitchen", tag("04a1b2c3d4e5f6"))
+        awaitReady("touch again") { it.outcome == CodeOutcome.TouchAgain }
+
+        vm.tagRead("Kitchen", TagRead.Changing)
+
+        assertEquals(CodeOutcome.RandomTag, awaitReady("random") { it.outcome == CodeOutcome.RandomTag }.outcome)
+        vm.tagRead("Kitchen", tag("04a1b2c3d4e5f6"))
+        awaitReady("the first touch was forgotten") { it.outcome == CodeOutcome.TouchAgain }
+        assertTrue(storedTags().isEmpty())
+    }
+
+    @Test
+    fun noIdNoTagId() {
+        nfcViewModel()
+        tagConsented()
+        vm.tagRead("Kitchen", tag("04a1b2c3d4e5f6"))
+        awaitReady("touch again") { it.outcome == CodeOutcome.TouchAgain }
+
+        vm.tagRead("Kitchen", TagRead.NoId)
+
+        assertEquals(CodeOutcome.NoTagId, awaitReady("no id") { it.outcome == CodeOutcome.NoTagId }.outcome)
+        vm.tagRead("Kitchen", tag("04a1b2c3d4e5f6"))
+        awaitReady("the first touch was forgotten") { it.outcome == CodeOutcome.TouchAgain }
+        assertTrue(storedTags().isEmpty())
+    }
+
+    private fun touchTwice(label: String, read: TagRead.Seen): CodeOutcome? {
+        vm.tagRead(label, read)
+        awaitReady("touch again") { it.outcome == CodeOutcome.TouchAgain }
+        vm.tagRead(label, read)
+        return awaitReady("answered") { it.outcome != null && it.outcome != CodeOutcome.TouchAgain }.outcome
+    }
+
+    @Test
+    fun duplicateAndFullForTags() {
+        nfcViewModel()
+        tagConsented()
+        assertEquals(CodeOutcome.Registered("Kitchen"), touchTwice("Kitchen", tag("04a1b2c3d4e5f6")))
+
+        assertEquals(CodeOutcome.Duplicate("Kitchen"), touchTwice("Hall", tag("04a1b2c3d4e5f6")))
+        assertEquals(CodeOutcome.BadLabel, touchTwice(" ", tag("04000000000001")))
+
+        runBlocking { for (i in 2..TokenRepository.MAX_PER_MODE) tokens.registerTag("Tag $i", TokenHash.ofTag(TagId(byteArrayOf(4, i.toByte(), 1, 2, 3, 4, 5)))) }
+        assertEquals(CodeOutcome.Full, touchTwice("One more", tag("04000000000002")))
+        assertEquals(TokenRepository.MAX_PER_MODE, storedTags().size)
+        assertTrue("the codes are counted apart", stored().isEmpty())
+    }
+
+    @Test
+    fun consentWithdrawnBetweenTouchesNoConsent() {
+        nfcViewModel()
+        tagConsented()
+        vm.tagRead("Kitchen", tag("04a1b2c3d4e5f6"))
+        awaitReady("touch again") { it.outcome == CodeOutcome.TouchAgain }
+        runBlocking { consents.revoke(ConsentKey.NFC, ConsentSource.USER) }
+        awaitReady("withdrawn") { !it.consentGranted }
+
+        vm.tagRead("Kitchen", tag("04a1b2c3d4e5f6"))
+
+        assertEquals(CodeOutcome.NoConsent, awaitReady("no consent") { it.outcome == CodeOutcome.NoConsent }.outcome)
+        assertTrue(storedTags().isEmpty())
+    }
+
+    @Test
+    fun noMakeCodeForNfc() {
+        nfcViewModel()
+        ready()
+
+        vm.makeCode()
+
+        assertNull("a tag cannot be made", ready().madeCode)
+    }
+
+    @Test
+    fun `a tag read on the codes screen is ignored, and the reader stopping says so on the tags screen`() {
+        ready()
+        runBlocking { consents.grant(ConsentKey.NFC, ConsentSource.USER) }
+        vm.tagRead("Kitchen", tag("04a1b2c3d4e5f6"))
+        assertNull("a first touch is not held, and asks for nothing", ready().outcome)
+        vm.tagRead("Kitchen", tag("04a1b2c3d4e5f6"))
+        // A save would finish on the main thread after the database has answered: let it, before looking.
+        repeat(20) {
+            shadowOf(Looper.getMainLooper()).idle()
+            Thread.sleep(25)
+        }
+        assertNull(ready().outcome)
+        assertTrue(storedTags().isEmpty())
+
+        nfcViewModel()
+        ready()
+        vm.tagReaderOff()
+        assertEquals(CodeOutcome.ReaderOff, awaitReady("reader off") { it.outcome != null }.outcome)
+    }
+
+    @Test
+    fun `cancelling after the first touch forgets it`() {
+        nfcViewModel()
+        tagConsented()
+        vm.tagRead("Kitchen", tag("04a1b2c3d4e5f6"))
+        awaitReady("touch again") { it.outcome == CodeOutcome.TouchAgain }
+
+        vm.cancelTag()
+
+        awaitReady("the words of the touch are put away") { it.outcome == null }
+        vm.tagRead("Kitchen", tag("04a1b2c3d4e5f6"))
+        awaitReady("a first touch again") { it.outcome == CodeOutcome.TouchAgain }
+        assertTrue(storedTags().isEmpty())
+    }
+
+    @Test
+    fun `the reader as this screen needs it, and Secure NFC`() {
+        val nfc = FakeNfcStatus()
+        nfcViewModel(nfc)
+        for ((now, access) in listOf(
+            NfcAvailability.NONE to ReaderAccess.NONE,
+            NfcAvailability.OFF to ReaderAccess.OFF,
+            NfcAvailability.SECURE_LOCKED to ReaderAccess.READY, // this screen is used unlocked
+            NfcAvailability.READY to ReaderAccess.READY,
+        )) {
+            nfc.now = now
+            assertEquals("$now", access, vm.readerAccess())
+        }
+        assertFalse(vm.secureNfcOn())
+        nfc.secure = true
+        assertTrue(vm.secureNfcOn())
+    }
+
+    @Test
+    fun pendingNotInSavedState() {
+        val saved = SavedStateHandle(mapOf("mode" to "NFC"))
+        nfcViewModel(saved = saved)
+        tagConsented()
+        val read = tag("04a1b2c3d4e5f6")
+
+        vm.tagRead("Kitchen", read)
+        awaitReady("touch again") { it.outcome == CodeOutcome.TouchAgain }
+
+        assertEquals("the saved state holds the mode alone", setOf("mode"), saved.keys())
+        assertEquals("NFC", saved.get<String>("mode"))
+        assertFalse("the state says nothing of the tag", (vm.state.value as RegisterTokenUiState.Ready).toString().contains(read.hash))
     }
 
     @Test
