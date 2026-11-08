@@ -9,6 +9,7 @@ answer, gives a first step and an optional five-minute starter, checks in, and k
 - Owner-aligned product and engineering requirements: [Complete COMMAND build specification](docs/PRODUCT-SPEC.html).
 - The rebuild's design record, which wins over any working plan: [docs/RECONSTRUCTION-DESIGN.html](docs/RECONSTRUCTION-DESIGN.html).
 - Which verification steps run where: [docs/VERIFICATION.html](docs/VERIFICATION.html).
+- The libraries the app ships with and their licences: [docs/THIRD_PARTY_NOTICES.html](docs/THIRD_PARTY_NOTICES.html).
 
 ## Building
 

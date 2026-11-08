@@ -15,23 +15,41 @@ enum class HandshakeMode {
         }
 
     /**
-     * Whether a person can be asked for this challenge today. Hold, the confirmation sequence, typing and two-step have their rules built
-     * and tested in :domain (the screens that ask for them belong to the app); QR, NFC and voice are planned (each needs a camera, a tag
-     * reader or a microphone, and its own consent) and stay marked as planned until their tests pass (spec section 4). A chain that names
-     * one is run with the mode [offered] in its place, and the record says so.
+     * Whether this challenge is built: its rules are in :domain and the app has a screen that asks for it. Hold, the confirmation sequence,
+     * typing, two-step and QR are; NFC and voice are not yet (each needs a tag reader or a microphone, and its own consent, spec section 4).
+     * A chain that names one that is not built is run with the mode [offered] in its place, and the record says so. This is a static rule:
+     * it never depends on the phone, so what is saved reads the same on every phone.
      */
-    val available: Boolean
+    val built: Boolean
         get() = when (this) {
-            HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP -> true
-            QR, NFC, VOICE -> false
+            HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP, QR -> true
+            NFC, VOICE -> false
         }
 
-    /** The mode that is really asked for in place of this one: itself when it is [available], otherwise its fallback, and so on until one is. */
+    /**
+     * Whether this challenge needs something of the phone that it may not have right now (a camera, a consent, a permission, a registered
+     * code). A ring asks for such a mode only when [com.command.domain.handshake.HandshakeCapability] says the phone can do it; otherwise the
+     * step runs its fallback and a row says so. QR, for now (NFC and voice join it when they are built).
+     */
+    val needsDevice: Boolean
+        get() = this == QR
+
+    /**
+     * Whether this challenge is not yet signed off on hardware: built or not, it has not been checked on a phone. The screens use it for the
+     * label; it changes nothing the engine does. QR, NFC and voice.
+     */
+    val planned: Boolean
+        get() = when (this) {
+            QR, NFC, VOICE -> true
+            HOLD, CONFIRM_SEQUENCE, TYPING, TWO_STEP -> false
+        }
+
+    /** The mode that is really asked for in place of this one: itself when it is [built], otherwise its fallback, and so on until one is. */
     val offered: HandshakeMode
         get() {
             var mode = this
             var hops = 0
-            while (!mode.available && hops++ < values().size) mode = mode.fallback
+            while (!mode.built && hops++ < values().size) mode = mode.fallback
             return mode
         }
 }

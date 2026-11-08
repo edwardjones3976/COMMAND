@@ -1,6 +1,7 @@
 package com.command.reveille
 
 import com.command.data.OccurrenceRepository
+import com.command.data.TokenRepository
 import com.command.data.ProfileRepository
 import com.command.data.db.CommandDb
 import com.command.data.db.OccurrenceRow
@@ -55,7 +56,7 @@ class HandshakeAlternativesTest {
     @Before
     fun setUp() {
         hilt.inject()
-        vm = ReveilleViewModel(repo, clock, phrases)
+        vm = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
     }
 
     private fun step(mode: HandshakeMode, tries: Int = 3, hold: Int = 0) = StepSpec(mode, tries, 90, hold)
@@ -253,7 +254,7 @@ class HandshakeAlternativesTest {
         vm.switchTo(1)
         awaitChallenge("typing") { it is Challenge.Typing }
 
-        val fresh = ReveilleViewModel(repo, clock, phrases)
+        val fresh = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
         fresh.show(o.id)
         awaitUntil(message = "restored") { (fresh.state.value as? ReveilleUiState.Firing)?.challenge is Challenge.Hold }
     }
@@ -267,7 +268,7 @@ class HandshakeAlternativesTest {
         vm.typingSubmitted((firing().challenge as Challenge.Typing).tryId, "wrong")
         awaitChallenge("a second try") { it is Challenge.Typing && it.tryId.tryNo == 2 }
 
-        val fresh = ReveilleViewModel(repo, clock, phrases)
+        val fresh = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
         fresh.show(o.id)
         awaitUntil(message = "restored") { ((fresh.state.value as? ReveilleUiState.Firing)?.challenge as? Challenge.Typing)?.tryId?.tryNo == 2 }
 
@@ -613,7 +614,7 @@ class HandshakeAlternativesTest {
         vm.switchTo(2)
         awaitChallenge("the press") { it is Challenge.Hold }
 
-        val fresh = ReveilleViewModel(repo, clock, phrases)
+        val fresh = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
         fresh.show(o.id)
         awaitUntil(message = "restored") { (fresh.state.value as? ReveilleUiState.Firing)?.challenge is Challenge.Typing }
 
@@ -623,13 +624,13 @@ class HandshakeAlternativesTest {
     }
 
     @Test
-    fun `a planned way is offered as the way that will be asked, and its replacement is written down once`() {
+    fun `a way the phone cannot do is offered as the way that will be asked, and its replacement is written down once`() {
         val o = ringingWith(ChainSpec(ChainOp.OR, listOf(step(HandshakeMode.HOLD, hold = 3), step(HandshakeMode.QR))))
         show(o)
 
-        assertEquals("not 'Scan a code': the ring asks for typing", listOf(Alternative(1, HandshakeMode.TYPING, instead = true)), firing().alternatives)
+        assertEquals("not 'Scan a code' on a phone that cannot scan: the ring asks for typing", listOf(Alternative(1, HandshakeMode.TYPING, instead = true)), firing().alternatives)
         assertEquals(listOf(ChallengeOutcome.FALLBACK), rows(o).map { it.outcome })
-        val fresh = ReveilleViewModel(repo, clock, phrases)
+        val fresh = ReveilleViewModel(repo, clock, phrases, FixedCapability(), TokenRepository(db, clock))
         fresh.show(o.id)
         awaitUntil(message = "shown again") { fresh.state.value is ReveilleUiState.Firing }
         assertEquals("and said once", listOf(ChallengeOutcome.FALLBACK), rows(o).map { it.outcome })

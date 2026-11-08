@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material3.AlertDialog
@@ -91,6 +92,10 @@ object ReveilleTags {
     const val PROGRESS = "reveille_progress"
     const val ACKNOWLEDGING = "reveille_acknowledging"
     const val HOLD_WORDS = "reveille_hold_words"
+    const val QR_WORDS = "reveille_qr_words"
+    const val QR_CANNOT_SCAN = "reveille_qr_cannot_scan"
+    const val QR_INSTRUCTION = "reveille_qr_instruction"
+    const val QR_VIEWFINDER = "reveille_qr_viewfinder"
     fun alternative(position: Int) = "reveille_alternative_$position"
     const val HANDSHAKE_PROMPT = "reveille_handshake_prompt"
     const val UNSPOKEN_LINE = "reveille_unspoken_line"
@@ -119,6 +124,10 @@ class ReveilleActions(
     val onSequenceTapped: (TryId, Int) -> Unit = { _, _ -> },
     val onTwoStepIndicated: (TryId) -> Unit = {},
     val onSwitch: (Int) -> Unit = {},
+    /** The camera read a code while the try [TryId] was on screen. */
+    val onQrScanned: (TryId, String) -> Unit = { _, _ -> },
+    /** The camera cannot be used now. */
+    val onQrUnavailable: () -> Unit = {},
     val onSilence: () -> Unit,
     val onResume: () -> Unit,
     val onStarted: () -> Unit,
@@ -244,7 +253,8 @@ private fun Firing(state: ReveilleUiState.Firing, actions: ReveilleActions) {
     // Safety silence is the last thing on the screen and never scrolls: it is always in view and one tap, whatever is being asked. It is the
     // one child of the column that has a size of its own; everything else is given the weight that is left, so that no layout, however much it
     // asks for, can squeeze it (a column that runs out of room squeezes its last child to a sliver, and that was once the silence). A hold
-    // keeps its target out of anything that scrolls, so that a finger resting on it can never be taken over by a scroll gesture. The title,
+    // keeps its target out of anything that scrolls, so that a finger resting on it can never be taken over by a scroll gesture, and a code to
+    // scan keeps its viewfinder out of it in the same way. The title,
     // and typing, the numbers or the two-step, scroll in the space above. The window gives way to the system bars, the notch and the
     // keyboard (safe drawing); in a short window, and with the keyboard up, the margins are tighter.
     BoxWithConstraints(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -256,6 +266,7 @@ private fun Firing(state: ReveilleUiState.Firing, actions: ReveilleActions) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when (val challenge = state.challenge) {
                     is Challenge.Hold -> HoldArea(state, challenge, actions)
+                    is Challenge.Qr -> QrArea(state, challenge, actions)
                     else -> Column(
                         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -274,6 +285,7 @@ private fun Firing(state: ReveilleUiState.Firing, actions: ReveilleActions) {
                             is Challenge.TwoStep -> TwoStepChallenge(challenge) { actions.onTwoStepIndicated(challenge.tryId) }
                             Challenge.OutOfTries -> OutOfTriesNote()
                             is Challenge.Hold -> Unit
+                            is Challenge.Qr -> Unit
                         }
                         Alternatives(state.alternatives, actions.onSwitch)
                     }
@@ -394,6 +406,42 @@ private fun HoldArea(state: ReveilleUiState.Firing, hold: Challenge.Hold, action
                 target()
                 if (offerConfirm && !hold.assistive) AssistiveConfirm(hold.tryId, primary = false, onBegun = { actions.onAssistiveBegun(hold.tryId) }) { actions.onAssistiveConfirmed(hold.tryId) }
             }
+        }
+    }
+}
+
+/**
+ * A code to scan: the words above (the title, what to do, a wrong code said so, the other ways) take half the room that is left and scroll in
+ * it, and the viewfinder takes the other half, out of anything that scrolls, as the hold's target is. The camera is [LocalQrScanner]'s. A code
+ * it reads is reported with the try on screen; a camera that cannot be used is reported once, and the view model asks the fallback instead.
+ * Under the viewfinder, "Cannot scan? Type a phrase instead" makes the same report, for a camera that opens but never reads anything.
+ */
+@Composable
+private fun QrArea(state: ReveilleUiState.Firing, qr: Challenge.Qr, actions: ReveilleActions) {
+    val scanner = LocalQrScanner.current
+    val description = stringResource(R.string.handshake_qr_viewfinder)
+    Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(modifier = Modifier.weight(1f).fillMaxWidth().testTag(ReveilleTags.QR_WORDS).verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                TitleBlock(state)
+                QrWords(qr)
+                Alternatives(state.alternatives, actions.onSwitch)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        scanner.Viewfinder(
+            modifier = Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(16.dp)).testTag(ReveilleTags.QR_VIEWFINDER).semantics { contentDescription = description },
+            onDecoded = { actions.onQrScanned(qr.tryId, it) },
+            onError = actions.onQrUnavailable,
+        )
+        // A camera can open and still never show a code it can read (the camera privacy switch, black frames, a code it cannot focus on), and
+        // then it reports nothing: the person can always say so, and is asked the fallback instead. It is not a try, and it is out of anything
+        // that scrolls, under the viewfinder; Safety silence is apart from it and is never covered or replaced by it.
+        OutlinedButton(
+            onClick = actions.onQrUnavailable,
+            modifier = Modifier.padding(top = 8.dp).heightIn(min = 48.dp).testTag(ReveilleTags.QR_CANNOT_SCAN),
+        ) {
+            Text(stringResource(R.string.handshake_qr_cannot_scan), style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
         }
     }
 }

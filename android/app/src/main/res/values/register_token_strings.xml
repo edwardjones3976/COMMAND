@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <string name="codes_title">Registered codes</string>
+    <string name="codes_back">Back</string>
+    <string name="codes_intro">A code is any QR code you print or already own. A handshake step that asks you to scan a code is passed by one of the codes registered here. Only a fingerprint of each code is kept on this phone, never the code itself. A code you already own should not hold a secret, such as a Wi-Fi password; a code made here is the safest choice.</string>
+    <string name="codes_none">No codes are registered yet.</string>
+    <string name="codes_list_title">Your codes</string>
+
+    <string name="codes_rename">Rename</string>
+    <string name="codes_rename_named">Rename %1$s</string>
+    <string name="codes_delete">Delete</string>
+    <string name="codes_delete_named">Delete %1$s</string>
+    <string name="codes_rename_field">Name of the code</string>
+    <string name="codes_rename_save">Save the name</string>
+    <string name="codes_rename_cancel">Cancel</string>
+
+    <string name="codes_delete_title">Delete this code?</string>
+    <string name="codes_delete_body">“%1$s” is deleted from COMMAND, and a step that asks for a code no longer accepts it. The printed code itself does not change. This cannot be undone.</string>
+    <string name="codes_delete_keep">Keep the code</string>
+    <string name="codes_delete_confirm">Delete the code</string>
+
+    <string name="codes_camera_title">The camera</string>
+    <string name="codes_camera_none">This phone has no camera, so QR codes cannot be used on it. A step that asks for a code asks you to type a phrase instead.</string>
+    <string name="codes_camera_not_asked">To scan a code, COMMAND needs Android to give it the camera.</string>
+    <string name="codes_camera_ask">Allow the camera</string>
+    <string name="codes_camera_refused">Android has not given COMMAND the camera, so a code cannot be scanned. You can allow it in the app\'s settings.</string>
+    <string name="codes_app_settings">Open the app\'s settings</string>
+    <string name="codes_need_consent">Turn on the camera consent above to add a code.</string>
+
+    <string name="codes_add">Add a code</string>
+    <string name="codes_label_field">Name for the code, such as Kitchen</string>
+    <!-- The limit is TokenRepository.MAX_LABEL, which is 40: never 1. -->
+    <string name="codes_label_limit" tools:ignore="PluralsCandidate">A name needs 1 to %1$d characters.</string>
+    <string name="codes_scan">Scan the code</string>
+    <string name="codes_add_cancel">Cancel</string>
+    <string name="codes_scan_instruction">Point the camera at the code you want to register as “%1$s”.</string>
+    <string name="codes_viewfinder">Camera view. Point it at the code to register.</string>
+    <string name="codes_scan_cancel">Cancel the scan</string>
+
+    <string name="codes_make">Make a new code</string>
+    <string name="codes_made_words">Print this or show it on another screen, then scan it to register it</string>
+    <string name="codes_made_image">A new QR code to print or show on another screen</string>
+    <string name="codes_made_close">Done</string>
+
+    <string name="codes_registered">Registered “%1$s”. A step that asks for a code accepts it now.</string>
+    <string name="codes_blank">That code holds no text, so it cannot be used. Try another code.</string>
+    <string name="codes_duplicate">That code is already registered, as “%1$s”.</string>
+    <!-- The number is TokenRepository.MAX_PER_MODE, which is 20: never 1. -->
+    <string name="codes_full" tools:ignore="PluralsCandidate">%1$d codes are registered, the most there can be. Delete one to add another.</string>
+    <string name="codes_renamed">The name is changed.</string>
+    <string name="codes_gone">That code has been deleted.</string>
+    <string name="codes_camera_failed">The camera could not be used. If another app is using it, close that app and try again.</string>
+    <string name="codes_no_consent">The camera consent is off, so the code was not registered.</string>
+    <string name="codes_outcome_dismiss">OK</string>
+</resources>

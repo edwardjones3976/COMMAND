@@ -12,6 +12,7 @@ import com.command.domain.dials.StepSpec
 import com.command.domain.dials.issues
 import com.command.domain.handshake.ChainRunner
 import com.command.domain.handshake.ChainState
+import com.command.domain.handshake.HandshakeCapability
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -43,10 +44,12 @@ class ChainValidationTest {
     fun `no more steps than a person can be asked for while an alarm rings`() {
         val modes = listOf(HandshakeMode.HOLD, HandshakeMode.CONFIRM_SEQUENCE, HandshakeMode.TYPING, HandshakeMode.TWO_STEP, HandshakeMode.QR)
         assertEquals(emptyList<ChainIssue>(), issues(*modes.take(ChainLimits.MAX_STEPS).map { step(it) }.toTypedArray()))
-        // Four ways are built, so a fifth step is also a way that is there already (the planned QR runs as typing): both are told.
+        // Five different ways are one step too many.
+        assertEquals(listOf(ChainIssue(ChainProblem.TOO_MANY_STEPS)), issues(*modes.map { step(it) }.toTypedArray()))
+        // And a fifth step that is also a way that is there already (NFC, not built, runs as typing): both are told.
         assertEquals(
             listOf(ChainIssue(ChainProblem.TOO_MANY_STEPS), ChainIssue(ChainProblem.SAME_WAY_TWICE, 4)),
-            issues(*modes.map { step(it) }.toTypedArray()),
+            issues(*(modes.take(4) + HandshakeMode.NFC).map { step(it) }.toTypedArray()),
         )
     }
 
@@ -141,7 +144,7 @@ class ChainValidationTest {
         val edge = ChainSpec(ChainOp.OR, listOf(step(HandshakeMode.HOLD, tries = ChainLimits.MAX_TRIES, timeout = ChainLimits.MIN_TIMEOUT_SECONDS, hold = ChainLimits.MAX_HOLD_SECONDS)))
         assertTrue(edge.issues().isEmpty())
 
-        val state = ChainRunner.start(edge).state
+        val state = ChainRunner.start(edge, HandshakeCapability.ALL).state
 
         assertEquals("a press as long as the limit allows", ChainLimits.MAX_HOLD_SECONDS, state.holdSeconds(0))
         assertEquals("a try as short as the limit allows", ChainLimits.MIN_TIMEOUT_SECONDS, state.timeoutSeconds(0))
@@ -149,16 +152,27 @@ class ChainValidationTest {
     }
 
     @Test
-    fun `a planned way is the same way as the one that takes its place, because that is what the ring asks for`() {
-        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.QR), step(HandshakeMode.TYPING)))
-        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.TYPING), step(HandshakeMode.QR)))
-        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.QR), step(HandshakeMode.NFC)))
-        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 2)), issues(step(HandshakeMode.QR), step(HandshakeMode.HOLD), step(HandshakeMode.VOICE)))
-        assertEquals("a planned way beside a way that is not typing is two different asks", emptyList<ChainIssue>(), issues(step(HandshakeMode.QR), step(HandshakeMode.HOLD)))
+    fun `a way that is not built is the same way as the one that takes its place, because that is what the ring asks for`() {
+        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.NFC), step(HandshakeMode.TYPING)))
+        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.TYPING), step(HandshakeMode.NFC)))
+        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.NFC), step(HandshakeMode.VOICE)))
+        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 2)), issues(step(HandshakeMode.NFC), step(HandshakeMode.HOLD), step(HandshakeMode.VOICE)))
+        assertEquals("a way that is not built beside a way that is not typing is two different asks", emptyList<ChainIssue>(), issues(step(HandshakeMode.NFC), step(HandshakeMode.HOLD)))
     }
 
     @Test
-    fun `a planned way can be named, because the engine runs its fallback and says so`() {
-        assertEquals(emptyList<ChainIssue>(), ChainSpec(ChainOp.OR, listOf(step(HandshakeMode.QR))).issues())
+    fun `QR is built, so it and typing are two ways, whatever the phone can do, because what is saved never depends on the phone`() {
+        assertEquals(emptyList<ChainIssue>(), issues(step(HandshakeMode.QR), step(HandshakeMode.TYPING)))
+        assertEquals(emptyList<ChainIssue>(), issues(step(HandshakeMode.TYPING), step(HandshakeMode.QR)))
+        assertEquals("QR beside a way that is not built is two ways too", emptyList<ChainIssue>(), issues(step(HandshakeMode.QR), step(HandshakeMode.NFC)))
+        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 1)), issues(step(HandshakeMode.QR), step(HandshakeMode.QR)))
+        assertEquals(listOf(ChainIssue(ChainProblem.SAME_WAY_TWICE, 2)), issues(step(HandshakeMode.QR), step(HandshakeMode.TYPING), step(HandshakeMode.NFC)))
+    }
+
+    @Test
+    fun `a way that is not built, or not yet checked on a phone, can be named, because the engine runs its fallback and says so`() {
+        for (mode in listOf(HandshakeMode.QR, HandshakeMode.NFC, HandshakeMode.VOICE)) {
+            assertEquals("$mode", emptyList<ChainIssue>(), ChainSpec(ChainOp.OR, listOf(step(mode))).issues())
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.command.reveille
 
 import android.os.Looper
 import com.command.data.OccurrenceRepository
+import com.command.data.TokenRepository
 import com.command.data.REPEATED_ACK_NO_START_AFTER
 import com.command.data.db.CommandDb
 import com.command.data.db.OccurrenceRow
@@ -65,7 +66,7 @@ class StarterViewModelTest {
         vm = model()
     }
 
-    private fun model(tick: Channel<Unit> = ticks) = ReveilleViewModel(repo, clock, FixedPhrases(listOf("Starting now"))).also { it.starterTick = { tick.receive() } }
+    private fun model(tick: Channel<Unit> = ticks) = ReveilleViewModel(repo, clock, FixedPhrases(listOf("Starting now")), FixedCapability(), TokenRepository(db, clock)).also { it.starterTick = { tick.receive() } }
 
     private fun missionId(starterMinutes: Int = 5, title: String = "Write the report"): String = runBlocking {
         val mission = testMission(title = title, profileId = "builtin_steady").copy(starterMinutes = starterMinutes)

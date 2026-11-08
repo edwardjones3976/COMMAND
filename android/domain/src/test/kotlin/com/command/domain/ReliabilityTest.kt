@@ -1,6 +1,8 @@
 package com.command.domain
 
 import com.command.domain.model.ConsentBoundaries
+import com.command.domain.model.ConsentCascade
+import com.command.domain.model.ConsentKey
 import com.command.domain.model.ConsentOwner
 import com.command.domain.reliability.AlarmOutcomeKind
 import com.command.domain.reliability.AlarmOutcomes
@@ -98,6 +100,16 @@ class ReliabilityTest {
                 ConsentOwner.APP -> assertTrue("${boundary.key} is the app's to keep, so no Android setting stands for it", preconditions.isEmpty())
             }
         }
+    }
+
+    @Test
+    fun `the camera consent for the QR handshake is listed after the calendar, is the app's own, and withdraws nothing else`() {
+        assertEquals(
+            listOf(ConsentKey.NOTIFICATIONS, ConsentKey.EXACT_ALARM, ConsentKey.FULL_SCREEN, ConsentKey.VOLUME_CONTROL, ConsentKey.CALENDAR_READ, ConsentKey.CAMERA_QR),
+            ConsentBoundaries.all.map { it.key },
+        )
+        assertEquals(ConsentOwner.APP, ConsentBoundaries.all.single { it.key == ConsentKey.CAMERA_QR }.owner)
+        assertEquals(emptyList<ConsentKey>(), ConsentCascade.dependents(ConsentKey.CAMERA_QR))
     }
 
     // --- how recent alarms are read --------------------------------------------------------------------------

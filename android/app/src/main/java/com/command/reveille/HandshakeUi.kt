@@ -3,6 +3,8 @@ package com.command.reveille
 import android.content.Context
 import com.command.domain.dials.Personality
 import com.command.domain.handshake.TryId
+import com.command.handshake.AndroidHandshakeCapabilitySource
+import com.command.handshake.HandshakeCapabilitySource
 import com.command.R
 import dagger.Binds
 import dagger.Module
@@ -30,6 +32,12 @@ sealed interface Challenge {
 
     /** The numbers 1 to 4, to be tapped in order; [layout] is where they stand, [tapped] how many have been tapped rightly. */
     data class Sequence(val tryId: TryId, val layout: List<Int>, val tapped: Int, val triesLeft: Int, val mistaken: Boolean, val slow: Boolean = false) : Challenge
+
+    /**
+     * A registered code to scan with the camera. [mistaken] says that the last code scanned was not a registered one (or, [slow], that the
+     * time ran out), and [triesLeft] how many remain on this way. The try begins with its first scan, so walking to the code costs nothing.
+     */
+    data class Qr(val tryId: TryId, val triesLeft: Int, val mistaken: Boolean, val slow: Boolean = false) : Challenge
 
     /** The person says what they will do first: [firstAction] is what they are asked to stand behind. */
     data class TwoStep(val tryId: TryId, val firstAction: String) : Challenge
@@ -76,4 +84,7 @@ class ResourcePhraseSource @Inject constructor(@ApplicationContext private val c
 abstract class HandshakeModule {
     @Binds
     abstract fun phrases(impl: ResourcePhraseSource): PhraseSource
+
+    @Binds
+    abstract fun capability(impl: AndroidHandshakeCapabilitySource): HandshakeCapabilitySource
 }

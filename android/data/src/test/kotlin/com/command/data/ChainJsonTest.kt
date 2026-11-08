@@ -75,10 +75,18 @@ class ChainJsonTest {
     }
 
     @Test
-    fun `a planned way and the way that takes its place are the same way twice`() {
-        val text = "{\"op\":\"OR\",\"steps\":[{\"mode\":\"QR\",\"tries\":3,\"timeoutSeconds\":90},{\"mode\":\"TYPING\",\"tries\":3,\"timeoutSeconds\":90}]}"
+    fun `a way that is not built and the way that takes its place are the same way twice`() {
+        val text = "{\"op\":\"OR\",\"steps\":[{\"mode\":\"NFC\",\"tries\":3,\"timeoutSeconds\":90},{\"mode\":\"TYPING\",\"tries\":3,\"timeoutSeconds\":90}]}"
         assertNull(ChainJson.decode(text))
         assertNotNull(ChainJson.decode(text.replace("TYPING", "HOLD")))
+    }
+
+    @Test
+    fun `QR is built, so QR and typing are two ways and read back the same on every phone`() {
+        val text = "{\"op\":\"OR\",\"steps\":[{\"mode\":\"QR\",\"tries\":3,\"timeoutSeconds\":90},{\"mode\":\"TYPING\",\"tries\":3,\"timeoutSeconds\":90}]}"
+        val chain = ChainSpec(ChainOp.OR, listOf(StepSpec(HandshakeMode.QR, 3, 90), StepSpec(HandshakeMode.TYPING, 3, 90)))
+        assertEquals(chain, ChainJson.decode(text))
+        assertEquals(chain, ChainJson.decode(ChainJson.encode(chain)))
     }
 
     @Test

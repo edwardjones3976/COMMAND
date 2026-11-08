@@ -77,6 +77,8 @@ class ReveilleActivity : ComponentActivity() {
         super.onStart()
         getSystemService(AccessibilityManager::class.java)?.addTouchExplorationStateChangeListener(screenReader)
         viewModel.offerAccessibleConfirm = needsAnotherWayThanHolding() // it may have changed while the activity was stopped
+        // So may the camera consent, the camera permission and the registered codes: a step that cannot scan any more asks its fallback.
+        viewModel.recheckCapability()
     }
 
     override fun onStop() {
@@ -127,6 +129,8 @@ internal fun ringActions(viewModel: ReveilleViewModel, ring: String?, onClose: (
     onSequenceTapped = { at, number -> ring?.let { viewModel.sequenceTapped(it, at, number) } },
     onTwoStepIndicated = { at -> ring?.let { viewModel.twoStepIndicated(it, at) } },
     onSwitch = { position -> ring?.let { viewModel.switchTo(it, position) } },
+    onQrScanned = { at, payload -> ring?.let { viewModel.qrScanned(it, at, payload) } },
+    onQrUnavailable = { ring?.let { viewModel.qrUnavailable(it) } },
     onSilence = viewModel::silence,
     onResume = viewModel::resume,
     onStarted = viewModel::started,

@@ -111,18 +111,21 @@ object HandshakeTags {
     fun up(index: Int) = "handshake_step_${index}_up"
     fun down(index: Int) = "handshake_step_${index}_down"
     fun remove(index: Int) = "handshake_step_${index}_remove"
+    fun qrNeeds(index: Int) = "handshake_step_${index}_qr_needs"
+    fun codes(index: Int) = "handshake_step_${index}_codes"
+    const val CODES = "handshake_codes"
 }
 
 @Composable
-fun HandshakeProfilesRoute(onBack: () -> Unit, onEdit: (String) -> Unit, viewModel: HandshakeProfilesViewModel = hiltViewModel()) {
+fun HandshakeProfilesRoute(onBack: () -> Unit, onEdit: (String) -> Unit, onOpenCodes: () -> Unit = {}, viewModel: HandshakeProfilesViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    HandshakeProfilesScreen(state, onBack, onEdit)
+    HandshakeProfilesScreen(state, onBack, onEdit, onOpenCodes)
 }
 
-/** Stateless, so it can be shown in tests without a view model. */
+/** Stateless, so it can be shown in tests without a view model. [onOpenCodes] opens the codes that a step which scans a code checks against. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HandshakeProfilesScreen(state: HandshakeProfilesUiState, onBack: () -> Unit, onEdit: (String) -> Unit) {
+fun HandshakeProfilesScreen(state: HandshakeProfilesUiState, onBack: () -> Unit, onEdit: (String) -> Unit, onOpenCodes: () -> Unit = {}) {
     Scaffold(
         topBar = {
             TopAppBar(
@@ -143,6 +146,12 @@ fun HandshakeProfilesScreen(state: HandshakeProfilesUiState, onBack: () -> Unit,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item { Text(stringResource(R.string.handshake_profiles_intro), style = MaterialTheme.typography.bodyMedium) }
+                item {
+                    OutlinedButton(
+                        onClick = onOpenCodes,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).testTag(HandshakeTags.CODES),
+                    ) { Text(stringResource(R.string.handshake_registered_codes)) }
+                }
                 items(state.profiles, key = { it.id }) { profile -> ProfileCard(profile, profile.id in state.inUse, onEdit) }
             }
         }

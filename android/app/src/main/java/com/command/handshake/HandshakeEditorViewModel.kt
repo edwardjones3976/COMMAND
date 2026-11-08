@@ -180,8 +180,8 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
         return editing(profileName, difficulty, op, steps, usingStandard, storedUnusable, saved = saved && unchanged, restored = restored && unchanged)
     }
 
-    /** True when another step than [key] asks for what [mode] would ask for: a way that is only planned asks for the way that takes its place ([HandshakeMode.offered]), which the rules judge by. */
-    private fun HandshakeEditorUiState.Editing.asksFor(key: Int, mode: HandshakeMode) = steps.any { it.key != key && it.mode.offered == mode.offered }
+    /** True when another step than [key] asks for what [mode] would ask for: a way that is not built asks for the way that takes its place ([HandshakeMode.offered]), which the rules judge by. */
+    private fun HandshakeEditorUiState.Editing.asksFor(key: Int, mode: HandshakeMode) = steps.any { it.key != key && it.mode.editorWay == mode.editorWay }
 
     fun setOp(op: ChainOp) = edit { it.with(op = op) }
 
@@ -208,9 +208,9 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
         current.with(steps = moved)
     }
 
-    /** A way that another step already asks for, or one that is only planned, is not offered by the screen; asking for it here changes nothing. */
+    /** A way that another step already asks for, or one that is not built, is not offered by the screen; asking for it here changes nothing. */
     fun setMode(key: Int, mode: HandshakeMode) = edit { current ->
-        if (!mode.available || current.asksFor(key, mode)) return@edit current
+        if (!mode.selectable || current.asksFor(key, mode)) return@edit current
         current.with(steps = current.steps.map { step ->
             if (step.key != key || step.mode == mode) step else step.copy(mode = mode, holdSeconds = if (mode == HandshakeMode.HOLD) HOLD_START else 0)
         })
@@ -293,8 +293,11 @@ class HandshakeEditorViewModel @Inject constructor(private val profiles: Profile
         /** A key no step has, for asking whether any step asks for a way. */
         const val NO_KEY = -1
 
-        /** The ways a new step can start as, in the order they are offered. */
-        val BUILT_WAYS = listOf(HandshakeMode.HOLD, HandshakeMode.CONFIRM_SEQUENCE, HandshakeMode.TYPING, HandshakeMode.TWO_STEP)
+        /**
+         * The ways a new step can start as, in the order they are offered: every way that is built, and those that need something of the
+         * phone (a code to scan) last, so that a new step asks for nothing the phone may not have.
+         */
+        val BUILT_WAYS = HandshakeMode.values().filter { it.built }.sortedBy { it.needsDevice }
         const val HOLD_START = ChainState.DEFAULT_HOLD_SECONDS
         const val TIMEOUT_STEP = 10
         val DEFAULT_TRIES = DialEffects.defaultChain(3).steps.first().maxRetries

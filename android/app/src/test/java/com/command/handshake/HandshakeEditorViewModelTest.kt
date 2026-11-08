@@ -162,7 +162,9 @@ class HandshakeEditorViewModelTest {
 
         vm.setMode(first, HandshakeMode.CONFIRM_SEQUENCE) // the second step has it
         assertEquals(HandshakeMode.HOLD, editing().steps[0].mode)
-        vm.setMode(first, HandshakeMode.QR) // planned
+        vm.setMode(first, HandshakeMode.NFC) // planned
+        assertEquals(HandshakeMode.HOLD, editing().steps[0].mode)
+        vm.setMode(first, HandshakeMode.VOICE) // planned
         assertEquals(HandshakeMode.HOLD, editing().steps[0].mode)
         vm.setMode(first, HandshakeMode.TYPING)
         assertEquals(HandshakeMode.TYPING, editing().steps[0].mode)
@@ -828,19 +830,19 @@ class HandshakeEditorViewModelTest {
 
     @Test
     fun `adding steps to a chain with a planned way never repeats the way it runs as`() {
-        openWithPlanned(HandshakeMode.QR) // runs as typing
+        openWithPlanned(HandshakeMode.NFC) // runs as typing
 
         vm.addStep()
         vm.addStep()
         vm.addStep()
 
-        assertEquals("typing is not added, because the first step runs as typing", listOf(HandshakeMode.QR, HandshakeMode.HOLD, HandshakeMode.CONFIRM_SEQUENCE, HandshakeMode.TWO_STEP), modes())
+        assertEquals("typing is not added, because the first step runs as typing", listOf(HandshakeMode.NFC, HandshakeMode.HOLD, HandshakeMode.CONFIRM_SEQUENCE, HandshakeMode.TWO_STEP), modes())
         assertTrue("and the draft has no problem that the person did nothing to cause", editing().issues.isEmpty())
     }
 
     @Test
     fun `and a way cannot be chosen for a step when another step runs as that way`() {
-        openWithPlanned(HandshakeMode.QR, HandshakeMode.HOLD)
+        openWithPlanned(HandshakeMode.NFC, HandshakeMode.HOLD)
         val hold = editing().steps[1]
 
         vm.setMode(hold.key, HandshakeMode.TYPING) // the first step runs as typing
@@ -851,11 +853,66 @@ class HandshakeEditorViewModelTest {
 
     @Test
     fun `the planned step itself can be changed to the way it runs as`() {
-        openWithPlanned(HandshakeMode.QR, HandshakeMode.HOLD)
+        openWithPlanned(HandshakeMode.NFC, HandshakeMode.HOLD)
 
         vm.setMode(editing().steps[0].key, HandshakeMode.TYPING)
 
         assertEquals(listOf(HandshakeMode.TYPING, HandshakeMode.HOLD), modes())
+    }
+
+    // --- a code to scan is built: it can be chosen, and it is its own way ------------------------------------------------
+
+    @Test
+    fun `a code to scan can be chosen for a step, and it has no press`() {
+        open("builtin_steady")
+        val key = editing().steps.single().key
+
+        vm.setMode(key, HandshakeMode.QR)
+
+        assertEquals(listOf(HandshakeMode.QR), modes())
+        assertEquals(0, editing().steps.single().holdSeconds)
+        assertTrue(editing().issues.isEmpty())
+        assertTrue("and it is a change that can be saved", editing().canSave)
+    }
+
+    @Test
+    fun `a code to scan and typing in one chain are two ways, so both can be chosen and saved`() {
+        open("builtin_steady")
+        vm.addStep()
+        val (first, second) = editing().steps.map { it.key }
+
+        vm.setMode(first, HandshakeMode.QR)
+        vm.setMode(second, HandshakeMode.TYPING)
+
+        assertEquals(listOf(HandshakeMode.QR, HandshakeMode.TYPING), modes())
+        assertTrue(editing().issues.isEmpty())
+        vm.save()
+        awaitUntil(message = "the save is done") { editing().saved }
+        assertEquals(listOf(HandshakeMode.QR, HandshakeMode.TYPING), stored("builtin_steady").own!!.steps.map { it.mode })
+    }
+
+    @Test
+    fun `but a second step that scans a code is the same way twice, and cannot be chosen`() {
+        open("builtin_steady")
+        vm.addStep()
+        val (first, second) = editing().steps.map { it.key }
+        vm.setMode(first, HandshakeMode.QR)
+
+        vm.setMode(second, HandshakeMode.QR)
+
+        assertEquals(listOf(HandshakeMode.QR, HandshakeMode.CONFIRM_SEQUENCE), modes())
+    }
+
+    @Test
+    fun `new steps start as the ways that need nothing of the phone, and not as a code to scan`() {
+        openWithPlanned(HandshakeMode.TYPING)
+
+        vm.addStep()
+        vm.addStep()
+        vm.addStep()
+
+        assertEquals("the two-step comes before a code to scan", listOf(HandshakeMode.TYPING, HandshakeMode.HOLD, HandshakeMode.CONFIRM_SEQUENCE, HandshakeMode.TWO_STEP), modes())
+        assertTrue(editing().issues.isEmpty())
     }
 
     @Suppress("unused")

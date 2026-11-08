@@ -76,10 +76,25 @@ class ConsentCenterScreenTest {
     }
 
     @Test
-    fun `the footer says that optional features are not in this version`() {
+    fun `the footer says a feature that needs its own consent is listed here first, and no longer that camera features are missing`() {
         show(everyConsent())
         compose.onNodeWithTag(ConsentTags.FOOTER).assertIsDisplayed()
-        compose.onNodeWithText("are not in this version", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("listed here before it can be used", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("are not in this version", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("such as camera", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun `the camera consent says what it allows and what it never does, and is a switch the app keeps`() {
+        show(ConsentCenterUiState.Ready(listOf(item(ConsentKey.CAMERA_QR, emptyList()))))
+        compose.onNodeWithText("Camera for the QR handshake").assertIsDisplayed()
+        compose.onNodeWithText(
+            "Scanning a code you registered when an alarm asks for it. Frames are read on the phone and never saved or sent.",
+        ).assertIsDisplayed()
+        compose.onNodeWithText("It does not take photos or video.").assertIsDisplayed()
+        compose.onNodeWithTag(ConsentTags.switch(ConsentKey.CAMERA_QR)).assertIsOff()
+        compose.onNodeWithTag(ConsentTags.switch(ConsentKey.CAMERA_QR)).assertContentDescriptionEquals("Camera for the QR handshake")
+        compose.onNodeWithTag(ConsentTags.settings(ConsentKey.CAMERA_QR)).assertDoesNotExist()
     }
 
     @Test

@@ -17,5 +17,8 @@ object ConsentBoundaries {
         ConsentBoundary(ConsentKey.FULL_SCREEN, ConsentOwner.PLATFORM),
         ConsentBoundary(ConsentKey.VOLUME_CONTROL, ConsentOwner.APP),
         ConsentBoundary(ConsentKey.CALENDAR_READ, ConsentOwner.APP),
+        // Withdrawing it withdraws nothing else and keeps the registered codes: they are hashes only, the person can delete them, and
+        // deleting everything removes them.
+        ConsentBoundary(ConsentKey.CAMERA_QR, ConsentOwner.APP),
     )
 }

@@ -71,6 +71,18 @@
     </plurals>
     <string name="handshake_sequence_progress">%1$d of 4 done</string>
 
+    <string name="handshake_qr_title">Scan your registered code</string>
+    <string name="handshake_qr_viewfinder">Camera view. Point it at your registered code.</string>
+    <string name="handshake_qr_cannot_scan">Cannot scan? Type a phrase instead</string>
+    <plurals name="handshake_qr_wrong">
+        <item quantity="one">That is not a registered code. %d try left.</item>
+        <item quantity="other">That is not a registered code. %d tries left.</item>
+    </plurals>
+    <plurals name="handshake_qr_slow">
+        <item quantity="one">Time ran out. %d try left.</item>
+        <item quantity="other">Time ran out. %d tries left.</item>
+    </plurals>
+
     <string name="handshake_two_title">Say what you will do first</string>
     <string name="handshake_two_hold_first">First, hold to show you are up</string>
     <string name="handshake_two_indicate">I am doing: %1$s</string>

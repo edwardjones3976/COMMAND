@@ -29,3 +29,7 @@ internal fun ReveilleViewModel.sequenceTapped(at: TryId, number: Int) = sequence
 internal fun ReveilleViewModel.twoStepIndicated(at: TryId) = twoStepIndicated(ring(), at)
 
 internal fun ReveilleViewModel.switchTo(position: Int) = switchTo(ring(), position)
+
+internal fun ReveilleViewModel.qrScanned(at: TryId, payload: String) = qrScanned(ring(), at, payload)
+
+internal fun ReveilleViewModel.qrUnavailable() = qrUnavailable(ring())

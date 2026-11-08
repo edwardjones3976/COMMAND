@@ -67,7 +67,7 @@ class HandshakeScreensTest {
         var saved = 0
         var standard = 0
 
-        fun actions() = HandshakeEditorActions(
+        fun actions(onOpenCodes: () -> Unit = {}) = HandshakeEditorActions(
             onBack = { back++ },
             onSetOp = { ops += it },
             onAddStep = { added++ },
@@ -79,6 +79,7 @@ class HandshakeScreensTest {
             onChangeHold = { key, by -> holds += key to by },
             onSave = { saved++ },
             onUseStandard = { standard++ },
+            onOpenCodes = onOpenCodes,
         )
     }
 
@@ -170,14 +171,40 @@ class HandshakeScreensTest {
 
     @Test
     fun `a chain that names a way that is only planned says what the ring asks for in its place`() {
-        val planned = ChainSpec(ChainOp.OR, listOf(StepSpec(HandshakeMode.QR, 3, 90), StepSpec(HandshakeMode.HOLD, 3, 90, 4)))
+        val planned = ChainSpec(ChainOp.OR, listOf(StepSpec(HandshakeMode.NFC, 3, 90), StepSpec(HandshakeMode.HOLD, 3, 90, 4)))
         compose.setContent {
             CommandTheme(darkTheme = true) {
                 HandshakeProfilesScreen(HandshakeProfilesUiState.Ready(listOf(profile("p", "Planned", 3, own = planned)), inUse = emptySet()), onBack = {}, onEdit = {})
             }
         }
 
-        compose.onNodeWithText("Any one of: Scan a code (planned; for now: Type a phrase), Hold the button for 4 seconds").assertIsDisplayed()
+        compose.onNodeWithText("Any one of: Touch a tag (planned; for now: Type a phrase), Hold the button for 4 seconds").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a chain with a code to scan says that it asks for typing when the phone cannot scan`() {
+        val qr = ChainSpec(ChainOp.SEQUENCE, listOf(StepSpec(HandshakeMode.QR, 3, 90), StepSpec(HandshakeMode.TYPING, 3, 90)))
+        compose.setContent {
+            CommandTheme(darkTheme = true) {
+                HandshakeProfilesScreen(HandshakeProfilesUiState.Ready(listOf(profile("p", "Scan", 3, own = qr)), inUse = emptySet()), onBack = {}, onEdit = {})
+            }
+        }
+
+        compose.onNodeWithText("One after another: Scan a code (or Type a phrase when the phone cannot), Type a phrase").assertIsDisplayed()
+    }
+
+    @Test
+    fun `the list of profiles leads to the registered codes`() {
+        var codes = 0
+        compose.setContent {
+            CommandTheme(darkTheme = true) {
+                HandshakeProfilesScreen(HandshakeProfilesUiState.Ready(listOf(profile("a", "Steady", 2)), inUse = emptySet()), onBack = {}, onEdit = {}, onOpenCodes = { codes++ })
+            }
+        }
+
+        compose.onNodeWithTag(HandshakeTags.CODES).assertTextEquals("Registered codes").assertHeightIsAtLeast(48.dp).performClick()
+
+        assertEquals(1, codes)
     }
 
     @Test
@@ -244,10 +271,51 @@ class HandshakeScreensTest {
         compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.CONFIRM_SEQUENCE)).assertIsNotSelected().assertIsEnabled()
         compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.TYPING)).assertIsNotEnabled() // the second step has it
         compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.TWO_STEP)).assertIsEnabled()
-        for (planned in listOf(HandshakeMode.QR, HandshakeMode.NFC, HandshakeMode.VOICE)) {
+        for (planned in listOf(HandshakeMode.NFC, HandshakeMode.VOICE)) {
             compose.onNodeWithTag(HandshakeTags.mode(0, planned)).assertIsNotEnabled()
         }
-        compose.onAllNodesWithTextCount("Scan a code (planned)", 2)
+        compose.onAllNodesWithTextCount("Touch a tag (planned)", 2)
+        // A code to scan is built and can be chosen, and says that it has not been checked on a phone yet.
+        compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.QR)).assertIsEnabled().assertIsNotSelected()
+        compose.onAllNodesWithTextCount("Scan a code (not yet checked on a phone)", 2)
+        compose.onAllNodesWithTextCount("Scan a code (planned)", 0)
+    }
+
+    @Test
+    fun `choosing a code to scan reports the step and the way`() {
+        val calls = showEditor(editing(listOf(step(4, HandshakeMode.HOLD, hold = 3), step(5, HandshakeMode.TYPING))))
+
+        compose.onNodeWithTag(HandshakeTags.mode(1, HandshakeMode.QR)).performClick()
+
+        assertEquals(listOf(5 to HandshakeMode.QR), calls.modes)
+    }
+
+    @Test
+    fun `a step that scans a code says what it needs and leads to the registered codes`() {
+        var codes = 0
+        compose.setContent {
+            CommandTheme(darkTheme = true) {
+                HandshakeEditorScreen(editing(listOf(step(0, HandshakeMode.HOLD, hold = 3), step(1, HandshakeMode.QR))), Calls().actions(onOpenCodes = { codes++ }))
+            }
+        }
+
+        compose.onNodeWithTag(HandshakeTags.qrNeeds(1))
+            .assertTextEquals("Needs the camera, the camera consent and a registered code; without them this step asks you to type a phrase.")
+        compose.onNodeWithTag(HandshakeTags.codes(1)).assertTextEquals("Registered codes").assertHeightIsAtLeast(48.dp).performClick()
+        assertEquals(1, codes)
+        compose.onNodeWithTag(HandshakeTags.qrNeeds(0)).assertDoesNotExistFor()
+        compose.onNodeWithTag(HandshakeTags.codes(0)).assertDoesNotExistFor()
+        compose.onNodeWithText("This way is not built yet. For now the alarm asks for this instead: Type a phrase.").assertDoesNotExistFor()
+    }
+
+    @Test
+    fun `a code to scan and typing are not the same way, so a step can scan while another types`() {
+        showEditor(editing(listOf(step(0, HandshakeMode.QR), step(1, HandshakeMode.HOLD, hold = 3))))
+
+        compose.onNodeWithTag(HandshakeTags.mode(1, HandshakeMode.TYPING)).assertIsEnabled()
+        assertEquals(null, compose.onNodeWithTag(HandshakeTags.mode(1, HandshakeMode.TYPING)).stateDescription())
+        compose.onNodeWithTag(HandshakeTags.mode(1, HandshakeMode.QR)).assertIsNotEnabled()
+        assertEquals("Used in step 1", compose.onNodeWithTag(HandshakeTags.mode(1, HandshakeMode.QR)).stateDescription())
     }
 
     @Test
@@ -591,9 +659,10 @@ class HandshakeScreensTest {
 
     @Test
     fun `a planned way that is in a chain says that it runs as typing`() {
-        showEditor(editing(listOf(step(0, HandshakeMode.QR))))
+        showEditor(editing(listOf(step(0, HandshakeMode.NFC))))
         compose.onNodeWithText("This way is not built yet. For now the alarm asks for this instead: Type a phrase.").assertIsDisplayed()
-        compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.QR)).assertIsSelected()
+        compose.onNodeWithTag(HandshakeTags.mode(0, HandshakeMode.NFC)).assertIsSelected()
+        compose.onNodeWithTag(HandshakeTags.codes(0)).assertDoesNotExistFor()
     }
 
     // --- the editor: adding, saving, the problems -------------------------------------------------------------------
@@ -1000,7 +1069,7 @@ class HandshakeScreensTest {
         showEditor(editing(listOf(step(0, HandshakeMode.HOLD, hold = 3), step(1, HandshakeMode.TYPING))))
 
         for (index in 0..1) {
-            for (mode in listOf(HandshakeMode.QR, HandshakeMode.NFC, HandshakeMode.VOICE)) {
+            for (mode in listOf(HandshakeMode.NFC, HandshakeMode.VOICE)) {
                 val chip = compose.onNodeWithTag(HandshakeTags.mode(index, mode))
                 chip.assertIsNotEnabled()
                 assertEquals("step ${index + 1}, $mode", null, chip.stateDescription())
@@ -1011,7 +1080,7 @@ class HandshakeScreensTest {
 
     @Test
     fun `a planned way that runs as typing takes typing, so no other step can choose it, and the chip says which step has it`() {
-        showEditor(editing(listOf(step(0, HandshakeMode.QR), step(1, HandshakeMode.HOLD, hold = 3))))
+        showEditor(editing(listOf(step(0, HandshakeMode.NFC), step(1, HandshakeMode.HOLD, hold = 3))))
 
         compose.onNodeWithTag(HandshakeTags.mode(1, HandshakeMode.TYPING)).assertIsNotEnabled()
         assertEquals("Used in step 1", compose.onNodeWithTag(HandshakeTags.mode(1, HandshakeMode.TYPING)).stateDescription())
